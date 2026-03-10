@@ -23,6 +23,8 @@ export default function Home() {
   const [selectedSheet, setSelectedSheet] = useState('all')
   const [status, setStatus] = useState('พร้อมใช้งาน')
   const [loading, setLoading] = useState(false)
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; url: string } | null>(null)
+  const [editProduct, setEditProduct] = useState<Product | null>(null)
 
   useEffect(() => {
     loadStats()
@@ -42,6 +44,7 @@ export default function Home() {
     const data = await res.json()
     if (data.success) {
       setProducts(data.products)
+      preloadImages(data.products)
       setStatus(`พร้อมใช้งาน (${data.products.length} รายการ)`)
     }
     setLoading(false)
@@ -52,7 +55,10 @@ export default function Home() {
     setLoading(true)
     const res = await fetch(`/api/products?sku=${encodeURIComponent(sku)}`)
     const data = await res.json()
-    if (data.success) setProducts(data.products)
+    if (data.success) {
+      setProducts(data.products)
+      preloadImages(data.products)
+    }
     setLoading(false)
   }
 
@@ -66,6 +72,51 @@ export default function Home() {
       setStatus(`พบ ${data.mismatchCount} รายการราคาไม่ตรง`)
     }
     setLoading(false)
+  }
+
+  async function saveProduct() {
+    if (!editProduct) return
+    const res = await fetch('/api/products', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sku: editProduct['_originalSku'],
+        '*ชื่อสินค้า (NAME)': editProduct['*ชื่อสินค้า (NAME)'],
+        '*เลขที่ใบอนุญาตโฆษณา': editProduct['*เลขที่ใบอนุญาตโฆษณา'],
+        '*ราคาสินค้า': editProduct['*ราคาสินค้า'],
+        'หมวดหมู่สินค้า (CATEGORIES)': editProduct['หมวดหมู่สินค้า (CATEGORIES)'],
+        'รหัสสินค้า (SKU NUMBER)': editProduct['รหัสสินค้า (SKU NUMBER)']
+      })
+    })
+    const data = await res.json()
+    if (data.success) {
+      setProducts(prev => prev.map(p =>
+        p['รหัสสินค้า (SKU NUMBER)'] === editProduct['_originalSku']
+          ? { ...editProduct } : p
+      ))
+      setEditProduct(null)
+      setStatus('บันทึกสำเร็จ ✅')
+    } else {
+      setStatus('เกิดข้อผิดพลาด: ' + data.error)
+    }
+  }
+
+  function convertDriveLink(url: string): string {
+    if (!url) return ''
+    const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
+      url.match(/[?&]id=([a-zA-Z0-9_-]+)/)
+    if (match) return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w300`
+    return url.startsWith('http') ? url : ''
+  }
+
+  function preloadImages(productList: Product[]) {
+    productList.forEach(p => {
+      const url = convertDriveLink(p['*รูปภาพสินค้า'] || '')
+      if (url) {
+        const img = new Image()
+        img.src = url
+      }
+    })
   }
 
   return (
@@ -139,13 +190,24 @@ export default function Home() {
                   <th style={th}>ชื่อสินค้า</th>
                   <th style={th}>ใบอนุญาต</th>
                   <th style={th}>ราคา</th>
+                  <th style={th}>ดำเนินการ</th>
                 </tr>
               </thead>
               <tbody>
                 {products.map((p, i) => (
                   <tr key={i}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#e8f4fc')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.background = '#e8f4fc'
+                      const imgUrl = convertDriveLink(p['*รูปภาพสินค้า'] || '')
+                      setTooltip({ x: e.clientX, y: e.clientY, url: imgUrl })
+                    }}
+                    onMouseMove={e => {
+                      setTooltip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.background = 'transparent'
+                      setTooltip(null)
+                    }}
                   >
                     <td style={td}>{i + 1}</td>
                     <td style={td}>{p['หมวดหมู่สินค้า (CATEGORIES)'] || '-'}</td>
@@ -153,6 +215,14 @@ export default function Home() {
                     <td style={td}>{p['*ชื่อสินค้า (NAME)'] || '-'}</td>
                     <td style={td}>{p['*เลขที่ใบอนุญาตโฆษณา'] || '-'}</td>
                     <td style={{ ...td, color: '#c74634', fontWeight: 600 }}>{p['*ราคาสินค้า'] || '-'}</td>
+                    <td style={td}>
+                      <button
+                        onClick={() => setEditProduct({ ...p, _originalSku: p['รหัสสินค้า (SKU NUMBER)'] })}
+                        style={{ ...btnStyle, fontSize: 11, padding: '4px 10px' }}
+                      >
+                        ✏️ แก้ไข
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -165,6 +235,102 @@ export default function Home() {
       <div style={{ background: '#f0f0f0', borderTop: '1px solid #bbb', padding: '4px 15px', fontSize: 11, color: '#666' }}>
         {status}
       </div>
+
+      {/* Edit Modal */}
+      {editProduct && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 6, width: 480,
+            boxShadow: '0 10px 40px rgba(0,0,0,0.3)', overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong>✏️ แก้ไขสินค้า</strong>
+              <button onClick={() => setEditProduct(null)}
+                style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: 20, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>หมวดหมู่</label>
+                <input style={inputStyle}
+                  value={editProduct['หมวดหมู่สินค้า (CATEGORIES)'] || ''}
+                  onChange={e => setEditProduct({ ...editProduct, 'หมวดหมู่สินค้า (CATEGORIES)': e.target.value })}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>รหัสสินค้า</label>
+                <input style={inputStyle}
+                  value={editProduct['รหัสสินค้า (SKU NUMBER)'] || ''}
+                  onChange={e => setEditProduct({ ...editProduct, 'รหัสสินค้า (SKU NUMBER)': e.target.value })}
+                />
+              </div>
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={labelStyle}>ชื่อสินค้า</label>
+                <input style={inputStyle}
+                  value={editProduct['*ชื่อสินค้า (NAME)'] || ''}
+                  onChange={e => setEditProduct({ ...editProduct, '*ชื่อสินค้า (NAME)': e.target.value })}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>ใบอนุญาต</label>
+                <input style={inputStyle}
+                  value={editProduct['*เลขที่ใบอนุญาตโฆษณา'] || ''}
+                  onChange={e => setEditProduct({ ...editProduct, '*เลขที่ใบอนุญาตโฆษณา': e.target.value })}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>ราคา</label>
+                <input style={inputStyle} type="number"
+                  value={editProduct['*ราคาสินค้า'] || ''}
+                  onChange={e => setEditProduct({ ...editProduct, '*ราคาสินค้า': e.target.value })}
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '0 20px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setEditProduct(null)} style={btnStyle}>ยกเลิก</button>
+              <button onClick={saveProduct}
+                style={{ ...btnStyle, background: '#4a8bc4', color: '#fff', borderColor: '#3d7ab3' }}>
+                💾 บันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Tooltip */}
+      {tooltip && (
+        <div style={{
+          position: 'fixed',
+          left: tooltip.x + 15,
+          top: tooltip.y + 15,
+          zIndex: 9999,
+          background: '#fff',
+          border: '2px solid #4a8bc4',
+          borderRadius: 8,
+          padding: 8,
+          boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
+          pointerEvents: 'none'
+        }}>
+          {tooltip.url ? (
+            <img
+              src={tooltip.url}
+              alt=""
+              style={{ maxWidth: 280, maxHeight: 280, borderRadius: 4, display: 'block' }}
+              onError={e => (e.currentTarget.style.display = 'none')}
+            />
+          ) : (
+            <div style={{ padding: 40, color: '#999', fontSize: 12 }}>ไม่มีรูป</div>
+          )}
+        </div>
+      )}
+
     </div>
   )
 }
@@ -181,4 +347,14 @@ const th: React.CSSProperties = {
   padding: '8px 12px', textAlign: 'left', border: '1px solid #ccc',
   fontWeight: 600, position: 'sticky', top: 0, background: '#f5f5f5'
 }
-const td: React.CSSProperties = { padding: '8px 12px', border: '1px solid #eee', color: '#444' }
+const td: React.CSSProperties = {
+  padding: '8px 12px', border: '1px solid #eee', color: '#444'
+}
+const labelStyle: React.CSSProperties = {
+  fontSize: 11, color: '#666', display: 'block', marginBottom: 4
+}
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '6px 10px', border: '1px solid #999',
+  borderRadius: 3, fontSize: 13, fontFamily: 'sans-serif',
+  boxSizing: 'border-box'
+}
