@@ -28,6 +28,16 @@ export default function Home() {
   const [grabFile, setGrabFile] = useState<File | null>(null)
   const [grabResults, setGrabResults] = useState<any[]>([])
   const [showGrabModal, setShowGrabModal] = useState(false)
+  const [grabMismatchProducts, setGrabMismatchProducts] = useState<Product[]>([])
+  const [isAdding, setIsAdding] = useState(false)
+  const [showPriceCalcModal, setShowPriceCalcModal] = useState(false)
+  const [priceCalcResults, setPriceCalcResults] = useState<any[]>([])
+  const [updatingPrices, setUpdatingPrices] = useState(false)
+  const [lastPriceUpdate, setLastPriceUpdate] = useState<string | null>(null)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [importSheets, setImportSheets] = useState<{ name: string; rows: any[] }[]>([])
+  const [importingData, setImportingData] = useState(false)
+  const [importLog, setImportLog] = useState('')
   
   useEffect(() => {
     loadStats()
@@ -79,29 +89,58 @@ export default function Home() {
 
   async function saveProduct() {
     if (!editProduct) return
+    const payload = {
+      'ประเภทสินค้า': editProduct['ประเภทสินค้า'],
+      '*ชื่อสินค้า (NAME)': editProduct['*ชื่อสินค้า (NAME)'],
+      '*เลขที่ใบอนุญาตโฆษณา': editProduct['*เลขที่ใบอนุญาตโฆษณา'],
+      '*ราคาสินค้า': editProduct['*ราคาสินค้า'],
+      'หมวดหมู่สินค้า (CATEGORIES)': editProduct['หมวดหมู่สินค้า (CATEGORIES)'],
+      'รหัสสินค้า (SKU NUMBER)': editProduct['รหัสสินค้า (SKU NUMBER)'],
+      '*รูปภาพสินค้า': editProduct['*รูปภาพสินค้า']
+    }
     const res = await fetch('/api/products', {
-      method: 'PATCH',
+      method: isAdding ? 'POST' : 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sku: editProduct['_originalSku'],
-        '*ชื่อสินค้า (NAME)': editProduct['*ชื่อสินค้า (NAME)'],
-        '*เลขที่ใบอนุญาตโฆษณา': editProduct['*เลขที่ใบอนุญาตโฆษณา'],
-        '*ราคาสินค้า': editProduct['*ราคาสินค้า'],
-        'หมวดหมู่สินค้า (CATEGORIES)': editProduct['หมวดหมู่สินค้า (CATEGORIES)'],
-        'รหัสสินค้า (SKU NUMBER)': editProduct['รหัสสินค้า (SKU NUMBER)']
-      })
+      body: JSON.stringify(isAdding ? payload : { sku: editProduct['_originalSku'], ...payload })
     })
     const data = await res.json()
     if (data.success) {
-      setProducts(prev => prev.map(p =>
-        p['รหัสสินค้า (SKU NUMBER)'] === editProduct['_originalSku']
-          ? { ...editProduct } : p
-      ))
+      if (isAdding) {
+        setProducts(prev => [...prev, data.product])
+        loadStats()
+        await downloadProductXlsx(data.product)
+      } else {
+        setProducts(prev => prev.map(p =>
+          p['รหัสสินค้า (SKU NUMBER)'] === editProduct['_originalSku'] ? { ...editProduct } : p
+        ))
+      }
       setEditProduct(null)
-      setStatus('บันทึกสำเร็จ ✅')
+      setIsAdding(false)
+      setStatus(isAdding ? 'เพิ่มสินค้าสำเร็จ ✅' : 'บันทึกสำเร็จ ✅')
     } else {
       setStatus('เกิดข้อผิดพลาด: ' + data.error)
     }
+  }
+
+  async function downloadProductXlsx(p: Product) {
+    const XLSX = await import('xlsx')
+    const rows = [{
+      '*ประเภทสินค้า': p['ประเภทสินค้า'] || '',
+      '*ชื่อสินค้า': p['*ชื่อสินค้า (NAME)'] || '',
+      '*เลขที่ใบอนุญาตโฆษณา': p['*เลขที่ใบอนุญาตโฆษณา'] || '',
+      '*ราคาสินค้า': p['*ราคาสินค้า'] || '',
+      'รหัสสินค้า': p['รหัสสินค้า (SKU NUMBER)'] || '',
+      '*รูปภาพสินค้า': p['*รูปภาพสินค้า'] || '',
+      'หมวดหมู่รายการสินค้า': p['หมวดหมู่สินค้า (CATEGORIES)'] || ''
+    }]
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'สินค้าใหม่')
+    const now = new Date()
+    const dd = String(now.getDate()).padStart(2, '0')
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const yyyy = now.getFullYear()
+    XLSX.writeFile(wb, `GM MME ${dd}.${mm}.${yyyy}.xlsx`)
   }
 
   function convertDriveLink(url: string): string {
@@ -187,27 +226,228 @@ async function handleGrabCheck(file: File) {
     return
   }
 
+  if (data.products.length === 0) {
+    setStatus('ไม่มีข้อมูล')
+    setGrabResults([{ error: 'ไม่พบ SKU ใน Supabase กรุณาตรวจสอบข้อมูลใน CSV' }])
+    return
+  }
+
   // เปรียบเทียบราคา
-  const results = data.products
+  const foundSkus = new Set(data.products.map((p: Product) => p['รหัสสินค้า (SKU NUMBER)']))
+
+  const matched_results = data.products
     .map((p: Product) => {
       const sku = p['รหัสสินค้า (SKU NUMBER)']
       const grabPrice = grabMap[sku]
       const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
       if (grabPrice === undefined || dbPrice === null) return null
       const matched = Math.abs(grabPrice - dbPrice) < 0.01
-      return {
-        sku,
-        name: p['*ชื่อสินค้า (NAME)'],
-        grabPrice,
-        dbPrice,
-        matched
-      }
+      return { sku, name: p['*ชื่อสินค้า (NAME)'], grabPrice, dbPrice, matched }
     })
     .filter(Boolean)
 
-  const mismatch = results.filter((r: any) => !r.matched)
+  const notFound_results = Object.keys(grabMap)
+    .filter(sku => !foundSkus.has(sku))
+    .map(sku => ({ sku, grabPrice: grabMap[sku], notFound: true }))
+
+  const results = [...matched_results, ...notFound_results]
+
+  const mismatch = matched_results.filter((r: any) => !r.matched)
+  const mismatchSkus = new Set(mismatch.map((r: any) => r.sku))
+  setGrabMismatchProducts(data.products.filter((p: Product) => mismatchSkus.has(p['รหัสสินค้า (SKU NUMBER)'])))
   setGrabResults(results)
-  setStatus(`GRAB: ตรง ${results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} รายการ`)
+  setStatus(`GRAB: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} รายการ`)
+}
+
+  const IMPORT_FIELDS = [
+    'ประเภทสินค้า', '*ชื่อสินค้า (NAME)', '*เลขที่ใบอนุญาตโฆษณา',
+    '*ราคาสินค้า', 'รหัสสินค้า (SKU NUMBER)', '*รูปภาพสินค้า', 'หมวดหมู่สินค้า (CATEGORIES)'
+  ]
+
+  async function handleImportXlsx(file: File) {
+    const XLSX = await import('xlsx')
+    const buffer = await file.arrayBuffer()
+    const wb = XLSX.read(buffer, { type: 'array' })
+    const sheets = wb.SheetNames.map(name => {
+      const ws = wb.Sheets[name]
+      const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+      const rows = raw.slice(1)
+        .filter(row => row.some((c: any) => String(c).trim() !== ''))
+        .map(row => {
+          const obj: any = {}
+          IMPORT_FIELDS.forEach((field, i) => {
+            const val = row[i] !== undefined ? String(row[i]).trim() : ''
+            obj[field] = field === '*ราคาสินค้า' ? (parseFloat(val) || null) : val
+          })
+          return obj
+        })
+      return { name, rows }
+    })
+    setImportSheets(sheets)
+    setImportLog('')
+    setShowImportModal(true)
+  }
+
+  async function confirmImport() {
+    const allRows = importSheets.flatMap(s => s.rows)
+    if (allRows.length === 0) return
+    setImportingData(true)
+    const chunkSize = 100
+    let success = 0
+    for (let i = 0; i < allRows.length; i += chunkSize) {
+      const chunk = allRows.slice(i, i + chunkSize)
+      setImportLog(`กำลัง import... ${Math.min(i + chunkSize, allRows.length)}/${allRows.length}`)
+      const res = await fetch('/api/products', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rows: chunk })
+      })
+      const data = await res.json()
+      if (!data.success) {
+        setImportLog('❌ เกิดข้อผิดพลาด: ' + data.error)
+        setImportingData(false)
+        return
+      }
+      success += chunk.length
+    }
+    setImportLog(`✅ Import สำเร็จ ${success} รายการ`)
+    loadStats()
+    setImportingData(false)
+  }
+
+  async function exportNotFoundXlsx() {
+    const XLSX = await import('xlsx')
+    const notFoundItems = grabResults.filter((r: any) => r.notFound)
+    const rows = notFoundItems.map((r: any) => ({
+      'รหัสสินค้า (SKU)': r.sku,
+      'ราคาใน GRAB': r.grabPrice
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'ไม่พบในระบบ')
+    const now = new Date()
+    const dd = String(now.getDate()).padStart(2, '0')
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const yyyy = now.getFullYear()
+    XLSX.writeFile(wb, `GRAB ไม่พบในระบบ ${dd}.${mm}.${yyyy}.xlsx`)
+  }
+
+  async function exportGrabXlsx() {
+    const XLSX = await import('xlsx')
+    const rows = grabMismatchProducts.map(p => ({
+      '*ประเภทสินค้า': p['ประเภทสินค้า'] || '',
+      '*ชื่อสินค้า': p['*ชื่อสินค้า (NAME)'] || '',
+      '*เลขที่ใบอนุญาตโฆษณา': p['*เลขที่ใบอนุญาตโฆษณา'] || '',
+      '*ราคาสินค้า': p['*ราคาสินค้า'] || '',
+      'รหัสสินค้า': p['รหัสสินค้า (SKU NUMBER)'] || '',
+      '*รูปภาพสินค้า': p['*รูปภาพสินค้า'] || '',
+      'หมวดหมู่รายการสินค้า': p['หมวดหมู่สินค้า (CATEGORIES)'] || ''
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'ราคาไม่ตรง')
+    const now = new Date()
+    const dd = String(now.getDate()).padStart(2, '0')
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const yyyy = now.getFullYear()
+    XLSX.writeFile(wb, `GM MME ${dd}.${mm}.${yyyy}.xlsx`)
+  }
+
+    async function handlePriceCalcUpload(file: File) {
+  setStatus('กำลังคำนวณราคา...')
+  setShowPriceCalcModal(true)
+  setPriceCalcResults([])
+
+  const text = await file.text()
+  const clean = text.replace(/^\uFEFF/, '')
+  const rows = parseCSVRows(clean)
+
+  // Col B (index 1) = SKU, Col G (index 6) = ราคาระดับ 0
+  // เริ่มจาก row 2 (index 1) ข้าม header
+  const calcMap: Record<string, { sku: string; level0: number; D: number }> = {}
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i]
+    if (!row || row.length < 7) continue
+    const sku = row[1]?.trim()
+    const level0 = parsePriceRobust(row[6])
+    if (!sku || level0 === null) continue
+
+    const A = level0 * 0.95
+    const B = A * 1.20
+    const C = B * 0.07
+    const D = Math.ceil(B + C)  // ปัดขึ้นทศนิยม
+
+    calcMap[sku] = { sku, level0, D }
+  }
+
+  if (Object.keys(calcMap).length === 0) {
+    setPriceCalcResults([{ error: 'ไม่พบข้อมูลใน CSV กรุณาตรวจสอบไฟล์' }])
+    setStatus('ไม่พบข้อมูล')
+    return
+  }
+
+  // ดึงข้อมูลจาก Supabase เฉพาะ SKU ที่มีใน CSV
+  const skus = Object.keys(calcMap)
+  const res = await fetch(`/api/products?skus=${encodeURIComponent(skus.join(','))}`)
+  const data = await res.json()
+
+  if (!data.success) {
+    setStatus('เกิดข้อผิดพลาดในการดึงข้อมูล')
+    return
+  }
+
+  // จับคู่กับข้อมูลใน Supabase
+  const results = data.products.map((p: Product) => {
+    const sku = p['รหัสสินค้า (SKU NUMBER)']
+    const calc = calcMap[sku]
+    if (!calc) return null
+    const oldPrice = parsePriceRobust(String(p['*ราคาสินค้า'])) ?? 0
+    return {
+      sku,
+      name: p['*ชื่อสินค้า (NAME)'],
+      level0: calc.level0,
+      newPrice: calc.D,
+      oldPrice,
+      changed: Math.abs(calc.D - oldPrice) > 0.01
+    }
+  }).filter(Boolean)
+
+  setPriceCalcResults(results)
+  const changedCount = results.filter((r: any) => r.changed).length
+  setStatus(`คำนวณเสร็จ — เปลี่ยนแปลง ${changedCount} รายการ`)
+}
+
+async function confirmUpdatePrices() {
+  const toUpdate = priceCalcResults.filter(r => r.changed)
+  if (toUpdate.length === 0) return
+
+  setUpdatingPrices(true)
+  setStatus('กำลังอัพเดทราคา...')
+
+  const res = await fetch('/api/prices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      items: toUpdate.map(r => ({ sku: r.sku, correctPrice: r.newPrice }))
+    })
+  })
+  const data = await res.json()
+
+  if (data.success) {
+    const now = new Date()
+    const dd = String(now.getDate()).padStart(2, '0')
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const yyyy = now.getFullYear()
+    const hh = String(now.getHours()).padStart(2, '0')
+    const min = String(now.getMinutes()).padStart(2, '0')
+    setLastPriceUpdate(`${dd}/${mm}/${yyyy} ${hh}:${min}`)
+    setStatus(`✅ อัพเดทราคาสำเร็จ ${data.updated} รายการ`)
+    setShowPriceCalcModal(false)
+  } else {
+    setStatus('เกิดข้อผิดพลาดในการอัพเดท')
+  }
+  setUpdatingPrices(false)
 }
 
   return (
@@ -216,6 +456,7 @@ async function handleGrabCheck(file: File) {
       {/* Header */}
       <div style={{ background: '#f5f7fa', padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ fontSize: 18, color: '#333' }}>📦 ระบบตรวจสอบราคาสินค้า</h1>
+        <span style={{ fontSize: 11, color: '#888' }}>อัพเดทราคาล่าสุด: {lastPriceUpdate ?? '-'}</span>
       </div>
 
       {/* Toolbar */}
@@ -231,10 +472,19 @@ async function handleGrabCheck(file: File) {
         type="file" accept=".csv" id="grabInput" style={{ display: 'none' }}
         onChange={e => { if (e.target.files?.[0]) handleGrabCheck(e.target.files[0]) }}
         />
+        <input
+        type="file" accept=".csv" id="priceCalcInput" style={{ display: 'none' }}
+        onChange={e => { if (e.target.files?.[0]) handlePriceCalcUpload(e.target.files[0]) }}
+        />
+        <input
+        type="file" accept=".xlsx,.xls" id="importInput" style={{ display: 'none' }}
+        onChange={e => { if (e.target.files?.[0]) { handleImportXlsx(e.target.files[0]); e.target.value = '' } }}
+        />
         <button onClick={() => loadProducts(selectedSheet)} style={btnStyle}>🔄 รีเฟรช</button>
-        <button onClick={checkPrices} style={btnStyle}>💰 ตรวจสอบราคา</button>
-        <button onClick={() => document.getElementById('grabInput')?.click()} style={{ ...btnStyle, background: '#fff3cd', borderColor: '#f0ad4e' }}>
-        🛵 ตรวจสอบราคา GRAB</button>
+        <button onClick={() => { setIsAdding(true); setEditProduct({ 'ประเภทสินค้า': '', '*ชื่อสินค้า (NAME)': '', '*เลขที่ใบอนุญาตโฆษณา': '', '*ราคาสินค้า': '', 'รหัสสินค้า (SKU NUMBER)': '', '*รูปภาพสินค้า': '', 'หมวดหมู่สินค้า (CATEGORIES)': '' }) }} style={btnStyle}>➕ เพิ่มรายการสินค้า</button>
+        <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
+        <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle}>📊 อัพเดทราคา</button>
+        <button onClick={() => document.getElementById('grabInput')?.click()} style={btnStyle}>🛵 ตรวจสอบราคา GRAB</button>
       </div>
 
       {/* Main Layout */}
@@ -352,7 +602,10 @@ async function handleGrabCheck(file: File) {
         <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
           <span>ทั้งหมด: <strong>{grabResults.length}</strong></span>
           <span style={{ color: '#28a745' }}>✓ ตรง: <strong>{grabResults.filter((r: any) => r.matched).length}</strong></span>
-          <span style={{ color: '#dc3545' }}>✗ ต้องแก้ไขใน GRAB: <strong>{grabResults.filter((r: any) => !r.matched).length}</strong></span>
+          <span style={{ color: '#dc3545' }}>✗ ต้องแก้ไขใน GRAB: <strong>{grabResults.filter((r: any) => !r.matched && !r.notFound).length}</strong></span>
+          {grabResults.filter((r: any) => r.notFound).length > 0 && (
+            <span style={{ color: '#888' }}>⚠ ไม่พบในระบบ: <strong>{grabResults.filter((r: any) => r.notFound).length}</strong></span>
+          )}
         </div>
       )}
 
@@ -376,16 +629,18 @@ async function handleGrabCheck(file: File) {
             </thead>
             <tbody>
               {grabResults.map((r: any, i: number) => (
-                <tr key={i} style={{ background: r.matched ? 'transparent' : '#fff3cd' }}>
+                <tr key={i} style={{ background: r.notFound ? '#f0f0f0' : r.matched ? 'transparent' : '#fff3cd' }}>
                   <td style={td}>{i + 1}</td>
-                  <td style={td}><strong>{r.sku}</strong></td>
-                  <td style={td}>{r.name}</td>
-                  <td style={{ ...td, fontWeight: 600 }}>{r.grabPrice.toLocaleString()}</td>
-                  <td style={{ ...td, fontWeight: 600, color: '#c74634' }}>{r.dbPrice.toLocaleString()}</td>
+                  <td style={{ ...td, color: r.notFound ? '#999' : '#444' }}><strong>{r.sku}</strong></td>
+                  <td style={{ ...td, color: r.notFound ? '#999' : '#444' }}>{r.name || '-'}</td>
+                  <td style={{ ...td, fontWeight: 600, color: r.notFound ? '#999' : '#444' }}>{r.grabPrice?.toLocaleString() ?? '-'}</td>
+                  <td style={{ ...td, fontWeight: 600, color: r.notFound ? '#999' : '#c74634' }}>{r.dbPrice?.toLocaleString() ?? '-'}</td>
                   <td style={td}>
-                    {r.matched
-                      ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
-                      : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ แก้ไขใน GRAB</span>
+                    {r.notFound
+                      ? <span style={{ background: '#e0e0e0', color: '#666', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบในระบบ</span>
+                      : r.matched
+                        ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
+                        : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ แก้ไขใน GRAB</span>
                     }
                   </td>
                 </tr>
@@ -396,12 +651,161 @@ async function handleGrabCheck(file: File) {
       </div>
 
       {/* Footer */}
-      <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            onClick={exportGrabXlsx}
+            disabled={grabMismatchProducts.length === 0}
+            style={{ ...btnStyle, background: '#d4edda', borderColor: '#28a745', color: '#155724', opacity: grabMismatchProducts.length === 0 ? 0.5 : 1 }}
+          >
+            📥 Export ราคาไม่ตรง ({grabMismatchProducts.length})
+          </button>
+          <button
+            onClick={exportNotFoundXlsx}
+            disabled={grabResults.filter((r: any) => r.notFound).length === 0}
+            style={{ ...btnStyle, background: '#e8e8e8', borderColor: '#999', color: '#555', opacity: grabResults.filter((r: any) => r.notFound).length === 0 ? 0.5 : 1 }}
+          >
+            ⚠ Export ไม่พบในระบบ ({grabResults.filter((r: any) => r.notFound).length})
+          </button>
+        </div>
         <button onClick={() => setShowGrabModal(false)} style={btnStyle}>ปิด</button>
       </div>
     </div>
   </div>
 )}
+
+      {showPriceCalcModal && (
+  <div style={{
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+    display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
+  }}>
+    <div style={{ background: '#fff', borderRadius: 6, width: 750, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+
+      {/* Header */}
+      <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <strong>🧮 ผลคำนวณราคา</strong>
+        <button onClick={() => setShowPriceCalcModal(false)}
+          style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
+      </div>
+
+      {/* Summary */}
+      {priceCalcResults.length > 0 && !priceCalcResults[0]?.error && (
+        <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
+          <span>ทั้งหมด: <strong>{priceCalcResults.length}</strong></span>
+          <span style={{ color: '#28a745' }}>เปลี่ยนแปลง: <strong>{priceCalcResults.filter(r => r.changed).length}</strong></span>
+          <span style={{ color: '#666' }}>ราคาเดิม: <strong>{priceCalcResults.filter(r => !r.changed).length}</strong></span>
+          <div style={{ marginLeft: 'auto', fontSize: 11, color: '#888' }}>
+            สูตร: ระดับ0 × 0.95 × 1.20 × 1.07
+          </div>
+        </div>
+      )}
+
+      {/* Table */}
+      <div style={{ overflowY: 'auto', flex: 1 }}>
+        {priceCalcResults[0]?.error ? (
+          <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{priceCalcResults[0].error}</div>
+        ) : priceCalcResults.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>กำลังคำนวณ...</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+                <th style={th}>#</th>
+                <th style={th}>SKU</th>
+                <th style={th}>ชื่อสินค้า</th>
+                <th style={th}>ราคาระดับ 0</th>
+                <th style={th}>ราคาเดิม</th>
+                <th style={th}>ราคาใหม่ (D)</th>
+                <th style={th}>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {priceCalcResults.map((r: any, i: number) => (
+                <tr key={i} style={{ background: r.changed ? '#fff3cd' : 'transparent' }}>
+                  <td style={td}>{i + 1}</td>
+                  <td style={td}><strong>{r.sku}</strong></td>
+                  <td style={td}>{r.name}</td>
+                  <td style={td}>{r.level0.toLocaleString()}</td>
+                  <td style={td}>{r.oldPrice.toLocaleString()}</td>
+                  <td style={{ ...td, color: '#28a745', fontWeight: 600 }}>{r.newPrice.toLocaleString()}</td>
+                  <td style={td}>
+                    {r.changed
+                      ? <span style={{ background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ เปลี่ยนแปลง</span>
+                      : <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ เดิม</span>
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <button onClick={() => setShowPriceCalcModal(false)} style={btnStyle}>ยกเลิก</button>
+        <button
+          onClick={confirmUpdatePrices}
+          disabled={updatingPrices || priceCalcResults.filter(r => r.changed).length === 0}
+          style={{ ...btnStyle, background: '#28a745', color: '#fff', borderColor: '#1e7e34', opacity: updatingPrices ? 0.6 : 1 }}
+        >
+          {updatingPrices ? '⏳ กำลังอัพเดท...' : `💾 อัพเดท ${priceCalcResults.filter(r => r.changed).length} รายการ`}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: 6, width: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+            <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong>📂 Import ข้อมูลจาก Excel</strong>
+              <button onClick={() => setShowImportModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
+            </div>
+            <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', fontSize: 13 }}>
+              พบ <strong>{importSheets.length}</strong> ชีท | รวม <strong>{importSheets.reduce((s, sh) => s + sh.rows.length, 0)}</strong> รายการ
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, padding: 16 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ background: '#f5f5f5' }}>
+                    <th style={th}>#</th>
+                    <th style={th}>ชีท</th>
+                    <th style={th}>จำนวนรายการ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importSheets.map((s, i) => (
+                    <tr key={i}>
+                      <td style={td}>{i + 1}</td>
+                      <td style={td}><strong>{s.name}</strong></td>
+                      <td style={td}>{s.rows.length.toLocaleString()} รายการ</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {importLog && (
+                <div style={{ marginTop: 12, padding: '8px 12px', background: importLog.startsWith('✅') ? '#d4edda' : importLog.startsWith('❌') ? '#f8d7da' : '#fff3cd', borderRadius: 4, fontSize: 13 }}>
+                  {importLog}
+                </div>
+              )}
+            </div>
+            <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowImportModal(false)} style={btnStyle}>ปิด</button>
+              <button
+                onClick={confirmImport}
+                disabled={importingData || importSheets.reduce((s, sh) => s + sh.rows.length, 0) === 0}
+                style={{ ...btnStyle, background: '#4a8bc4', color: '#fff', borderColor: '#3d7ab3', opacity: importingData ? 0.6 : 1 }}
+              >
+                {importingData ? '⏳ กำลัง Import...' : `📥 Import ทั้งหมด (${importSheets.reduce((s, sh) => s + sh.rows.length, 0)} รายการ)`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Modal */}
       {editProduct && (
@@ -414,14 +818,21 @@ async function handleGrabCheck(file: File) {
             boxShadow: '0 10px 40px rgba(0,0,0,0.3)', overflow: 'hidden'
           }}>
             {/* Modal Header */}
-            <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>✏️ แก้ไขสินค้า</strong>
-              <button onClick={() => setEditProduct(null)}
+            <div style={{ background: isAdding ? '#2d6a2d' : '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong>{isAdding ? '➕ เพิ่มรายการสินค้า' : '✏️ แก้ไขสินค้า'}</strong>
+              <button onClick={() => { setEditProduct(null); setIsAdding(false) }}
                 style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
             </div>
 
             {/* Modal Body */}
             <div style={{ padding: 20, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={labelStyle}>ประเภทสินค้า</label>
+                <input style={inputStyle}
+                  value={editProduct['ประเภทสินค้า'] || ''}
+                  onChange={e => setEditProduct({ ...editProduct, 'ประเภทสินค้า': e.target.value })}
+                />
+              </div>
               <div>
                 <label style={labelStyle}>หมวดหมู่</label>
                 <input style={inputStyle}
@@ -457,14 +868,32 @@ async function handleGrabCheck(file: File) {
                   onChange={e => setEditProduct({ ...editProduct, '*ราคาสินค้า': e.target.value })}
                 />
               </div>
+              <div style={{ gridColumn: 'span 2' }}>
+                <label style={labelStyle}>รูปภาพสินค้า (Google Drive Link)</label>
+                <input style={inputStyle}
+                  placeholder="วาง Google Drive URL ที่นี่..."
+                  value={editProduct['*รูปภาพสินค้า'] || ''}
+                  onChange={e => setEditProduct({ ...editProduct, '*รูปภาพสินค้า': e.target.value })}
+                />
+                {editProduct['*รูปภาพสินค้า'] && (
+                  <div style={{ marginTop: 8, textAlign: 'center', background: '#f8f8f8', borderRadius: 4, padding: 8, border: '1px solid #eee' }}>
+                    <img
+                      src={convertDriveLink(editProduct['*รูปภาพสินค้า'])}
+                      alt="preview"
+                      style={{ maxWidth: '100%', maxHeight: 160, borderRadius: 4, objectFit: 'contain' }}
+                      onError={e => { e.currentTarget.style.display = 'none' }}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Modal Footer */}
             <div style={{ padding: '0 20px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => setEditProduct(null)} style={btnStyle}>ยกเลิก</button>
+              <button onClick={() => { setEditProduct(null); setIsAdding(false) }} style={btnStyle}>ยกเลิก</button>
               <button onClick={saveProduct}
-                style={{ ...btnStyle, background: '#4a8bc4', color: '#fff', borderColor: '#3d7ab3' }}>
-                💾 บันทึก
+                style={{ ...btnStyle, background: isAdding ? '#28a745' : '#4a8bc4', color: '#fff', borderColor: isAdding ? '#1e7e34' : '#3d7ab3' }}>
+                {isAdding ? '➕ เพิ่มสินค้า' : '💾 บันทึก'}
               </button>
             </div>
           </div>
