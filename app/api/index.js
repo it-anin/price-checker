@@ -1,29 +1,14 @@
-'use client'
-
 import { useState, useEffect } from 'react'
 
-interface Product {
-  [key: string]: any
-}
-
-interface SheetStat {
-  name: string
-  count: number
-}
-
-interface Stats {
-  totalProducts: number
-  sheets: SheetStat[]
-}
-
 export default function Home() {
-  const [products, setProducts] = useState<Product[]>([])
-  const [stats, setStats] = useState<Stats>({ totalProducts: 0, sheets: [] })
+  const [products, setProducts] = useState([])
+  const [stats, setStats] = useState({ totalProducts: 0, sheets: [] })
   const [search, setSearch] = useState('')
   const [selectedSheet, setSelectedSheet] = useState('all')
   const [status, setStatus] = useState('พร้อมใช้งาน')
   const [loading, setLoading] = useState(false)
 
+  // โหลด stats ตอนเปิดหน้า
   useEffect(() => {
     loadStats()
   }, [])
@@ -47,7 +32,7 @@ export default function Home() {
     setLoading(false)
   }
 
-  async function searchProducts(sku: string) {
+  async function searchProducts(sku) {
     if (sku.length < 3) return
     setLoading(true)
     const res = await fetch(`/api/products?sku=${encodeURIComponent(sku)}`)
@@ -56,16 +41,9 @@ export default function Home() {
     setLoading(false)
   }
 
-  async function checkPrices() {
-    setLoading(true)
-    setStatus('กำลังตรวจสอบราคา...')
-    const res = await fetch('/api/prices')
-    const data = await res.json()
-    if (data.success) {
-      setProducts(data.mismatched)
-      setStatus(`พบ ${data.mismatchCount} รายการราคาไม่ตรง`)
-    }
-    setLoading(false)
+  function handleSheetClick(name) {
+    setSelectedSheet(name)
+    loadProducts(name)
   }
 
   return (
@@ -110,7 +88,7 @@ export default function Home() {
           {stats.sheets.map(s => (
             <div
               key={s.name}
-              onClick={() => { setSelectedSheet(s.name); loadProducts(s.name) }}
+              onClick={() => handleSheetClick(s.name)}
               style={{
                 padding: '8px 12px', borderBottom: '1px solid #ddd', fontSize: 12,
                 cursor: 'pointer', display: 'flex', justifyContent: 'space-between',
@@ -143,9 +121,9 @@ export default function Home() {
               </thead>
               <tbody>
                 {products.map((p, i) => (
-                  <tr key={i}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#e8f4fc')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  <tr key={i} style={{ borderBottom: '1px solid #eee' }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#e8f4fc'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
                     <td style={td}>{i + 1}</td>
                     <td style={td}>{p['หมวดหมู่สินค้า (CATEGORIES)'] || '-'}</td>
@@ -167,18 +145,31 @@ export default function Home() {
       </div>
     </div>
   )
+
+  async function checkPrices() {
+    setLoading(true)
+    setStatus('กำลังตรวจสอบราคา...')
+    const res = await fetch('/api/prices')
+    const data = await res.json()
+    if (data.success) {
+      setProducts(data.mismatched)
+      setStatus(`พบ ${data.mismatchCount} รายการราคาไม่ตรง`)
+    }
+    setLoading(false)
+  }
 }
 
-const btnStyle: React.CSSProperties = {
+// Styles
+const btnStyle = {
   padding: '7px 16px', border: '1px solid #777', borderRadius: 20,
   fontSize: 12, fontWeight: 600, cursor: 'pointer', background: '#f5f5f5'
 }
-const statCard: React.CSSProperties = {
+const statCard = {
   background: '#fff', border: '1px solid #ccc', borderRadius: 4,
   padding: 15, marginBottom: 10
 }
-const th: React.CSSProperties = {
+const th = {
   padding: '8px 12px', textAlign: 'left', border: '1px solid #ccc',
   fontWeight: 600, position: 'sticky', top: 0, background: '#f5f5f5'
 }
-const td: React.CSSProperties = { padding: '8px 12px', border: '1px solid #eee', color: '#444' }
+const td = { padding: '8px 12px', border: '1px solid #eee', color: '#444' }
