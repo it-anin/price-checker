@@ -25,7 +25,10 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; url: string } | null>(null)
   const [editProduct, setEditProduct] = useState<Product | null>(null)
-
+  const [grabFile, setGrabFile] = useState<File | null>(null)
+  const [grabResults, setGrabResults] = useState<any[]>([])
+  const [showGrabModal, setShowGrabModal] = useState(false)
+  
   useEffect(() => {
     loadStats()
   }, [])
@@ -119,6 +122,94 @@ export default function Home() {
     })
   }
 
+  function parseCSVRows(text: string): string[][] {
+  const firstLine = text.split('\n')[0]
+  const delim = firstLine.includes(';') && !firstLine.includes(',') ? ';' : ','
+  return text.split(/\r?\n/).map(line => {
+    const cells: string[] = []
+    let cur = '', inQuote = false
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (inQuote) {
+        if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++ }
+        else if (ch === '"') inQuote = false
+        else cur += ch
+      } else {
+        if (ch === '"') inQuote = true
+        else if (ch === delim) { cells.push(cur.trim()); cur = '' }
+        else cur += ch
+      }
+    }
+    cells.push(cur.trim())
+    return cells
+  })
+}
+
+function parsePriceRobust(str: string): number | null {
+  if (!str) return null
+  let s = str.replace(/[฿$€£¥\s]/g, '').replace(/,/g, '')
+  const n = parseFloat(s)
+  return isNaN(n) ? null : n
+}
+
+async function handleGrabCheck(file: File) {
+  setStatus('กำลังตรวจสอบราคา GRAB...')
+  setShowGrabModal(true)
+  setGrabResults([])
+
+  const text = await file.text()
+  const clean = text.replace(/^\uFEFF/, '')
+  const rows = parseCSVRows(clean)
+
+  // Col I (index 8) = SKU, Col C (index 2) = ราคา, เริ่มจาก row 3 (index 2)
+  const grabMap: Record<string, number> = {}
+  for (let i = 2; i < rows.length; i++) {
+    const row = rows[i]
+    if (!row || row.length < 9) continue
+    const sku = row[8]?.trim()
+    const price = parsePriceRobust(row[2])
+    if (sku && price !== null) grabMap[sku] = price
+  }
+
+  if (Object.keys(grabMap).length === 0) {
+    setStatus('ไม่พบข้อมูลใน CSV')
+    setGrabResults([{ error: 'ไม่พบข้อมูลใน CSV กรุณาตรวจสอบไฟล์' }])
+    return
+  }
+
+  // ดึงข้อมูลจาก Supabase เฉพาะ SKU ที่มีใน CSV
+  const skus = Object.keys(grabMap)
+  const res = await fetch(`/api/products?skus=${encodeURIComponent(skus.join(','))}`)
+  const data = await res.json()
+
+  if (!data.success) {
+    setStatus('เกิดข้อผิดพลาด')
+    return
+  }
+
+  // เปรียบเทียบราคา
+  const results = data.products
+    .map((p: Product) => {
+      const sku = p['รหัสสินค้า (SKU NUMBER)']
+      const grabPrice = grabMap[sku]
+      const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
+      if (grabPrice === undefined || dbPrice === null) return null
+      const matched = Math.abs(grabPrice - dbPrice) < 0.01
+      return {
+        sku,
+        name: p['*ชื่อสินค้า (NAME)'],
+        grabPrice,
+        dbPrice,
+        matched
+      }
+    })
+    .filter(Boolean)
+
+  const mismatch = results.filter((r: any) => !r.matched)
+  setGrabResults(results)
+  setStatus(`GRAB: ตรง ${results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} รายการ`)
+}
+
   return (
     <div style={{ fontFamily: 'sans-serif', height: '100vh', display: 'flex', flexDirection: 'column' }}>
 
@@ -136,8 +227,14 @@ export default function Home() {
           onChange={e => { setSearch(e.target.value); searchProducts(e.target.value) }}
           style={{ padding: '6px 10px', border: '1px solid #999', borderRadius: 3, fontSize: 13, width: 220 }}
         />
+        <input
+        type="file" accept=".csv" id="grabInput" style={{ display: 'none' }}
+        onChange={e => { if (e.target.files?.[0]) handleGrabCheck(e.target.files[0]) }}
+        />
         <button onClick={() => loadProducts(selectedSheet)} style={btnStyle}>🔄 รีเฟรช</button>
         <button onClick={checkPrices} style={btnStyle}>💰 ตรวจสอบราคา</button>
+        <button onClick={() => document.getElementById('grabInput')?.click()} style={{ ...btnStyle, background: '#fff3cd', borderColor: '#f0ad4e' }}>
+        🛵 ตรวจสอบราคา GRAB</button>
       </div>
 
       {/* Main Layout */}
@@ -235,6 +332,76 @@ export default function Home() {
       <div style={{ background: '#f0f0f0', borderTop: '1px solid #bbb', padding: '4px 15px', fontSize: 11, color: '#666' }}>
         {status}
       </div>
+      
+      {showGrabModal && (
+  <div style={{
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+    display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
+  }}>
+    <div style={{ background: '#fff', borderRadius: 6, width: 700, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+
+      {/* Header */}
+      <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <strong>🛵 ผลตรวจสอบราคา GRAB</strong>
+        <button onClick={() => setShowGrabModal(false)}
+          style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
+      </div>
+
+      {/* Summary */}
+      {grabResults.length > 0 && !grabResults[0]?.error && (
+        <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
+          <span>ทั้งหมด: <strong>{grabResults.length}</strong></span>
+          <span style={{ color: '#28a745' }}>✓ ตรง: <strong>{grabResults.filter((r: any) => r.matched).length}</strong></span>
+          <span style={{ color: '#dc3545' }}>✗ ต้องแก้ไขใน GRAB: <strong>{grabResults.filter((r: any) => !r.matched).length}</strong></span>
+        </div>
+      )}
+
+      {/* Table */}
+      <div style={{ overflowY: 'auto', flex: 1 }}>
+        {grabResults[0]?.error ? (
+          <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{grabResults[0].error}</div>
+        ) : grabResults.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>กำลังโหลด...</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+                <th style={th}>#</th>
+                <th style={th}>SKU</th>
+                <th style={th}>ชื่อสินค้า</th>
+                <th style={th}>ราคาใน GRAB</th>
+                <th style={th}>ราคาใน DB</th>
+                <th style={th}>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {grabResults.map((r: any, i: number) => (
+                <tr key={i} style={{ background: r.matched ? 'transparent' : '#fff3cd' }}>
+                  <td style={td}>{i + 1}</td>
+                  <td style={td}><strong>{r.sku}</strong></td>
+                  <td style={td}>{r.name}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{r.grabPrice.toLocaleString()}</td>
+                  <td style={{ ...td, fontWeight: 600, color: '#c74634' }}>{r.dbPrice.toLocaleString()}</td>
+                  <td style={td}>
+                    {r.matched
+                      ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
+                      : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ แก้ไขใน GRAB</span>
+                    }
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'flex-end' }}>
+        <button onClick={() => setShowGrabModal(false)} style={btnStyle}>ปิด</button>
+      </div>
+    </div>
+  </div>
+)}
 
       {/* Edit Modal */}
       {editProduct && (
@@ -358,3 +525,4 @@ const inputStyle: React.CSSProperties = {
   borderRadius: 3, fontSize: 13, fontFamily: 'sans-serif',
   boxSizing: 'border-box'
 }
+
