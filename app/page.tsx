@@ -455,8 +455,8 @@ async function confirmUpdatePrices() {
 
       {/* Header */}
       <div style={{ background: '#f5f7fa', padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 18, color: '#333' }}>📦 ระบบตรวจสอบราคาสินค้า</h1>
-        <span style={{ fontSize: 11, color: '#888' }}>อัพเดทราคาล่าสุด: {lastPriceUpdate ?? '-'}</span>
+        <h1 style={{ fontSize: 18, color: '#000' }}>📦 ระบบตรวจสอบราคาสินค้า</h1>
+        <span style={{ fontSize: 11, color: '#000' }}>อัพเดทราคาล่าสุด: {lastPriceUpdate ?? '-'}</span>
       </div>
 
       {/* Toolbar */}
@@ -495,11 +495,11 @@ async function confirmUpdatePrices() {
           <div style={{ padding: '6px 10px', background: '#e0e0e0', borderBottom: '1px solid #ccc', fontWeight: 700, fontSize: 13 }}>📊 สถิติ</div>
           <div style={{ padding: 15 }}>
             <div style={statCard}>
-              <div style={{ fontSize: 11, color: '#666' }}>สินค้าทั้งหมด</div>
+              <div style={{ fontSize: 11, color: '#000' }}>สินค้าทั้งหมด</div>
               <div style={{ fontSize: 24, fontWeight: 700, color: '#c74634' }}>{stats.totalProducts.toLocaleString()}</div>
             </div>
             <div style={statCard}>
-              <div style={{ fontSize: 11, color: '#666' }}>หมวดหมู่</div>
+              <div style={{ fontSize: 11, color: '#000' }}>หมวดหมู่</div>
               <div style={{ fontSize: 24, fontWeight: 700, color: '#c74634' }}>{stats.sheets.length}</div>
             </div>
           </div>
@@ -524,9 +524,9 @@ async function confirmUpdatePrices() {
         {/* Right Panel */}
         <div style={{ overflowY: 'auto', background: '#fff' }}>
           {loading ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#666' }}>กำลังโหลด...</div>
+            <div style={{ textAlign: 'center', padding: 40, color: '#000' }}>กำลังโหลด...</div>
           ) : products.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#888' }}>เลือกหมวดหมู่หรือค้นหาสินค้า</div>
+            <div style={{ textAlign: 'center', padding: 40, color: '#000' }}>เลือกหมวดหมู่หรือค้นหาสินค้า</div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
@@ -579,7 +579,7 @@ async function confirmUpdatePrices() {
       </div>
 
       {/* Status Bar */}
-      <div style={{ background: '#f0f0f0', borderTop: '1px solid #bbb', padding: '4px 15px', fontSize: 11, color: '#666' }}>
+      <div style={{ background: '#f0f0f0', borderTop: '1px solid #bbb', padding: '4px 15px', fontSize: 11, color: '#000' }}>
         {status}
       </div>
       
@@ -604,7 +604,7 @@ async function confirmUpdatePrices() {
           <span style={{ color: '#28a745' }}>✓ ตรง: <strong>{grabResults.filter((r: any) => r.matched).length}</strong></span>
           <span style={{ color: '#dc3545' }}>✗ ต้องแก้ไขใน GRAB: <strong>{grabResults.filter((r: any) => !r.matched && !r.notFound).length}</strong></span>
           {grabResults.filter((r: any) => r.notFound).length > 0 && (
-            <span style={{ color: '#888' }}>⚠ ไม่พบในระบบ: <strong>{grabResults.filter((r: any) => r.notFound).length}</strong></span>
+            <span style={{ color: '#000' }}>⚠ ไม่พบในระบบ: <strong>{grabResults.filter((r: any) => r.notFound).length}</strong></span>
           )}
         </div>
       )}
@@ -614,7 +614,7 @@ async function confirmUpdatePrices() {
         {grabResults[0]?.error ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{grabResults[0].error}</div>
         ) : grabResults.length === 0 ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>กำลังโหลด...</div>
+          <div style={{ padding: 40, textAlign: 'center', color: '#000' }}>กำลังโหลด...</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
@@ -631,13 +631,13 @@ async function confirmUpdatePrices() {
               {grabResults.map((r: any, i: number) => (
                 <tr key={i} style={{ background: r.notFound ? '#f0f0f0' : r.matched ? 'transparent' : '#fff3cd' }}>
                   <td style={td}>{i + 1}</td>
-                  <td style={{ ...td, color: r.notFound ? '#999' : '#444' }}><strong>{r.sku}</strong></td>
-                  <td style={{ ...td, color: r.notFound ? '#999' : '#444' }}>{r.name || '-'}</td>
-                  <td style={{ ...td, fontWeight: 600, color: r.notFound ? '#999' : '#444' }}>{r.grabPrice?.toLocaleString() ?? '-'}</td>
-                  <td style={{ ...td, fontWeight: 600, color: r.notFound ? '#999' : '#c74634' }}>{r.dbPrice?.toLocaleString() ?? '-'}</td>
+                  <td style={{ ...td, color: '#000' }}><strong>{r.sku}</strong></td>
+                  <td style={{ ...td, color: '#000' }}>{r.name || '-'}</td>
+                  <td style={{ ...td, fontWeight: 600, color: '#000' }}>{r.grabPrice?.toLocaleString() ?? '-'}</td>
+                  <td style={{ ...td, fontWeight: 600, color: '#000' }}>{r.dbPrice?.toLocaleString() ?? '-'}</td>
                   <td style={td}>
                     {r.notFound
-                      ? <span style={{ background: '#e0e0e0', color: '#666', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบในระบบ</span>
+                      ? <span style={{ background: '#e0e0e0', color: '#000', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบในระบบ</span>
                       : r.matched
                         ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
                         : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ แก้ไขใน GRAB</span>
@@ -663,7 +663,7 @@ async function confirmUpdatePrices() {
           <button
             onClick={exportNotFoundXlsx}
             disabled={grabResults.filter((r: any) => r.notFound).length === 0}
-            style={{ ...btnStyle, background: '#e8e8e8', borderColor: '#999', color: '#555', opacity: grabResults.filter((r: any) => r.notFound).length === 0 ? 0.5 : 1 }}
+            style={{ ...btnStyle, background: '#e8e8e8', borderColor: '#999', color: '#000', opacity: grabResults.filter((r: any) => r.notFound).length === 0 ? 0.5 : 1 }}
           >
             ⚠ Export ไม่พบในระบบ ({grabResults.filter((r: any) => r.notFound).length})
           </button>
@@ -693,8 +693,8 @@ async function confirmUpdatePrices() {
         <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
           <span>ทั้งหมด: <strong>{priceCalcResults.length}</strong></span>
           <span style={{ color: '#28a745' }}>เปลี่ยนแปลง: <strong>{priceCalcResults.filter(r => r.changed).length}</strong></span>
-          <span style={{ color: '#666' }}>ราคาเดิม: <strong>{priceCalcResults.filter(r => !r.changed).length}</strong></span>
-          <div style={{ marginLeft: 'auto', fontSize: 11, color: '#888' }}>
+          <span style={{ color: '#000' }}>ราคาเดิม: <strong>{priceCalcResults.filter(r => !r.changed).length}</strong></span>
+          <div style={{ marginLeft: 'auto', fontSize: 11, color: '#000' }}>
             สูตร: ระดับ0 × 0.95 × 1.20 × 1.07
           </div>
         </div>
@@ -705,7 +705,7 @@ async function confirmUpdatePrices() {
         {priceCalcResults[0]?.error ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{priceCalcResults[0].error}</div>
         ) : priceCalcResults.length === 0 ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#666' }}>กำลังคำนวณ...</div>
+          <div style={{ padding: 40, textAlign: 'center', color: '#000' }}>กำลังคำนวณ...</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
@@ -922,7 +922,7 @@ async function confirmUpdatePrices() {
               onError={e => (e.currentTarget.style.display = 'none')}
             />
           ) : (
-            <div style={{ padding: 40, color: '#999', fontSize: 12 }}>ไม่มีรูป</div>
+            <div style={{ padding: 40, color: '#000', fontSize: 12 }}>ไม่มีรูป</div>
           )}
         </div>
       )}
@@ -944,14 +944,14 @@ const th: React.CSSProperties = {
   fontWeight: 600, position: 'sticky', top: 0, background: '#f5f5f5'
 }
 const td: React.CSSProperties = {
-  padding: '8px 12px', border: '1px solid #eee', color: '#444'
+  padding: '8px 12px', border: '1px solid #eee', color: '#000'
 }
 const labelStyle: React.CSSProperties = {
-  fontSize: 11, color: '#666', display: 'block', marginBottom: 4
+  fontSize: 11, color: '#000', display: 'block', marginBottom: 4
 }
 const inputStyle: React.CSSProperties = {
   width: '100%', padding: '6px 10px', border: '1px solid #999',
-  borderRadius: 3, fontSize: 13, fontFamily: 'sans-serif',
+  borderRadius: 3, fontSize: 13, fontFamily: 'sans-serif', color: '#000',
   boxSizing: 'border-box'
 }
 
