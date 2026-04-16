@@ -1,10 +1,16 @@
 import { supabase } from '../../../lib/supabase'
 import { NextResponse,NextRequest } from 'next/server'
 
-export async function GET() {
-  const { data, error } = await supabase
-    .from('products')
-    .select('*, sku_reference!inner(ref_price)')
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const branch = searchParams.get('branch')
+
+  let q = supabase.from('products').select('*, sku_reference!inner(ref_price)')
+  if (branch && branch !== 'all') {
+    q = q.or(`branch.eq.${branch},branch.is.null`)
+  }
+
+  const { data, error } = await q
 
   if (error) return NextResponse.json({ success: false, error: error.message })
 

@@ -38,13 +38,56 @@ export default function Home() {
   const [importSheets, setImportSheets] = useState<{ name: string; rows: any[] }[]>([])
   const [importingData, setImportingData] = useState(false)
   const [importLog, setImportLog] = useState('')
-  
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
+  const [selectedBranch, setSelectedBranch] = useState<string>(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+  )
+  const [showAddBranchModal, setShowAddBranchModal] = useState(false)
+  const [newBranchName, setNewBranchName] = useState('')
+  const [addingBranch, setAddingBranch] = useState(false)
+
   useEffect(() => {
+    loadBranches()
     loadStats()
   }, [])
 
+  useEffect(() => {
+    localStorage.setItem('selectedBranch', selectedBranch)
+    loadStats()
+    loadProducts('all')
+    setSelectedSheet('all')
+  }, [selectedBranch])
+
+  async function loadBranches() {
+    const res = await fetch('/api/branches')
+    const data = await res.json()
+    if (data.success) setBranches(data.branches)
+  }
+
+  async function addBranch() {
+    if (!newBranchName.trim()) return
+    setAddingBranch(true)
+    const res = await fetch('/api/branches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newBranchName.trim() })
+    })
+    const data = await res.json()
+    if (data.success) {
+      setBranches(prev => [...prev, data.branch])
+      setNewBranchName('')
+      setShowAddBranchModal(false)
+      setStatus(`เพิ่มสาขา "${data.branch.name}" สำเร็จ`)
+    } else {
+      setStatus('เกิดข้อผิดพลาด: ' + data.error)
+    }
+    setAddingBranch(false)
+  }
+
   async function loadStats() {
-    const res = await fetch('/api/stats')
+    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+    const url = branch && branch !== 'all' ? `/api/stats?branch=${encodeURIComponent(branch)}` : '/api/stats'
+    const res = await fetch(url)
     const data = await res.json()
     if (data.success) setStats(data)
   }
@@ -52,7 +95,9 @@ export default function Home() {
   async function loadProducts(sheet = 'all') {
     setLoading(true)
     setStatus('กำลังโหลด...')
-    const url = sheet === 'all' ? '/api/products' : `/api/products?sheet=${encodeURIComponent(sheet)}`
+    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+    const branchParam = branch && branch !== 'all' ? `&branch=${encodeURIComponent(branch)}` : ''
+    const url = sheet === 'all' ? `/api/products?${branchParam}` : `/api/products?sheet=${encodeURIComponent(sheet)}${branchParam}`
     const res = await fetch(url)
     const data = await res.json()
     if (data.success) {
@@ -66,7 +111,9 @@ export default function Home() {
   async function searchProducts(sku: string) {
     if (sku.length < 3) return
     setLoading(true)
-    const res = await fetch(`/api/products?sku=${encodeURIComponent(sku)}`)
+    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+    const branchParam = branch && branch !== 'all' ? `&branch=${encodeURIComponent(branch)}` : ''
+    const res = await fetch(`/api/products?sku=${encodeURIComponent(sku)}${branchParam}`)
     const data = await res.json()
     if (data.success) {
       setProducts(data.products)
@@ -78,7 +125,9 @@ export default function Home() {
   async function checkPrices() {
     setLoading(true)
     setStatus('กำลังตรวจสอบราคา...')
-    const res = await fetch('/api/prices')
+    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+    const url = branch && branch !== 'all' ? `/api/prices?branch=${encodeURIComponent(branch)}` : '/api/prices'
+    const res = await fetch(url)
     const data = await res.json()
     if (data.success) {
       setProducts(data.mismatched)
@@ -218,7 +267,8 @@ async function handleGrabCheck(file: File) {
 
   // ดึงข้อมูลจาก Supabase เฉพาะ SKU ที่มีใน CSV
   const skus = Object.keys(grabMap)
-  const res = await fetch(`/api/products?skus=${encodeURIComponent(skus.join(','))}`)
+  const grabBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus, branch: grabBranch }) })
   const data = await res.json()
 
   if (!data.success) {
@@ -289,7 +339,10 @@ async function handleGrabCheck(file: File) {
   }
 
   async function confirmImport() {
-    const allRows = importSheets.flatMap(s => s.rows)
+    const importBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+    const allRows = importSheets.flatMap(s => s.rows).map(row =>
+      importBranch && importBranch !== 'all' ? { ...row, branch: importBranch } : row
+    )
     if (allRows.length === 0) return
     setImportingData(true)
     const chunkSize = 100
@@ -362,7 +415,9 @@ async function handleGrabCheck(file: File) {
   const clean = text.replace(/^\uFEFF/, '')
   const rows = parseCSVRows(clean)
 
-  // Col B (index 1) = SKU, Col G (index 6) = ราคาระดับ 0
+  setStatus('(1/3) กำลังอ่านไฟล์ CSV...')
+
+  // Col B (index 1) = SKU, Col F (index 5) = filter เฉพาะ 0, Col G (index 6) = ราคาระดับ 0
   // เริ่มจาก row 2 (index 1) ข้าม header
   const calcMap: Record<string, { sku: string; level0: number; D: number }> = {}
 
@@ -370,6 +425,10 @@ async function handleGrabCheck(file: File) {
     const row = rows[i]
     if (!row || row.length < 7) continue
     const sku = row[1]?.trim()
+    const colD = row[3]?.trim()
+    const colF = row[5]?.trim()
+    if (colD !== '1') continue  // หน่วยเล็กที่สุดขายหน้าร้าน
+    if (colF !== '0') continue
     const level0 = parsePriceRobust(row[6])
     if (!sku || level0 === null) continue
 
@@ -381,6 +440,8 @@ async function handleGrabCheck(file: File) {
     calcMap[sku] = { sku, level0, D }
   }
 
+  console.log('[PriceCalc] calcMap size:', Object.keys(calcMap).length, 'sample:', Object.keys(calcMap).slice(0, 3))
+
   if (Object.keys(calcMap).length === 0) {
     setPriceCalcResults([{ error: 'ไม่พบข้อมูลใน CSV กรุณาตรวจสอบไฟล์' }])
     setStatus('ไม่พบข้อมูล')
@@ -389,13 +450,18 @@ async function handleGrabCheck(file: File) {
 
   // ดึงข้อมูลจาก Supabase เฉพาะ SKU ที่มีใน CSV
   const skus = Object.keys(calcMap)
-  const res = await fetch(`/api/products?skus=${encodeURIComponent(skus.join(','))}`)
+  const calcBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+  setStatus(`(2/3) กำลังดึงข้อมูลจากระบบ... (${skus.length} SKU)`)
+  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus, branch: calcBranch }) })
   const data = await res.json()
+  console.log('[PriceCalc] API response:', JSON.stringify(data))
 
   if (!data.success) {
     setStatus('เกิดข้อผิดพลาดในการดึงข้อมูล')
     return
   }
+
+  setStatus('(3/3) กำลังคำนวณราคา...')
 
   // จับคู่กับข้อมูลใน Supabase
   const results = data.products.map((p: Product) => {
@@ -409,7 +475,8 @@ async function handleGrabCheck(file: File) {
       level0: calc.level0,
       newPrice: calc.D,
       oldPrice,
-      changed: Math.abs(calc.D - oldPrice) > 0.01
+      changed: Math.abs(calc.D - oldPrice) > 0.01,
+      _product: p
     }
   }).filter(Boolean)
 
@@ -443,6 +510,23 @@ async function confirmUpdatePrices() {
     const min = String(now.getMinutes()).padStart(2, '0')
     setLastPriceUpdate(`${dd}/${mm}/${yyyy} ${hh}:${min}`)
     setStatus(`✅ อัพเดทราคาสำเร็จ ${data.updated} รายการ`)
+
+    // Export Excel หลังอัพเดทสำเร็จ
+    const XLSX = await import('xlsx')
+    const exportRows = toUpdate.map((r: any) => ({
+      '*ประเภทสินค้า': r._product?.['ประเภทสินค้า'] || '',
+      '*ชื่อสินค้า': r._product?.['*ชื่อสินค้า (NAME)'] || '',
+      '*เลขที่ใบอนุญาตโฆษณา': r._product?.['*เลขที่ใบอนุญาตโฆษณา'] || '',
+      '*ราคาสินค้า': r.newPrice,
+      'รหัสสินค้า': r.sku,
+      '*รูปภาพสินค้า': r._product?.['*รูปภาพสินค้า'] || '',
+      'หมวดหมู่รายการสินค้า': r._product?.['หมวดหมู่สินค้า (CATEGORIES)'] || ''
+    }))
+    const ws = XLSX.utils.json_to_sheet(exportRows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'อัพเดทราคา')
+    XLSX.writeFile(wb, `GM MME ${dd}.${mm}.${yyyy}.xlsx`)
+
     setShowPriceCalcModal(false)
   } else {
     setStatus('เกิดข้อผิดพลาดในการอัพเดท')
@@ -456,6 +540,20 @@ async function confirmUpdatePrices() {
       {/* Header */}
       <div style={{ background: '#f5f7fa', padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1 style={{ fontSize: 18, color: '#000' }}>📦 ระบบตรวจสอบราคาสินค้า</h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, color: '#555' }}>สาขา:</span>
+          <select
+            value={selectedBranch}
+            onChange={e => setSelectedBranch(e.target.value)}
+            style={{ padding: '5px 10px', border: '1px solid #999', borderRadius: 3, fontSize: 13 }}
+          >
+            <option value="all">ทั้งหมด</option>
+            {branches.map(b => (
+              <option key={b.id} value={b.name}>{b.name}</option>
+            ))}
+          </select>
+          <button onClick={() => setShowAddBranchModal(true)} style={{ padding: '5px 10px', border: '1px solid #999', borderRadius: 3, fontSize: 12, cursor: 'pointer', background: '#fff' }}>+ สาขาใหม่</button>
+        </div>
         <span style={{ fontSize: 11, color: '#000' }}>อัพเดทราคาล่าสุด: {lastPriceUpdate ?? '-'}</span>
       </div>
 
@@ -483,8 +581,8 @@ async function confirmUpdatePrices() {
         <button onClick={() => loadProducts(selectedSheet)} style={btnStyle}>🔄 รีเฟรช</button>
         <button onClick={() => { setIsAdding(true); setEditProduct({ 'ประเภทสินค้า': '', '*ชื่อสินค้า (NAME)': '', '*เลขที่ใบอนุญาตโฆษณา': '', '*ราคาสินค้า': '', 'รหัสสินค้า (SKU NUMBER)': '', '*รูปภาพสินค้า': '', 'หมวดหมู่สินค้า (CATEGORIES)': '' }) }} style={btnStyle}>➕ เพิ่มรายการสินค้า</button>
         <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
-        <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle}>📊 อัพเดทราคา</button>
-        <button onClick={() => document.getElementById('grabInput')?.click()} style={btnStyle}>🛵 ตรวจสอบราคา GRAB</button>
+        <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ R05.105 อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ตรวจสอบราคา Promaxx</button>
+        <button onClick={() => document.getElementById('grabInput')?.click()} style={btnStyle} title="ไฟล์เมนูที่ download จาก GrabMart สำหรับตรวจสอบชื่อสินค้าและราคา">🛵 ตรวจสอบราคา GRAB</button>
       </div>
 
       {/* Main Layout */}
@@ -720,7 +818,7 @@ async function confirmUpdatePrices() {
               </tr>
             </thead>
             <tbody>
-              {priceCalcResults.map((r: any, i: number) => (
+              {priceCalcResults.filter((r: any) => r.changed).map((r: any, i: number) => (
                 <tr key={i} style={{ background: r.changed ? '#fff3cd' : 'transparent' }}>
                   <td style={td}>{i + 1}</td>
                   <td style={td}><strong>{r.sku}</strong></td>
@@ -744,6 +842,34 @@ async function confirmUpdatePrices() {
       {/* Footer */}
       <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button onClick={() => setShowPriceCalcModal(false)} style={btnStyle}>ยกเลิก</button>
+        <button
+          onClick={async () => {
+            const toExport = priceCalcResults.filter((r: any) => r.changed)
+            if (toExport.length === 0) return
+            const XLSX = await import('xlsx')
+            const now = new Date()
+            const dd = String(now.getDate()).padStart(2, '0')
+            const mm = String(now.getMonth() + 1).padStart(2, '0')
+            const yyyy = now.getFullYear()
+            const exportRows = toExport.map((r: any) => ({
+              '*ประเภทสินค้า': r._product?.['ประเภทสินค้า'] || '',
+              '*ชื่อสินค้า': r._product?.['*ชื่อสินค้า (NAME)'] || '',
+              '*เลขที่ใบอนุญาตโฆษณา': r._product?.['*เลขที่ใบอนุญาตโฆษณา'] || '',
+              '*ราคาสินค้า': r.newPrice,
+              'รหัสสินค้า': r.sku,
+              '*รูปภาพสินค้า': r._product?.['*รูปภาพสินค้า'] || '',
+              'หมวดหมู่รายการสินค้า': r._product?.['หมวดหมู่สินค้า (CATEGORIES)'] || ''
+            }))
+            const ws = XLSX.utils.json_to_sheet(exportRows)
+            const wb = XLSX.utils.book_new()
+            XLSX.utils.book_append_sheet(wb, ws, 'อัพเดทราคา')
+            XLSX.writeFile(wb, `GM MME ${dd}.${mm}.${yyyy}.xlsx`)
+          }}
+          disabled={priceCalcResults.filter((r: any) => r.changed).length === 0}
+          style={{ ...btnStyle, background: '#17a2b8', color: '#fff', borderColor: '#117a8b' }}
+        >
+          📥 Export Excel
+        </button>
         <button
           onClick={confirmUpdatePrices}
           disabled={updatingPrices || priceCalcResults.filter(r => r.changed).length === 0}
@@ -924,6 +1050,39 @@ async function confirmUpdatePrices() {
           ) : (
             <div style={{ padding: 40, color: '#000', fontSize: 12 }}>ไม่มีรูป</div>
           )}
+        </div>
+      )}
+
+      {/* Add Branch Modal */}
+      {showAddBranchModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: 6, width: 360, boxShadow: '0 10px 40px rgba(0,0,0,0.3)', overflow: 'hidden' }}>
+            <div style={{ background: '#2d6a2d', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong>+ เพิ่มสาขาใหม่</strong>
+              <button onClick={() => setShowAddBranchModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
+            </div>
+            <div style={{ padding: 20 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>ชื่อสาขา</label>
+              <input
+                style={{ width: '100%', padding: '8px 10px', border: '1px solid #ccc', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }}
+                placeholder="เช่น สาขาสีลม, สาขาลาดพร้าว"
+                value={newBranchName}
+                onChange={e => setNewBranchName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addBranch() }}
+                autoFocus
+              />
+            </div>
+            <div style={{ padding: '0 20px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => { setShowAddBranchModal(false); setNewBranchName('') }} style={btnStyle}>ยกเลิก</button>
+              <button
+                onClick={addBranch}
+                disabled={addingBranch || !newBranchName.trim()}
+                style={{ ...btnStyle, background: '#28a745', color: '#fff', borderColor: '#1e7e34', opacity: addingBranch ? 0.6 : 1 }}
+              >
+                {addingBranch ? '⏳ กำลังเพิ่ม...' : '✅ เพิ่มสาขา'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

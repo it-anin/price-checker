@@ -6,12 +6,14 @@ export async function GET(req: NextRequest) {
   const sku = searchParams.get('sku')
   const sheet = searchParams.get('sheet')
   const skus = searchParams.get('skus')
+  const branch = searchParams.get('branch')
 
   let q = supabase.from('products').select('*')
 
   if (sku) q = q.ilike('"รหัสสินค้า (SKU NUMBER)"', `%${sku}%`)
   if (sheet) q = q.eq('"หมวดหมู่สินค้า (CATEGORIES)"', sheet)
   if (skus) q = q.in('"รหัสสินค้า (SKU NUMBER)"', skus.split(','))
+  if (branch && branch !== 'all') q = q.or(`branch.eq.${branch},branch.is.null`)
 
   const { data, error } = await q.limit(500)
   if (error) return NextResponse.json({ success: false, error: error.message })
@@ -21,6 +23,26 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   const body = await req.json()
 
+  // query by skus array (batch 300 per request to avoid Supabase limits)
+  if (Array.isArray(body.skus)) {
+    const chunkSize = 300
+    const branch = body.branch
+    const all: any[] = []
+    for (let i = 0; i < body.skus.length; i += chunkSize) {
+      const chunk = body.skus.slice(i, i + chunkSize)
+      let chunkQ = supabase
+        .from('products')
+        .select('*')
+        .in('"รหัสสินค้า (SKU NUMBER)"', chunk)
+      if (branch && branch !== 'all') chunkQ = chunkQ.or(`branch.eq.${branch},branch.is.null`)
+      const { data, error } = await chunkQ
+      if (error) return NextResponse.json({ success: false, error: error.message })
+      all.push(...(data || []))
+    }
+    return NextResponse.json({ success: true, products: all })
+  }
+
+  // insert single product
   const { data, error } = await supabase
     .from('products')
     .insert([body])

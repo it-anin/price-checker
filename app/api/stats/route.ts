@@ -1,11 +1,16 @@
 import { supabase } from '../../../lib/supabase'
-import { NextResponse } from 'next/server'
+import { NextResponse, NextRequest } from 'next/server'
 
-export async function GET() {
-  const { data, error } = await supabase
-    .from('products')
-    .select('"หมวดหมู่สินค้า (CATEGORIES)"')
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const branch = searchParams.get('branch')
 
+  let q = supabase.from('products').select('"หมวดหมู่สินค้า (CATEGORIES)"')
+  if (branch && branch !== 'all') {
+    q = q.or(`branch.eq.${branch},branch.is.null`)
+  }
+
+  const { data, error } = await q
   if (error) return NextResponse.json({ success: false, error: error.message })
 
   const categoryCount: Record<string, number> = {}
