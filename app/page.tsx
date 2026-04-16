@@ -29,6 +29,7 @@ export default function Home() {
   const [grabResults, setGrabResults] = useState<any[]>([])
   const [showGrabModal, setShowGrabModal] = useState(false)
   const [grabMismatchProducts, setGrabMismatchProducts] = useState<Product[]>([])
+  const [grabSource, setGrabSource] = useState<'GRAB' | 'Promaxx'>('GRAB')
   const [isAdding, setIsAdding] = useState(false)
   const [showPriceCalcModal, setShowPriceCalcModal] = useState(false)
   const [priceCalcResults, setPriceCalcResults] = useState<any[]>([])
@@ -241,6 +242,7 @@ function parsePriceRobust(str: string): number | null {
 }
 
 async function handleGrabCheck(file: File) {
+  setGrabSource('GRAB')
   setStatus('กำลังตรวจสอบราคา GRAB...')
   setShowGrabModal(true)
   setGrabResults([])
@@ -307,6 +309,68 @@ async function handleGrabCheck(file: File) {
   setGrabMismatchProducts(data.products.filter((p: Product) => mismatchSkus.has(p['รหัสสินค้า (SKU NUMBER)'])))
   setGrabResults(results)
   setStatus(`GRAB: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} รายการ`)
+}
+
+async function handlePromaxxCheck(file: File) {
+  setGrabSource('Promaxx')
+  setStatus('กำลังตรวจสอบราคา Promaxx...')
+  setShowGrabModal(true)
+  setGrabResults([])
+
+  const text = await file.text()
+  const clean = text.replace(/^\uFEFF/, '')
+  const rows = parseCSVRows(clean)
+
+  // Col B (index 1) = SKU, Col F (index 5) = filter 0, Col G (index 6) = ราคา, เริ่ม row 2 (index 1)
+  const promaxxMap: Record<string, number> = {}
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i]
+    if (!row || row.length < 7) continue
+    const sku = row[1]?.trim()
+    const colF = row[5]?.trim()
+    if (colF !== '0') continue
+    const price = parsePriceRobust(row[6])
+    if (sku && price !== null) promaxxMap[sku] = price
+  }
+
+  if (Object.keys(promaxxMap).length === 0) {
+    setStatus('ไม่พบข้อมูลใน CSV')
+    setGrabResults([{ error: 'ไม่พบข้อมูลใน CSV กรุณาตรวจสอบไฟล์' }])
+    return
+  }
+
+  const skus = Object.keys(promaxxMap)
+  const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus, branch }) })
+  const data = await res.json()
+
+  if (!data.success) { setStatus('เกิดข้อผิดพลาด'); return }
+  if (data.products.length === 0) {
+    setGrabResults([{ error: 'ไม่พบ SKU ใน Supabase กรุณาตรวจสอบข้อมูลใน CSV' }])
+    setStatus('ไม่มีข้อมูล')
+    return
+  }
+
+  const foundSkus = new Set(data.products.map((p: Product) => p['รหัสสินค้า (SKU NUMBER)']))
+  const matched_results = data.products.map((p: Product) => {
+    const sku = p['รหัสสินค้า (SKU NUMBER)']
+    const grabPrice = promaxxMap[sku]
+    const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
+    if (grabPrice === undefined || dbPrice === null) return null
+    const matched = Math.abs(grabPrice - dbPrice) < 0.01
+    return { sku, name: p['*ชื่อสินค้า (NAME)'], grabPrice, dbPrice, matched }
+  }).filter(Boolean)
+
+  const notFound_results = Object.keys(promaxxMap)
+    .filter(sku => !foundSkus.has(sku))
+    .map(sku => ({ sku, grabPrice: promaxxMap[sku], notFound: true }))
+
+  const results = [...matched_results, ...notFound_results]
+  const mismatch = matched_results.filter((r: any) => !r.matched)
+  const mismatchSkus = new Set(mismatch.map((r: any) => r.sku))
+  setGrabMismatchProducts(data.products.filter((p: Product) => mismatchSkus.has(p['รหัสสินค้า (SKU NUMBER)'])))
+  setGrabResults(results)
+  setStatus(`Promaxx: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} รายการ`)
 }
 
   const IMPORT_FIELDS = [
@@ -571,6 +635,10 @@ async function confirmUpdatePrices() {
         onChange={e => { if (e.target.files?.[0]) handleGrabCheck(e.target.files[0]) }}
         />
         <input
+        type="file" accept=".csv" id="promaxxInput" style={{ display: 'none' }}
+        onChange={e => { if (e.target.files?.[0]) handlePromaxxCheck(e.target.files[0]) }}
+        />
+        <input
         type="file" accept=".csv" id="priceCalcInput" style={{ display: 'none' }}
         onChange={e => { if (e.target.files?.[0]) handlePriceCalcUpload(e.target.files[0]) }}
         />
@@ -583,6 +651,7 @@ async function confirmUpdatePrices() {
         <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
         <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ R05.105 อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ตรวจสอบราคา Promaxx</button>
         <button onClick={() => document.getElementById('grabInput')?.click()} style={btnStyle} title="ไฟล์เมนูที่ download จาก GrabMart สำหรับตรวจสอบชื่อสินค้าและราคา">🛵 ตรวจสอบราคา GRAB</button>
+        <button onClick={() => document.getElementById('promaxxInput')?.click()} style={btnStyle} title="ไฟล์ R05.105 จาก Promaxx">🔍 ตรวจสอบราคา Promaxx</button>
       </div>
 
       {/* Main Layout */}
@@ -690,7 +759,7 @@ async function confirmUpdatePrices() {
 
       {/* Header */}
       <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <strong>🛵 ผลตรวจสอบราคา GRAB</strong>
+        <strong>{grabSource === 'Promaxx' ? '🔍 ผลตรวจสอบราคา Promaxx' : '🛵 ผลตรวจสอบราคา GRAB'}</strong>
         <button onClick={() => setShowGrabModal(false)}
           style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
       </div>
