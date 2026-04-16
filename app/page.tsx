@@ -327,7 +327,9 @@ async function handlePromaxxCheck(file: File) {
     const row = rows[i]
     if (!row || row.length < 7) continue
     const sku = row[1]?.trim()
+    const colD = row[3]?.trim()
     const colF = row[5]?.trim()
+    if (colD !== '1') continue
     if (colF !== '0') continue
     const price = parsePriceRobust(row[6])
     if (sku && price !== null) promaxxMap[sku] = price
