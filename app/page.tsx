@@ -29,7 +29,7 @@ export default function Home() {
   const [grabResults, setGrabResults] = useState<any[]>([])
   const [showGrabModal, setShowGrabModal] = useState(false)
   const [grabMismatchProducts, setGrabMismatchProducts] = useState<Product[]>([])
-  const [grabSource, setGrabSource] = useState<'GRAB' | 'Promaxx'>('GRAB')
+  const [grabSource, setGrabSource] = useState<'GRAB'>('GRAB')
   const [isAdding, setIsAdding] = useState(false)
   const [showPriceCalcModal, setShowPriceCalcModal] = useState(false)
   const [priceCalcResults, setPriceCalcResults] = useState<any[]>([])
@@ -280,7 +280,7 @@ async function handleGrabCheck(file: File) {
 
   if (data.products.length === 0) {
     setStatus('ไม่มีข้อมูล')
-    setGrabResults([{ error: 'ไม่พบ SKU ใน Supabase กรุณาตรวจสอบข้อมูลใน CSV' }])
+    setGrabResults([{ error: 'อัพโหลดไฟล์ผิด หรือ คอลัมน์ไฟล์ไม่ถูกต้อง' }])
     return
   }
 
@@ -309,70 +309,6 @@ async function handleGrabCheck(file: File) {
   setGrabMismatchProducts(data.products.filter((p: Product) => mismatchSkus.has(p['รหัสสินค้า (SKU NUMBER)'])))
   setGrabResults(results)
   setStatus(`GRAB: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} รายการ`)
-}
-
-async function handlePromaxxCheck(file: File) {
-  setGrabSource('Promaxx')
-  setStatus('กำลังตรวจสอบราคา Promaxx...')
-  setShowGrabModal(true)
-  setGrabResults([])
-
-  const text = await file.text()
-  const clean = text.replace(/^\uFEFF/, '')
-  const rows = parseCSVRows(clean)
-
-  // Col B (index 1) = SKU, Col F (index 5) = filter 0, Col G (index 6) = ราคา, เริ่ม row 2 (index 1)
-  const promaxxMap: Record<string, number> = {}
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i]
-    if (!row || row.length < 7) continue
-    const sku = row[1]?.trim()
-    const colD = row[3]?.trim()
-    const colF = row[5]?.trim()
-    if (colD !== '1') continue
-    if (colF !== '0') continue
-    const price = parsePriceRobust(row[6])
-    if (sku && price !== null) promaxxMap[sku] = price
-  }
-
-  if (Object.keys(promaxxMap).length === 0) {
-    setStatus('ไม่พบข้อมูลใน CSV')
-    setGrabResults([{ error: 'ไม่พบข้อมูลใน CSV กรุณาตรวจสอบไฟล์' }])
-    return
-  }
-
-  const skus = Object.keys(promaxxMap)
-  const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus, branch }) })
-  const data = await res.json()
-
-  if (!data.success) { setStatus('เกิดข้อผิดพลาด'); return }
-  if (data.products.length === 0) {
-    setGrabResults([{ error: 'ไม่พบ SKU ใน Supabase กรุณาตรวจสอบข้อมูลใน CSV' }])
-    setStatus('ไม่มีข้อมูล')
-    return
-  }
-
-  const foundSkus = new Set(data.products.map((p: Product) => p['รหัสสินค้า (SKU NUMBER)']))
-  const matched_results = data.products.map((p: Product) => {
-    const sku = p['รหัสสินค้า (SKU NUMBER)']
-    const grabPrice = promaxxMap[sku]
-    const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
-    if (grabPrice === undefined || dbPrice === null) return null
-    const matched = Math.abs(grabPrice - dbPrice) < 0.01
-    return { sku, name: p['*ชื่อสินค้า (NAME)'], grabPrice, dbPrice, matched }
-  }).filter(Boolean)
-
-  const notFound_results = Object.keys(promaxxMap)
-    .filter(sku => !foundSkus.has(sku))
-    .map(sku => ({ sku, grabPrice: promaxxMap[sku], notFound: true }))
-
-  const results = [...matched_results, ...notFound_results]
-  const mismatch = matched_results.filter((r: any) => !r.matched)
-  const mismatchSkus = new Set(mismatch.map((r: any) => r.sku))
-  setGrabMismatchProducts(data.products.filter((p: Product) => mismatchSkus.has(p['รหัสสินค้า (SKU NUMBER)'])))
-  setGrabResults(results)
-  setStatus(`Promaxx: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} รายการ`)
 }
 
   const IMPORT_FIELDS = [
@@ -453,15 +389,7 @@ async function handlePromaxxCheck(file: File) {
 
   async function exportGrabXlsx() {
     const XLSX = await import('xlsx')
-    const rows = grabMismatchProducts.map(p => ({
-      '*ประเภทสินค้า': p['ประเภทสินค้า'] || '',
-      '*ชื่อสินค้า': p['*ชื่อสินค้า (NAME)'] || '',
-      '*เลขที่ใบอนุญาตโฆษณา': p['*เลขที่ใบอนุญาตโฆษณา'] || '',
-      '*ราคาสินค้า': p['*ราคาสินค้า'] || '',
-      'รหัสสินค้า': p['รหัสสินค้า (SKU NUMBER)'] || '',
-      '*รูปภาพสินค้า': p['*รูปภาพสินค้า'] || '',
-      'หมวดหมู่รายการสินค้า': p['หมวดหมู่สินค้า (CATEGORIES)'] || ''
-    }))
+    const rows = toExportRows(grabMismatchProducts)
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'ราคาไม่ตรง')
@@ -470,6 +398,89 @@ async function handlePromaxxCheck(file: File) {
     const mm = String(now.getMonth() + 1).padStart(2, '0')
     const yyyy = now.getFullYear()
     XLSX.writeFile(wb, `GM MME ${dd}.${mm}.${yyyy}.xlsx`)
+  }
+
+  function toExportRows(list: Product[]) {
+    return list.map(p => ({
+      '*ประเภทสินค้า': p['ประเภทสินค้า'] || '',
+      '*ชื่อสินค้า': p['*ชื่อสินค้า (NAME)'] || '',
+      '*เลขที่ใบอนุญาตโฆษณา': p['*เลขที่ใบอนุญาตโฆษณา'] || '',
+      '*ราคาสินค้า': p['*ราคาสินค้า'] || '',
+      'รหัสสินค้า': p['รหัสสินค้า (SKU NUMBER)'] || '',
+      '*รูปภาพสินค้า': p['*รูปภาพสินค้า'] || '',
+      'หมวดหมู่รายการสินค้า': p['หมวดหมู่สินค้า (CATEGORIES)'] || ''
+    }))
+  }
+
+  async function exportSelectedCategoryXlsx() {
+    if (selectedSheet === 'all') {
+      setStatus('กรุณาเลือกหมวดหมู่ก่อน Export')
+      return
+    }
+
+    setStatus(`กำลังเตรียมไฟล์ Export หมวดหมู่ ${selectedSheet}...`)
+    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+    const branchParam = branch && branch !== 'all' ? `&branch=${encodeURIComponent(branch)}` : ''
+    const url = `/api/products?sheet=${encodeURIComponent(selectedSheet)}${branchParam}`
+    const res = await fetch(url)
+    const data = await res.json()
+
+    if (!data.success) {
+      setStatus('เกิดข้อผิดพลาดในการ Export')
+      return
+    }
+
+    const allProducts = data.products || []
+    if (allProducts.length === 0) {
+      setStatus('ไม่มีข้อมูลสินค้าให้ Export')
+      return
+    }
+
+    const XLSX = await import('xlsx')
+    const rows = toExportRows(allProducts)
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, selectedSheet)
+    const now = new Date()
+    const dd = String(now.getDate()).padStart(2, '0')
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const yyyy = now.getFullYear()
+    XLSX.writeFile(wb, `GM MME ${selectedSheet} ${dd}.${mm}.${yyyy}.xlsx`)
+    setStatus(`Export หมวดหมู่ ${selectedSheet} สำเร็จ (${allProducts.length} รายการ)`)
+  }
+
+  async function deleteSelectedCategoryInBranch() {
+    if (selectedSheet === 'all') {
+      setStatus('กรุณาเลือกหมวดหมู่ก่อนลบ')
+      return
+    }
+    if (selectedBranch === 'all') {
+      setStatus('กรุณาเลือกสาขาก่อนลบหมวดหมู่')
+      return
+    }
+
+    const ok = window.confirm(
+      `ยืนยันลบหมวดหมู่ "${selectedSheet}" ของสาขา "${selectedBranch}"?\nการลบนี้ไม่สามารถย้อนกลับได้`
+    )
+    if (!ok) return
+
+    setStatus(`กำลังลบหมวดหมู่ ${selectedSheet} ของสาขา ${selectedBranch}...`)
+    const res = await fetch('/api/products', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sheet: selectedSheet, branch: selectedBranch })
+    })
+    const data = await res.json()
+
+    if (!data.success) {
+      setStatus('เกิดข้อผิดพลาด: ' + data.error)
+      return
+    }
+
+    setSelectedSheet('all')
+    await loadStats()
+    await loadProducts('all')
+    setStatus(`ลบหมวดหมู่ ${selectedSheet} ของสาขา ${selectedBranch} สำเร็จ (${data.deleted || 0} รายการ)`)
   }
 
     async function handlePriceCalcUpload(file: File) {
@@ -509,7 +520,7 @@ async function handlePromaxxCheck(file: File) {
   console.log('[PriceCalc] calcMap size:', Object.keys(calcMap).length, 'sample:', Object.keys(calcMap).slice(0, 3))
 
   if (Object.keys(calcMap).length === 0) {
-    setPriceCalcResults([{ error: 'ไม่พบข้อมูลใน CSV กรุณาตรวจสอบไฟล์' }])
+    setPriceCalcResults([{ error: 'ไฟล์ไม่ถูกต้อง หรือ คอลัมน์ผิด' }])
     setStatus('ไม่พบข้อมูล')
     return
   }
@@ -551,6 +562,33 @@ async function handlePromaxxCheck(file: File) {
   setStatus(`คำนวณเสร็จ — เปลี่ยนแปลง ${changedCount} รายการ`)
 }
 
+function handleCsvToUtf8(file: File) {
+  const reader = new FileReader()
+  reader.onload = (e) => {
+    const buffer = e.target?.result as ArrayBuffer
+    if (!buffer) return
+    // ลอง decode ด้วย windows-874 (TIS-620) ก่อน
+    let text: string
+    try {
+      text = new TextDecoder('windows-874').decode(buffer)
+    } catch {
+      text = new TextDecoder('utf-8').decode(buffer)
+    }
+    // เพิ่ม BOM สำหรับ UTF-8
+    const utf8Bom = '\uFEFF'
+    const blob = new Blob([utf8Bom + text], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const baseName = file.name.replace(/\.csv$/i, '')
+    a.href = url
+    a.download = `${baseName}_utf8.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    setStatus(`แปลงไฟล์ "${file.name}" เป็น UTF-8 สำเร็จ ✅`)
+  }
+  reader.readAsArrayBuffer(file)
+}
+
 async function confirmUpdatePrices() {
   const toUpdate = priceCalcResults.filter(r => r.changed)
   if (toUpdate.length === 0) return
@@ -579,15 +617,13 @@ async function confirmUpdatePrices() {
 
     // Export Excel หลังอัพเดทสำเร็จ
     const XLSX = await import('xlsx')
-    const exportRows = toUpdate.map((r: any) => ({
-      '*ประเภทสินค้า': r._product?.['ประเภทสินค้า'] || '',
-      '*ชื่อสินค้า': r._product?.['*ชื่อสินค้า (NAME)'] || '',
-      '*เลขที่ใบอนุญาตโฆษณา': r._product?.['*เลขที่ใบอนุญาตโฆษณา'] || '',
-      '*ราคาสินค้า': r.newPrice,
-      'รหัสสินค้า': r.sku,
-      '*รูปภาพสินค้า': r._product?.['*รูปภาพสินค้า'] || '',
-      'หมวดหมู่รายการสินค้า': r._product?.['หมวดหมู่สินค้า (CATEGORIES)'] || ''
-    }))
+    const exportRows = toExportRows(
+      toUpdate.map((r: any) => ({
+        ...r._product,
+        '*ราคาสินค้า': r.newPrice,
+        'รหัสสินค้า (SKU NUMBER)': r.sku
+      }))
+    )
     const ws = XLSX.utils.json_to_sheet(exportRows)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'อัพเดทราคา')
@@ -637,10 +673,6 @@ async function confirmUpdatePrices() {
         onChange={e => { if (e.target.files?.[0]) handleGrabCheck(e.target.files[0]) }}
         />
         <input
-        type="file" accept=".csv" id="promaxxInput" style={{ display: 'none' }}
-        onChange={e => { if (e.target.files?.[0]) handlePromaxxCheck(e.target.files[0]) }}
-        />
-        <input
         type="file" accept=".csv" id="priceCalcInput" style={{ display: 'none' }}
         onChange={e => { if (e.target.files?.[0]) handlePriceCalcUpload(e.target.files[0]) }}
         />
@@ -648,12 +680,16 @@ async function confirmUpdatePrices() {
         type="file" accept=".xlsx,.xls" id="importInput" style={{ display: 'none' }}
         onChange={e => { if (e.target.files?.[0]) { handleImportXlsx(e.target.files[0]); e.target.value = '' } }}
         />
+        <input
+        type="file" accept=".csv" id="csvConvertInput" style={{ display: 'none' }}
+        onChange={e => { if (e.target.files?.[0]) { handleCsvToUtf8(e.target.files[0]); e.target.value = '' } }}
+        />
         <button onClick={() => loadProducts(selectedSheet)} style={btnStyle}>🔄 รีเฟรช</button>
         <button onClick={() => { setIsAdding(true); setEditProduct({ 'ประเภทสินค้า': '', '*ชื่อสินค้า (NAME)': '', '*เลขที่ใบอนุญาตโฆษณา': '', '*ราคาสินค้า': '', 'รหัสสินค้า (SKU NUMBER)': '', '*รูปภาพสินค้า': '', 'หมวดหมู่สินค้า (CATEGORIES)': '' }) }} style={btnStyle}>➕ เพิ่มรายการสินค้า</button>
         <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
+        <button onClick={() => document.getElementById('csvConvertInput')?.click()} style={btnStyle} title="แปลงไฟล์ CSV จาก POS (TIS-620) เป็น CSV UTF-8">🔄 แปลง CSV เป็น UTF-8</button>
         <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ R05.105 อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ตรวจสอบราคา Promaxx</button>
         <button onClick={() => document.getElementById('grabInput')?.click()} style={btnStyle} title="ไฟล์เมนูที่ download จาก GrabMart สำหรับตรวจสอบชื่อสินค้าและราคา">🛵 ตรวจสอบราคา GRAB</button>
-        <button onClick={() => document.getElementById('promaxxInput')?.click()} style={btnStyle} title="ไฟล์ R05.105 จาก Promaxx">🔍 ตรวจสอบราคา Promaxx</button>
       </div>
 
       {/* Main Layout */}
@@ -674,6 +710,41 @@ async function confirmUpdatePrices() {
           </div>
 
           <div style={{ padding: '6px 10px', background: '#e0e0e0', borderBottom: '1px solid #ccc', fontWeight: 700, fontSize: 13 }}>📁 หมวดหมู่</div>
+          <div style={{ padding: '8px 10px', borderBottom: '1px solid #ddd' }}>
+            <button
+              onClick={exportSelectedCategoryXlsx}
+              disabled={selectedSheet === 'all'}
+              style={{
+                ...btnStyle,
+                width: '100%',
+                padding: '7px 10px',
+                borderRadius: 6,
+                fontSize: 11,
+                opacity: selectedSheet === 'all' ? 0.5 : 1
+              }}
+            >
+              📥 Export หมวดหมู่ที่เลือก
+            </button>
+            <button
+              onClick={deleteSelectedCategoryInBranch}
+              disabled={selectedSheet === 'all' || selectedBranch === 'all'}
+              style={{
+                ...btnStyle,
+                width: '100%',
+                marginTop: 8,
+                padding: '7px 10px',
+                borderRadius: 6,
+                fontSize: 11,
+                background: '#f8d7da',
+                borderColor: '#dc3545',
+                color: '#721c24',
+                opacity: selectedSheet === 'all' || selectedBranch === 'all' ? 0.5 : 1
+              }}
+              title="ลบเฉพาะหมวดหมู่ในสาขาที่เลือก"
+            >
+              🗑️ ลบหมวดหมู่ของสาขานี้
+            </button>
+          </div>
           {stats.sheets.map(s => (
             <div
               key={s.name}
@@ -761,7 +832,7 @@ async function confirmUpdatePrices() {
 
       {/* Header */}
       <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <strong>{grabSource === 'Promaxx' ? '🔍 ผลตรวจสอบราคา Promaxx' : '🛵 ผลตรวจสอบราคา GRAB'}</strong>
+        <strong>🛵 ผลตรวจสอบราคา GRAB</strong>
         <button onClick={() => setShowGrabModal(false)}
           style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
       </div>
@@ -864,7 +935,7 @@ async function confirmUpdatePrices() {
           <span style={{ color: '#28a745' }}>เปลี่ยนแปลง: <strong>{priceCalcResults.filter(r => r.changed).length}</strong></span>
           <span style={{ color: '#000' }}>ราคาเดิม: <strong>{priceCalcResults.filter(r => !r.changed).length}</strong></span>
           <div style={{ marginLeft: 'auto', fontSize: 11, color: '#000' }}>
-            สูตร: ระดับ0 × 0.95 × 1.20 × 1.07
+            สูตร Grab = ราคาระดับ 0 ใหม่ × 0.95 × 1.20 × 1.07
           </div>
         </div>
       )}
@@ -882,9 +953,9 @@ async function confirmUpdatePrices() {
                 <th style={th}>#</th>
                 <th style={th}>SKU</th>
                 <th style={th}>ชื่อสินค้า</th>
-                <th style={th}>ราคาระดับ 0</th>
-                <th style={th}>ราคาเดิม</th>
-                <th style={th}>ราคาใหม่ (D)</th>
+                <th style={th}>ราคาในระบบใหม่</th>
+                <th style={th}>ราคาขาย Grab ปัจจุบัน</th>
+                <th style={th}>ราคาขาย Grab ใหม่</th>
                 <th style={th}>สถานะ</th>
               </tr>
             </thead>
@@ -922,15 +993,13 @@ async function confirmUpdatePrices() {
             const dd = String(now.getDate()).padStart(2, '0')
             const mm = String(now.getMonth() + 1).padStart(2, '0')
             const yyyy = now.getFullYear()
-            const exportRows = toExport.map((r: any) => ({
-              '*ประเภทสินค้า': r._product?.['ประเภทสินค้า'] || '',
-              '*ชื่อสินค้า': r._product?.['*ชื่อสินค้า (NAME)'] || '',
-              '*เลขที่ใบอนุญาตโฆษณา': r._product?.['*เลขที่ใบอนุญาตโฆษณา'] || '',
-              '*ราคาสินค้า': r.newPrice,
-              'รหัสสินค้า': r.sku,
-              '*รูปภาพสินค้า': r._product?.['*รูปภาพสินค้า'] || '',
-              'หมวดหมู่รายการสินค้า': r._product?.['หมวดหมู่สินค้า (CATEGORIES)'] || ''
-            }))
+            const exportRows = toExportRows(
+              toExport.map((r: any) => ({
+                ...r._product,
+                '*ราคาสินค้า': r.newPrice,
+                'รหัสสินค้า (SKU NUMBER)': r.sku
+              }))
+            )
             const ws = XLSX.utils.json_to_sheet(exportRows)
             const wb = XLSX.utils.book_new()
             XLSX.utils.book_append_sheet(wb, ws, 'อัพเดทราคา')

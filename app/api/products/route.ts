@@ -97,3 +97,26 @@ export async function PATCH(req: NextRequest) {
   return NextResponse.json({ success: true })
 }
 
+export async function DELETE(req: NextRequest) {
+  const body = await req.json()
+  const sheet = body?.sheet
+  const branch = body?.branch
+
+  if (!sheet || !branch || branch === 'all') {
+    return NextResponse.json({
+      success: false,
+      error: 'กรุณาระบุสาขาและหมวดหมู่ที่ต้องการลบให้ถูกต้อง'
+    })
+  }
+
+  const { data, error } = await supabase
+    .from('products')
+    .delete()
+    .eq('"หมวดหมู่สินค้า (CATEGORIES)"', sheet)
+    .eq('branch', branch)
+    .select('"รหัสสินค้า (SKU NUMBER)"')
+
+  if (error) return NextResponse.json({ success: false, error: error.message })
+  return NextResponse.json({ success: true, deleted: data?.length || 0 })
+}
+
