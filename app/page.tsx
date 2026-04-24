@@ -332,6 +332,12 @@ async function handleGrabCheck(file: File) {
   }
 
   async function handleImportXlsx(file: File) {
+    const importBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
+    if (!importBranch || importBranch === 'all') {
+      setStatus('กรุณาเลือกสาขาก่อน Import Excel')
+      return
+    }
+
     const XLSX = await import('xlsx')
     const buffer = await file.arrayBuffer()
     const wb = XLSX.read(buffer, { type: 'array' })
