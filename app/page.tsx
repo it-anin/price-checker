@@ -39,6 +39,7 @@ export default function Home() {
   const [importSheets, setImportSheets] = useState<{ name: string; rows: any[] }[]>([])
   const [importingData, setImportingData] = useState(false)
   const [importLog, setImportLog] = useState('')
+  const [importError, setImportError] = useState('')
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
   const [selectedBranch, setSelectedBranch] = useState<string>(() =>
     typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
@@ -316,13 +317,34 @@ async function handleGrabCheck(file: File) {
     '*ราคาสินค้า', 'รหัสสินค้า (SKU NUMBER)', '*รูปภาพสินค้า', 'หมวดหมู่สินค้า (CATEGORIES)'
   ]
 
+  const IMPORT_HEADER_ALIASES = [
+    ['*ประเภทสินค้า', 'ประเภทสินค้า'],
+    ['*ชื่อสินค้า', '*ชื่อสินค้า (NAME)'],
+    ['*เลขที่ใบอนุญาตโฆษณา'],
+    ['*ราคาสินค้า'],
+    ['รหัสสินค้า', 'รหัสสินค้า (SKU NUMBER)'],
+    ['*รูปภาพสินค้า'],
+    ['หมวดหมู่รายการสินค้า', 'หมวดหมู่สินค้า (CATEGORIES)']
+  ]
+
+  function normalizeImportHeader(value: any) {
+    return String(value ?? '').replace(/\s+/g, ' ').trim()
+  }
+
   async function handleImportXlsx(file: File) {
     const XLSX = await import('xlsx')
     const buffer = await file.arrayBuffer()
     const wb = XLSX.read(buffer, { type: 'array' })
+    const invalidSheets: string[] = []
     const sheets = wb.SheetNames.map(name => {
       const ws = wb.Sheets[name]
       const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+      const header = (raw[0] || []).slice(0, IMPORT_HEADER_ALIASES.length).map(normalizeImportHeader)
+      const hasInvalidHeader = IMPORT_HEADER_ALIASES.some((aliases, index) => {
+        const current = header[index]
+        return !current || !aliases.includes(current)
+      })
+      if (hasInvalidHeader) invalidSheets.push(name)
       const rows = raw.slice(1)
         .filter(row => row.some((c: any) => String(c).trim() !== ''))
         .map(row => {
@@ -335,12 +357,27 @@ async function handleGrabCheck(file: File) {
         })
       return { name, rows }
     })
+
+    const hasRows = sheets.some(sheet => sheet.rows.length > 0)
+    const errorMessage = invalidSheets.length > 0
+      ? `ไฟล์นี้คอลัมน์ไม่ตรงกับรูปแบบที่ระบบรองรับในชีท: ${invalidSheets.join(', ')}`
+      : !hasRows
+        ? 'ไม่พบข้อมูลที่นำเข้าได้ในไฟล์นี้'
+        : ''
+
     setImportSheets(sheets)
     setImportLog('')
+    setImportError(errorMessage)
+    setStatus(errorMessage || `พร้อม Import ${sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0)} รายการ`)
     setShowImportModal(true)
   }
 
   async function confirmImport() {
+    if (importError) {
+      setImportLog(`❌ ${importError}`)
+      return
+    }
+
     const importBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
     const allRows = importSheets.flatMap(s => s.rows).map(row =>
       importBranch && importBranch !== 'all' ? { ...row, branch: importBranch } : row
@@ -366,7 +403,9 @@ async function handleGrabCheck(file: File) {
       success += chunk.length
     }
     setImportLog(`✅ Import สำเร็จ ${success} รายการ`)
-    loadStats()
+    await loadStats()
+    await loadProducts('all')
+    setSelectedSheet('all')
     setImportingData(false)
   }
 
@@ -486,7 +525,7 @@ async function handleGrabCheck(file: File) {
       return
     }
 
-    const branchName = branches.find(b => b.id === selectedBranch)?.name ?? selectedBranch
+    const branchName = branches.find(b => b.name === selectedBranch)?.name ?? selectedBranch
     const ok = window.confirm(
       `ยืนยันลบหมวดหมู่ทั้งหมดของสาขา "${branchName}"?\nการลบนี้จะลบสินค้าทุกรายการในสาขานี้ และไม่สามารถย้อนกลับได้`
     )
@@ -1082,6 +1121,11 @@ async function confirmUpdatePrices() {
               พบ <strong>{importSheets.length}</strong> ชีท | รวม <strong>{importSheets.reduce((s, sh) => s + sh.rows.length, 0)}</strong> รายการ
             </div>
             <div style={{ overflowY: 'auto', flex: 1, padding: 16 }}>
+              {selectedBranch !== 'all' && (
+                <div style={{ marginBottom: 12, padding: '10px 12px', background: '#fff3cd', border: '1px solid #ffe08a', borderRadius: 6, fontSize: 12, color: '#7a5d00' }}>
+                  หาก import ไฟล์ผิดคอลัมน์มาก่อน สามารถลบข้อมูลของสาขา <strong>{selectedBranch}</strong> แล้วค่อย import ใหม่ได้
+                </div>
+              )}
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: '#f5f5f5' }}>
@@ -1100,6 +1144,11 @@ async function confirmUpdatePrices() {
                   ))}
                 </tbody>
               </table>
+              {importError && (
+                <div style={{ marginTop: 12, padding: '8px 12px', background: '#f8d7da', borderRadius: 4, fontSize: 13, color: '#721c24' }}>
+                  ❌ {importError}
+                </div>
+              )}
               {importLog && (
                 <div style={{ marginTop: 12, padding: '8px 12px', background: importLog.startsWith('✅') ? '#d4edda' : importLog.startsWith('❌') ? '#f8d7da' : '#fff3cd', borderRadius: 4, fontSize: 13 }}>
                   {importLog}
@@ -1107,10 +1156,19 @@ async function confirmUpdatePrices() {
               )}
             </div>
             <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              {selectedBranch !== 'all' && (
+                <button
+                  onClick={deleteAllCategoriesInBranch}
+                  disabled={importingData}
+                  style={{ ...btnStyle, background: '#f8d7da', color: '#721c24', borderColor: '#dc3545', opacity: importingData ? 0.6 : 1 }}
+                >
+                  🗑️ ลบข้อมูลสาขานี้ก่อน
+                </button>
+              )}
               <button onClick={() => setShowImportModal(false)} style={btnStyle}>ปิด</button>
               <button
                 onClick={confirmImport}
-                disabled={importingData || importSheets.reduce((s, sh) => s + sh.rows.length, 0) === 0}
+                disabled={importingData || !!importError || importSheets.reduce((s, sh) => s + sh.rows.length, 0) === 0}
                 style={{ ...btnStyle, background: '#4a8bc4', color: '#fff', borderColor: '#3d7ab3', opacity: importingData ? 0.6 : 1 }}
               >
                 {importingData ? '⏳ กำลัง Import...' : `📥 Import ทั้งหมด (${importSheets.reduce((s, sh) => s + sh.rows.length, 0)} รายการ)`}
