@@ -7,7 +7,7 @@ export async function GET(req: NextRequest) {
 
   let q = supabase.from('products').select('*, sku_reference!inner(ref_price)')
   if (branch && branch !== 'all') {
-    q = q.or(`branch.eq.${branch},branch.is.null`)
+    q = q.eq('branch', branch)
   }
 
   const { data, error } = await q
