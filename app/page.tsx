@@ -454,17 +454,14 @@ async function handleGrabCheck(file: File) {
       setStatus('กรุณาเลือกหมวดหมู่ก่อนลบ')
       return
     }
-    if (selectedBranch === 'all') {
-      setStatus('กรุณาเลือกสาขาก่อนลบหมวดหมู่')
-      return
-    }
 
+    const scopeLabel = selectedBranch === 'all' ? 'ทุกสาขา' : `สาขา "${selectedBranch}"`
     const ok = window.confirm(
-      `ยืนยันลบหมวดหมู่ "${selectedSheet}" ของสาขา "${selectedBranch}"?\nการลบนี้ไม่สามารถย้อนกลับได้`
+      `ยืนยันลบหมวดหมู่ "${selectedSheet}" ของ${scopeLabel}?\nการลบนี้ไม่สามารถย้อนกลับได้`
     )
     if (!ok) return
 
-    setStatus(`กำลังลบหมวดหมู่ ${selectedSheet} ของสาขา ${selectedBranch}...`)
+    setStatus(`กำลังลบหมวดหมู่ ${selectedSheet} ของ${scopeLabel}...`)
     const res = await fetch('/api/products', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
@@ -480,7 +477,7 @@ async function handleGrabCheck(file: File) {
     setSelectedSheet('all')
     await loadStats()
     await loadProducts('all')
-    setStatus(`ลบหมวดหมู่ ${selectedSheet} ของสาขา ${selectedBranch} สำเร็จ (${data.deleted || 0} รายการ)`)
+    setStatus(`ลบหมวดหมู่ ${selectedSheet} ของ${scopeLabel} สำเร็จ (${data.deleted || 0} รายการ)`)
   }
 
   async function deleteAllCategoriesInBranch() {
@@ -758,7 +755,7 @@ async function confirmUpdatePrices() {
             </button>
             <button
               onClick={deleteSelectedCategoryInBranch}
-              disabled={selectedSheet === 'all' || selectedBranch === 'all'}
+              disabled={selectedSheet === 'all'}
               style={{
                 ...btnStyle,
                 width: '100%',
@@ -769,11 +766,11 @@ async function confirmUpdatePrices() {
                 background: '#f8d7da',
                 borderColor: '#dc3545',
                 color: '#721c24',
-                opacity: selectedSheet === 'all' || selectedBranch === 'all' ? 0.5 : 1
+                opacity: selectedSheet === 'all' ? 0.5 : 1
               }}
-              title="ลบเฉพาะหมวดหมู่ในสาขาที่เลือก"
+              title={selectedBranch === 'all' ? 'ลบหมวดหมู่นี้ออกจากทุกสาขา' : 'ลบเฉพาะหมวดหมู่ในสาขาที่เลือก'}
             >
-              🗑️ ลบหมวดหมู่ของสาขานี้
+              🗑️ {selectedBranch === 'all' ? 'ลบหมวดหมู่นี้ทุกสาขา' : 'ลบหมวดหมู่ของสาขานี้'}
             </button>
             <button
               onClick={deleteAllCategoriesInBranch}

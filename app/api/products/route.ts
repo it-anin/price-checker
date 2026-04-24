@@ -103,14 +103,12 @@ export async function DELETE(req: NextRequest) {
   const branch = body?.branch
   const deleteAll = body?.deleteAll
 
-  if (!branch || branch === 'all') {
-    return NextResponse.json({
-      success: false,
-      error: 'กรุณาระบุสาขาที่ต้องการลบให้ถูกต้อง'
-    })
-  }
-
+  // deleteAll requires a specific branch (not 'all')
   if (deleteAll) {
+    if (!branch || branch === 'all') {
+      return NextResponse.json({ success: false, error: 'กรุณาระบุสาขาที่ต้องการลบให้ถูกต้อง' })
+    }
+
     const { data, error } = await supabase
       .from('products')
       .delete()
@@ -121,19 +119,21 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, deleted: data?.length || 0 })
   }
 
+  // delete by category — branch='all' means delete across all branches
   if (!sheet) {
-    return NextResponse.json({
-      success: false,
-      error: 'กรุณาระบุหมวดหมู่ที่ต้องการลบ'
-    })
+    return NextResponse.json({ success: false, error: 'กรุณาระบุหมวดหมู่ที่ต้องการลบ' })
   }
 
-  const { data, error } = await supabase
+  let q = supabase
     .from('products')
     .delete()
     .eq('"หมวดหมู่สินค้า (CATEGORIES)"', sheet)
-    .or(`branch.eq.${branch},branch.is.null`)
-    .select('"รหัสสินค้า (SKU NUMBER)"')
+
+  if (branch && branch !== 'all') {
+    q = q.or(`branch.eq.${branch},branch.is.null`)
+  }
+
+  const { data, error } = await q.select('"รหัสสินค้า (SKU NUMBER)"')
 
   if (error) return NextResponse.json({ success: false, error: error.message })
   return NextResponse.json({ success: true, deleted: data?.length || 0 })
