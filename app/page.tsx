@@ -317,18 +317,30 @@ async function handleGrabCheck(file: File) {
     '*ราคาสินค้า', 'รหัสสินค้า (SKU NUMBER)', '*รูปภาพสินค้า', 'หมวดหมู่สินค้า (CATEGORIES)'
   ]
 
-  const IMPORT_HEADER_ALIASES = [
-    ['*ประเภทสินค้า', 'ประเภทสินค้า'],
-    ['*ชื่อสินค้า', '*ชื่อสินค้า (NAME)'],
-    ['*เลขที่ใบอนุญาตโฆษณา'],
-    ['*ราคาสินค้า'],
-    ['รหัสสินค้า', 'รหัสสินค้า (SKU NUMBER)'],
-    ['*รูปภาพสินค้า'],
-    ['หมวดหมู่รายการสินค้า', 'หมวดหมู่สินค้า (CATEGORIES)']
+  const IMPORT_HEADER_GROUPS: Array<{ target: string; aliases: string[] }> = [
+    { target: 'ประเภทสินค้า', aliases: ['*ประเภทสินค้า', 'ประเภทสินค้า'] },
+    { target: '*ชื่อสินค้า (NAME)', aliases: ['*ชื่อสินค้า', '*ชื่อสินค้า (NAME)'] },
+    { target: '*เลขที่ใบอนุญาตโฆษณา', aliases: ['*เลขที่ใบอนุญาตโฆษณา'] },
+    { target: '*ราคาสินค้า', aliases: ['*ราคาสินค้า'] },
+    { target: 'รหัสสินค้า (SKU NUMBER)', aliases: ['รหัสสินค้า', 'รหัสสินค้า (SKU NUMBER)'] },
+    { target: '*รูปภาพสินค้า', aliases: ['*รูปภาพสินค้า'] },
+    { target: 'หมวดหมู่สินค้า (CATEGORIES)', aliases: ['หมวดหมู่รายการสินค้า', 'หมวดหมู่สินค้า (CATEGORIES)'] }
   ]
 
   function normalizeImportHeader(value: any) {
     return String(value ?? '').replace(/\s+/g, ' ').trim()
+  }
+
+  function getImportColumnMap(headerRow: any[]) {
+    const normalizedHeader = (headerRow || []).map(normalizeImportHeader)
+    const columnMap: Record<string, number> = {}
+
+    IMPORT_HEADER_GROUPS.forEach(({ target, aliases }) => {
+      const index = normalizedHeader.findIndex(col => aliases.includes(col))
+      if (index >= 0) columnMap[target] = index
+    })
+
+    return columnMap
   }
 
   async function handleImportXlsx(file: File) {
@@ -345,18 +357,16 @@ async function handleGrabCheck(file: File) {
     const sheets = wb.SheetNames.map(name => {
       const ws = wb.Sheets[name]
       const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
-      const header = (raw[0] || []).slice(0, IMPORT_HEADER_ALIASES.length).map(normalizeImportHeader)
-      const hasInvalidHeader = IMPORT_HEADER_ALIASES.some((aliases, index) => {
-        const current = header[index]
-        return !current || !aliases.includes(current)
-      })
+      const columnMap = getImportColumnMap(raw[0] || [])
+      const hasInvalidHeader = IMPORT_FIELDS.some(field => columnMap[field] === undefined)
       if (hasInvalidHeader) invalidSheets.push(name)
       const rows = raw.slice(1)
         .filter(row => row.some((c: any) => String(c).trim() !== ''))
         .map(row => {
           const obj: any = {}
-          IMPORT_FIELDS.forEach((field, i) => {
-            const val = row[i] !== undefined ? String(row[i]).trim() : ''
+          IMPORT_FIELDS.forEach(field => {
+            const columnIndex = columnMap[field]
+            const val = columnIndex !== undefined && row[columnIndex] !== undefined ? String(row[columnIndex]).trim() : ''
             obj[field] = field === '*ราคาสินค้า' ? (parseFloat(val) || null) : val
           })
           return obj
