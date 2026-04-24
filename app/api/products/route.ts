@@ -114,7 +114,7 @@ export async function DELETE(req: NextRequest) {
     const { data, error } = await supabase
       .from('products')
       .delete()
-      .eq('branch', branch)
+      .or(`branch.eq.${branch},branch.is.null`)
       .select('"รหัสสินค้า (SKU NUMBER)"')
 
     if (error) return NextResponse.json({ success: false, error: error.message })
@@ -132,7 +132,7 @@ export async function DELETE(req: NextRequest) {
     .from('products')
     .delete()
     .eq('"หมวดหมู่สินค้า (CATEGORIES)"', sheet)
-    .eq('branch', branch)
+    .or(`branch.eq.${branch},branch.is.null`)
     .select('"รหัสสินค้า (SKU NUMBER)"')
 
   if (error) return NextResponse.json({ success: false, error: error.message })
