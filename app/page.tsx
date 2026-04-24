@@ -483,6 +483,37 @@ async function handleGrabCheck(file: File) {
     setStatus(`ลบหมวดหมู่ ${selectedSheet} ของสาขา ${selectedBranch} สำเร็จ (${data.deleted || 0} รายการ)`)
   }
 
+  async function deleteAllCategoriesInBranch() {
+    if (selectedBranch === 'all') {
+      setStatus('กรุณาเลือกสาขาก่อนลบหมวดหมู่ทั้งหมด')
+      return
+    }
+
+    const branchName = branches.find(b => b.id === selectedBranch)?.name ?? selectedBranch
+    const ok = window.confirm(
+      `ยืนยันลบหมวดหมู่ทั้งหมดของสาขา "${branchName}"?\nการลบนี้จะลบสินค้าทุกรายการในสาขานี้ และไม่สามารถย้อนกลับได้`
+    )
+    if (!ok) return
+
+    setStatus(`กำลังลบหมวดหมู่ทั้งหมดของสาขา ${branchName}...`)
+    const res = await fetch('/api/products', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch: selectedBranch, deleteAll: true })
+    })
+    const data = await res.json()
+
+    if (!data.success) {
+      setStatus('เกิดข้อผิดพลาด: ' + data.error)
+      return
+    }
+
+    setSelectedSheet('all')
+    await loadStats()
+    await loadProducts('all')
+    setStatus(`ลบหมวดหมู่ทั้งหมดของสาขา ${branchName} สำเร็จ (${data.deleted || 0} รายการ)`)
+  }
+
     async function handlePriceCalcUpload(file: File) {
   setStatus('กำลังคำนวณราคา...')
   setShowPriceCalcModal(true)
@@ -743,6 +774,25 @@ async function confirmUpdatePrices() {
               title="ลบเฉพาะหมวดหมู่ในสาขาที่เลือก"
             >
               🗑️ ลบหมวดหมู่ของสาขานี้
+            </button>
+            <button
+              onClick={deleteAllCategoriesInBranch}
+              disabled={selectedBranch === 'all'}
+              style={{
+                ...btnStyle,
+                width: '100%',
+                marginTop: 8,
+                padding: '7px 10px',
+                borderRadius: 6,
+                fontSize: 11,
+                background: '#dc3545',
+                borderColor: '#a71d2a',
+                color: '#fff',
+                opacity: selectedBranch === 'all' ? 0.5 : 1
+              }}
+              title="ลบหมวดหมู่ทั้งหมดในสาขาที่เลือก"
+            >
+              ⚠️ ลบหมวดหมู่ทั้งหมดของสาขา
             </button>
           </div>
           {stats.sheets.map(s => (
