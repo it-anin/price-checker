@@ -343,6 +343,20 @@ async function handleGrabCheck(file: File) {
     return columnMap
   }
 
+  function findImportHeader(rawRows: any[][]) {
+    const searchRows = rawRows.slice(0, 10)
+
+    for (let rowIndex = 0; rowIndex < searchRows.length; rowIndex++) {
+      const columnMap = getImportColumnMap(searchRows[rowIndex] || [])
+      const hasRequiredHeaders = IMPORT_FIELDS.every(field => columnMap[field] !== undefined)
+      if (hasRequiredHeaders) {
+        return { headerRowIndex: rowIndex, columnMap }
+      }
+    }
+
+    return { headerRowIndex: -1, columnMap: {} as Record<string, number> }
+  }
+
   async function handleImportXlsx(file: File) {
     const importBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
     if (!importBranch || importBranch === 'all') {
@@ -357,10 +371,10 @@ async function handleGrabCheck(file: File) {
     const sheets = wb.SheetNames.map(name => {
       const ws = wb.Sheets[name]
       const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
-      const columnMap = getImportColumnMap(raw[0] || [])
-      const hasInvalidHeader = IMPORT_FIELDS.some(field => columnMap[field] === undefined)
+      const { headerRowIndex, columnMap } = findImportHeader(raw)
+      const hasInvalidHeader = headerRowIndex < 0
       if (hasInvalidHeader) invalidSheets.push(name)
-      const rows = raw.slice(1)
+      const rows = raw.slice(headerRowIndex + 1)
         .filter(row => row.some((c: any) => String(c).trim() !== ''))
         .map(row => {
           const obj: any = {}
