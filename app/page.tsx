@@ -236,7 +236,7 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
 
   if (!syncData.success) {
     setStatus('เกิดข้อผิดพลาดในการอัปเดตสถานะสาขา')
-    setGrabResults([{ error: 'อัปเดตสถานะสาขาไม่สำเร็จ กรุณาลองใหม่อีกครั้ง' }])
+    setGrabResults([{ error: `อัปเดตสถานะสาขาไม่สำเร็จ: ${syncData.error ?? 'unknown error'}` }])
     return
   }
 

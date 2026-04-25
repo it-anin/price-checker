@@ -63,31 +63,46 @@ export async function POST(req: NextRequest) {
 
     const skuSet: string[] = Array.from(new Set(body.skus.map((sku: any) => String(sku ?? '').trim()).filter(Boolean)))
     const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
+    const CHUNK = 200
 
-    const { data: targetRows, error: targetError } = await supabase
-      .from('products')
-      .select('*')
-      .eq('branch', availabilityBranch)
+    // ดึง targetRows แบบ paginate ไม่มี limit ตัด
+    const targetRows: any[] = []
+    let tFrom = 0
+    while (true) {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('branch', availabilityBranch)
+        .range(tFrom, tFrom + 999)
+      if (error) return NextResponse.json({ success: false, error: `targetRows: ${error.message}` })
+      targetRows.push(...(data || []))
+      if (!data || data.length < 1000) break
+      tFrom += 1000
+    }
 
-    if (targetError) return NextResponse.json({ success: false, error: targetError.message })
+    // ดึง sourceRows แบบ chunk ป้องกัน URL limit
+    const sourceRows: any[] = []
+    for (let i = 0; i < skuSet.length; i += CHUNK) {
+      const chunk = skuSet.slice(i, i + CHUNK)
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .in(skuColumn, chunk)
+      if (error) return NextResponse.json({ success: false, error: `sourceRows: ${error.message}` })
+      sourceRows.push(...(data || []))
+    }
 
-    const { data: sourceRows, error: sourceError } = await supabase
-      .from('products')
-      .select('*')
-      .in(skuColumn, skuSet)
-
-    if (sourceError) return NextResponse.json({ success: false, error: sourceError.message })
-
-    const existingTargetSkus = new Set((targetRows || []).map((row: any) => row['รหัสสินค้า (SKU NUMBER)']).filter(Boolean))
+    const existingTargetSkus = new Set(targetRows.map((row: any) => row['รหัสสินค้า (SKU NUMBER)']).filter(Boolean))
     const sourceBySku = new Map<string, any>()
-    for (const row of sourceRows || []) {
+    for (const row of sourceRows) {
       const sku = row['รหัสสินค้า (SKU NUMBER)']
       if (sku && !sourceBySku.has(sku)) sourceBySku.set(sku, row)
     }
 
-    const toDelete = (targetRows || [])
+    const skuSetSet = new Set(skuSet)
+    const toDelete = targetRows
       .map((row: any) => row['รหัสสินค้า (SKU NUMBER)'])
-      .filter((sku: string) => sku && !skuSet.includes(sku))
+      .filter((sku: string) => sku && !skuSetSet.has(sku))
 
     const toInsert = skuSet
       .filter((sku: string) => !existingTargetSkus.has(sku))
@@ -101,20 +116,24 @@ export async function POST(req: NextRequest) {
 
     const missingBase = skuSet.filter((sku: string) => !sourceBySku.has(sku))
 
-    if (toDelete.length > 0) {
+    // ลบแบบ chunk
+    for (let i = 0; i < toDelete.length; i += CHUNK) {
+      const chunk = toDelete.slice(i, i + CHUNK)
       const { error: deleteError } = await supabase
         .from('products')
         .delete()
         .eq('branch', availabilityBranch)
-        .in(skuColumn, toDelete)
-      if (deleteError) return NextResponse.json({ success: false, error: deleteError.message })
+        .in(skuColumn, chunk)
+      if (deleteError) return NextResponse.json({ success: false, error: `delete: ${deleteError.message}` })
     }
 
-    if (toInsert.length > 0) {
+    // insert แบบ chunk
+    for (let i = 0; i < toInsert.length; i += CHUNK) {
+      const chunk = toInsert.slice(i, i + CHUNK)
       const { error: insertError } = await supabase
         .from('products')
-        .insert(toInsert)
-      if (insertError) return NextResponse.json({ success: false, error: insertError.message })
+        .insert(chunk)
+      if (insertError) return NextResponse.json({ success: false, error: `insert: ${insertError.message}` })
     }
 
     return NextResponse.json({
