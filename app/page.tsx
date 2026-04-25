@@ -30,7 +30,6 @@ export default function Home() {
   const [showGrabModal, setShowGrabModal] = useState(false)
   const [grabMismatchProducts, setGrabMismatchProducts] = useState<Product[]>([])
   const [grabSource, setGrabSource] = useState<'GRAB'>('GRAB')
-  const [grabTargetBranch, setGrabTargetBranch] = useState<'src' | 'kkl' | 'sss'>('src')
   const [isAdding, setIsAdding] = useState(false)
   const [showPriceCalcModal, setShowPriceCalcModal] = useState(false)
   const [priceCalcResults, setPriceCalcResults] = useState<any[]>([])
@@ -199,13 +198,10 @@ function renderBranchFlag(value: any) {
   return value ? '✓' : '-'
 }
 
-function getBranchLabel(branch: 'src' | 'kkl' | 'sss') {
-  return branch.toUpperCase()
-}
 
-async function handleGrabCheck(file: File) {
+async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
   setGrabSource('GRAB')
-  setStatus('กำลังตรวจสอบราคา GRAB...')
+  setStatus(`กำลังตรวจสอบราคา GRAB ${branch.toUpperCase()}...`)
   setShowGrabModal(true)
   setGrabResults([])
 
@@ -234,7 +230,7 @@ async function handleGrabCheck(file: File) {
   const syncRes = await fetch('/api/products', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ availabilityBranch: grabTargetBranch, skus })
+    body: JSON.stringify({ availabilityBranch: branch, skus })
   })
   const syncData = await syncRes.json()
 
@@ -285,7 +281,7 @@ async function handleGrabCheck(file: File) {
   setGrabResults(results)
   await loadProducts(selectedSheet)
   await loadStats()
-  setStatus(`Grab ${getBranchLabel(grabTargetBranch)}: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} | เพิ่มสถานะ ${syncData.inserted || 0} | ลบสถานะ ${syncData.deleted || 0}`)
+  setStatus(`Grab ${branch.toUpperCase()}: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} | เพิ่มสถานะ ${syncData.inserted || 0} | ลบสถานะ ${syncData.deleted || 0}`)
 }
 
   const IMPORT_FIELDS = [
@@ -683,10 +679,12 @@ async function confirmUpdatePrices() {
           onChange={e => { setSearch(e.target.value); searchProducts(e.target.value) }}
           style={{ padding: '6px 10px', border: '1px solid #999', borderRadius: 3, fontSize: 13, width: 220 }}
         />
-        <input
-        type="file" accept=".csv" id="grabInput" style={{ display: 'none' }}
-        onChange={e => { if (e.target.files?.[0]) handleGrabCheck(e.target.files[0]) }}
-        />
+        <input type="file" accept=".csv" id="grabInputSrc" style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'src'); e.target.value = '' } }} />
+        <input type="file" accept=".csv" id="grabInputKkl" style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'kkl'); e.target.value = '' } }} />
+        <input type="file" accept=".csv" id="grabInputSss" style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'sss'); e.target.value = '' } }} />
         <input
         type="file" accept=".csv" id="priceCalcInput" style={{ display: 'none' }}
         onChange={e => { if (e.target.files?.[0]) handlePriceCalcUpload(e.target.files[0]) }}
@@ -704,16 +702,9 @@ async function confirmUpdatePrices() {
         <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
         <button onClick={() => document.getElementById('csvConvertInput')?.click()} style={btnStyle} title="แปลงไฟล์ CSV จาก POS (TIS-620) เป็น CSV UTF-8">🔄 แปลง CSV เป็น UTF-8</button>
         <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ R05.105 อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ตรวจสอบราคา Promaxx</button>
-        <select
-          value={grabTargetBranch}
-          onChange={e => setGrabTargetBranch(e.target.value as 'src' | 'kkl' | 'sss')}
-          style={{ padding: '6px 10px', border: '1px solid #999', borderRadius: 6, fontSize: 12, background: '#fff' }}
-        >
-          <option value="src">SRC</option>
-          <option value="kkl">KKL</option>
-          <option value="sss">SSS</option>
-        </select>
-        <button onClick={() => document.getElementById('grabInput')?.click()} style={btnStyle} title="ไฟล์เมนูที่ download จาก GrabMart สำหรับตรวจสอบชื่อสินค้าและราคา">🛵 ตรวจสอบราคา GRAB</button>
+        <button onClick={() => document.getElementById('grabInputSrc')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SRC">🛵 GRAB SRC</button>
+        <button onClick={() => document.getElementById('grabInputKkl')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา KKL">🛵 GRAB KKL</button>
+        <button onClick={() => document.getElementById('grabInputSss')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SSS">🛵 GRAB SSS</button>
 
       {/* Main Layout */}
       </div>
