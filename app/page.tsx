@@ -40,6 +40,7 @@ export default function Home() {
   const [importingData, setImportingData] = useState(false)
   const [importLog, setImportLog] = useState('')
   const [importError, setImportError] = useState('')
+  const [selectedSkus, setSelectedSkus] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     loadStats()
@@ -61,6 +62,7 @@ export default function Home() {
     if (data.success) {
       setProducts(data.products)
       preloadImages(data.products)
+      setSelectedSkus(new Set())
       setStatus(`พร้อมใช้งาน (${data.products.length} รายการ)`)
     }
     setLoading(false)
@@ -479,6 +481,22 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     setStatus(`Export หมวดหมู่ ${selectedSheet} สำเร็จ (${allProducts.length} รายการ)`)
   }
 
+  async function exportSelectedSkusXlsx() {
+    if (selectedSkus.size === 0) return
+    const selected = products.filter(p => selectedSkus.has(p['รหัสสินค้า (SKU NUMBER)']))
+    const XLSX = await import('xlsx')
+    const rows = toExportRows(selected)
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'รายการที่เลือก')
+    const now = new Date()
+    const dd = String(now.getDate()).padStart(2, '0')
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const yyyy = now.getFullYear()
+    XLSX.writeFile(wb, `GM MME Selected ${dd}.${mm}.${yyyy}.xlsx`)
+    setStatus(`Export ${selected.length} รายการที่เลือกสำเร็จ ✅`)
+  }
+
   async function deleteSelectedCategory() {
     if (selectedSheet === 'all') {
       setStatus('กรุณาเลือกหมวดหมู่ก่อนลบ')
@@ -698,6 +716,14 @@ async function confirmUpdatePrices() {
         onChange={e => { if (e.target.files?.[0]) { handleCsvToUtf8(e.target.files[0]); e.target.value = '' } }}
         />
         <button onClick={() => loadProducts(selectedSheet)} style={btnStyle}>🔄 รีเฟรช</button>
+        {selectedSkus.size > 0 && (
+          <button
+            onClick={exportSelectedSkusXlsx}
+            style={{ ...btnStyle, background: '#d4edda', borderColor: '#28a745', color: '#155724' }}
+          >
+            📥 Export ที่เลือก ({selectedSkus.size})
+          </button>
+        )}
         <button onClick={() => { setIsAdding(true); setEditProduct({ 'ประเภทสินค้า': '', '*ชื่อสินค้า (NAME)': '', '*เลขที่ใบอนุญาตโฆษณา': '', '*ราคาสินค้า': '', 'รหัสสินค้า (SKU NUMBER)': '', '*รูปภาพสินค้า': '', 'หมวดหมู่สินค้า (CATEGORIES)': '' }) }} style={btnStyle}>➕ เพิ่มรายการสินค้า</button>
         <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
         <button onClick={() => document.getElementById('csvConvertInput')?.click()} style={btnStyle} title="แปลงไฟล์ CSV จาก POS (TIS-620) เป็น CSV UTF-8">🔄 แปลง CSV เป็น UTF-8</button>
@@ -786,6 +812,20 @@ async function confirmUpdatePrices() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ background: '#f5f5f5' }}>
+                  <th style={{ ...th, width: 32, textAlign: 'center' }}>
+                    <input
+                      type="checkbox"
+                      title="เลือกทั้งหมด"
+                      checked={products.length > 0 && products.every(p => selectedSkus.has(p['รหัสสินค้า (SKU NUMBER)']))}
+                      onChange={e => {
+                        if (e.target.checked) {
+                          setSelectedSkus(new Set(products.map(p => p['รหัสสินค้า (SKU NUMBER)'])))
+                        } else {
+                          setSelectedSkus(new Set())
+                        }
+                      }}
+                    />
+                  </th>
                   <th style={th}>#</th>
                   <th style={th}>หมวดหมู่</th>
                   <th style={th}>รหัสสินค้า</th>
@@ -799,10 +839,14 @@ async function confirmUpdatePrices() {
                 </tr>
               </thead>
               <tbody>
-                {products.map((p, i) => (
+                {products.map((p, i) => {
+                  const sku = p['รหัสสินค้า (SKU NUMBER)']
+                  const isChecked = selectedSkus.has(sku)
+                  return (
                   <tr key={i}
+                    style={{ background: isChecked ? '#e8f8e8' : 'transparent' }}
                     onMouseEnter={e => {
-                      e.currentTarget.style.background = '#e8f4fc'
+                      if (!isChecked) e.currentTarget.style.background = '#e8f4fc'
                       const imgUrl = convertDriveLink(p['*รูปภาพสินค้า'] || '')
                       setTooltip({ x: e.clientX, y: e.clientY, url: imgUrl })
                     }}
@@ -810,10 +854,23 @@ async function confirmUpdatePrices() {
                       setTooltip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)
                     }}
                     onMouseLeave={e => {
-                      e.currentTarget.style.background = 'transparent'
+                      e.currentTarget.style.background = isChecked ? '#e8f8e8' : 'transparent'
                       setTooltip(null)
                     }}
                   >
+                    <td style={{ ...td, textAlign: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={e => {
+                          setSelectedSkus(prev => {
+                            const next = new Set(prev)
+                            e.target.checked ? next.add(sku) : next.delete(sku)
+                            return next
+                          })
+                        }}
+                      />
+                    </td>
                     <td style={td}>{i + 1}</td>
                     <td style={td}>{p['หมวดหมู่สินค้า (CATEGORIES)'] || '-'}</td>
                     <td style={td}><strong>{p['รหัสสินค้า (SKU NUMBER)'] || '-'}</strong></td>
@@ -832,7 +889,8 @@ async function confirmUpdatePrices() {
                       </button>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           )}
