@@ -1,32 +1,134 @@
 import { supabase } from '../../../lib/supabase'
 import { NextResponse, NextRequest } from 'next/server'
 
+const BRANCH_KEYS = ['src', 'kkl', 'sss'] as const
+
+function normalizeBranchName(value: any) {
+  return String(value ?? '').trim().toLowerCase()
+}
+
+function aggregateProducts(rows: any[]) {
+  const grouped = new Map<string, any>()
+
+  for (const row of rows || []) {
+    const sku = row['รหัสสินค้า (SKU NUMBER)']
+    if (!sku) continue
+
+    if (!grouped.has(sku)) {
+      grouped.set(sku, {
+        ...row,
+        src: false,
+        kkl: false,
+        sss: false,
+        _branches: [] as string[]
+      })
+    }
+
+    const current = grouped.get(sku)
+    const normalizedBranch = normalizeBranchName(row.branch)
+    if (BRANCH_KEYS.includes(normalizedBranch as (typeof BRANCH_KEYS)[number])) {
+      current[normalizedBranch] = true
+      if (!current._branches.includes(normalizedBranch)) current._branches.push(normalizedBranch)
+    }
+  }
+
+  return Array.from(grouped.values())
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const sku = searchParams.get('sku')
   const sheet = searchParams.get('sheet')
   const skus = searchParams.get('skus')
-  const branch = searchParams.get('branch')
 
   let q = supabase.from('products').select('*')
 
   if (sku) q = q.ilike('"รหัสสินค้า (SKU NUMBER)"', `%${sku}%`)
   if (sheet) q = q.eq('"หมวดหมู่สินค้า (CATEGORIES)"', sheet)
   if (skus) q = q.in('"รหัสสินค้า (SKU NUMBER)"', skus.split(','))
-  if (branch && branch !== 'all') q = q.eq('branch', branch)
 
   const { data, error } = await q.limit(500)
   if (error) return NextResponse.json({ success: false, error: error.message })
-  return NextResponse.json({ success: true, products: data })
+  return NextResponse.json({ success: true, products: aggregateProducts(data || []) })
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
 
+  if (body?.availabilityBranch && Array.isArray(body.skus)) {
+    const availabilityBranch = normalizeBranchName(body.availabilityBranch)
+    if (!BRANCH_KEYS.includes(availabilityBranch as (typeof BRANCH_KEYS)[number])) {
+      return NextResponse.json({ success: false, error: 'Invalid branch' })
+    }
+
+    const skuSet: string[] = Array.from(new Set(body.skus.map((sku: any) => String(sku ?? '').trim()).filter(Boolean)))
+    const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
+
+    const { data: targetRows, error: targetError } = await supabase
+      .from('products')
+      .select('*')
+      .eq('branch', availabilityBranch)
+
+    if (targetError) return NextResponse.json({ success: false, error: targetError.message })
+
+    const { data: sourceRows, error: sourceError } = await supabase
+      .from('products')
+      .select('*')
+      .in(skuColumn, skuSet)
+
+    if (sourceError) return NextResponse.json({ success: false, error: sourceError.message })
+
+    const existingTargetSkus = new Set((targetRows || []).map((row: any) => row['รหัสสินค้า (SKU NUMBER)']).filter(Boolean))
+    const sourceBySku = new Map<string, any>()
+    for (const row of sourceRows || []) {
+      const sku = row['รหัสสินค้า (SKU NUMBER)']
+      if (sku && !sourceBySku.has(sku)) sourceBySku.set(sku, row)
+    }
+
+    const toDelete = (targetRows || [])
+      .map((row: any) => row['รหัสสินค้า (SKU NUMBER)'])
+      .filter((sku: string) => sku && !skuSet.includes(sku))
+
+    const toInsert = skuSet
+      .filter((sku: string) => !existingTargetSkus.has(sku))
+      .map((sku: string) => {
+        const base = sourceBySku.get(sku)
+        if (!base) return null
+        const { id, created_at, updated_at, ...clone } = base
+        return { ...clone, branch: availabilityBranch }
+      })
+      .filter(Boolean)
+
+    const missingBase = skuSet.filter((sku: string) => !sourceBySku.has(sku))
+
+    if (toDelete.length > 0) {
+      const { error: deleteError } = await supabase
+        .from('products')
+        .delete()
+        .eq('branch', availabilityBranch)
+        .in(skuColumn, toDelete)
+      if (deleteError) return NextResponse.json({ success: false, error: deleteError.message })
+    }
+
+    if (toInsert.length > 0) {
+      const { error: insertError } = await supabase
+        .from('products')
+        .insert(toInsert)
+      if (insertError) return NextResponse.json({ success: false, error: insertError.message })
+    }
+
+    return NextResponse.json({
+      success: true,
+      syncedBranch: availabilityBranch,
+      inserted: toInsert.length,
+      deleted: toDelete.length,
+      missingBase: missingBase.length
+    })
+  }
+
   // query by skus array (batch 300 per request to avoid Supabase limits)
   if (Array.isArray(body.skus)) {
     const chunkSize = 300
-    const branch = body.branch
     const all: any[] = []
     for (let i = 0; i < body.skus.length; i += chunkSize) {
       const chunk = body.skus.slice(i, i + chunkSize)
@@ -34,12 +136,11 @@ export async function POST(req: NextRequest) {
         .from('products')
         .select('*')
         .in('"รหัสสินค้า (SKU NUMBER)"', chunk)
-      if (branch && branch !== 'all') chunkQ = chunkQ.eq('branch', branch)
       const { data, error } = await chunkQ
       if (error) return NextResponse.json({ success: false, error: error.message })
       all.push(...(data || []))
     }
-    return NextResponse.json({ success: true, products: all })
+    return NextResponse.json({ success: true, products: aggregateProducts(all) })
   }
 
   // insert single product

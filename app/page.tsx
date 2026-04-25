@@ -30,6 +30,7 @@ export default function Home() {
   const [showGrabModal, setShowGrabModal] = useState(false)
   const [grabMismatchProducts, setGrabMismatchProducts] = useState<Product[]>([])
   const [grabSource, setGrabSource] = useState<'GRAB'>('GRAB')
+  const [grabTargetBranch, setGrabTargetBranch] = useState<'src' | 'kkl' | 'sss'>('src')
   const [isAdding, setIsAdding] = useState(false)
   const [showPriceCalcModal, setShowPriceCalcModal] = useState(false)
   const [priceCalcResults, setPriceCalcResults] = useState<any[]>([])
@@ -40,56 +41,14 @@ export default function Home() {
   const [importingData, setImportingData] = useState(false)
   const [importLog, setImportLog] = useState('')
   const [importError, setImportError] = useState('')
-  const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
-  const [selectedBranch, setSelectedBranch] = useState<string>(() =>
-    typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-  )
-  const [showAddBranchModal, setShowAddBranchModal] = useState(false)
-  const [newBranchName, setNewBranchName] = useState('')
-  const [addingBranch, setAddingBranch] = useState(false)
 
   useEffect(() => {
-    loadBranches()
-    loadStats()
-  }, [])
-
-  useEffect(() => {
-    localStorage.setItem('selectedBranch', selectedBranch)
     loadStats()
     loadProducts('all')
-    setSelectedSheet('all')
-  }, [selectedBranch])
-
-  async function loadBranches() {
-    const res = await fetch('/api/branches')
-    const data = await res.json()
-    if (data.success) setBranches(data.branches)
-  }
-
-  async function addBranch() {
-    if (!newBranchName.trim()) return
-    setAddingBranch(true)
-    const res = await fetch('/api/branches', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newBranchName.trim() })
-    })
-    const data = await res.json()
-    if (data.success) {
-      setBranches(prev => [...prev, data.branch])
-      setNewBranchName('')
-      setShowAddBranchModal(false)
-      setStatus(`เพิ่มสาขา "${data.branch.name}" สำเร็จ`)
-    } else {
-      setStatus('เกิดข้อผิดพลาด: ' + data.error)
-    }
-    setAddingBranch(false)
-  }
+  }, [])
 
   async function loadStats() {
-    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-    const url = branch && branch !== 'all' ? `/api/stats?branch=${encodeURIComponent(branch)}` : '/api/stats'
-    const res = await fetch(url)
+    const res = await fetch('/api/stats')
     const data = await res.json()
     if (data.success) setStats(data)
   }
@@ -97,9 +56,7 @@ export default function Home() {
   async function loadProducts(sheet = 'all') {
     setLoading(true)
     setStatus('กำลังโหลด...')
-    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-    const branchParam = branch && branch !== 'all' ? `&branch=${encodeURIComponent(branch)}` : ''
-    const url = sheet === 'all' ? `/api/products?${branchParam}` : `/api/products?sheet=${encodeURIComponent(sheet)}${branchParam}`
+    const url = sheet === 'all' ? '/api/products' : `/api/products?sheet=${encodeURIComponent(sheet)}`
     const res = await fetch(url)
     const data = await res.json()
     if (data.success) {
@@ -113,9 +70,7 @@ export default function Home() {
   async function searchProducts(sku: string) {
     if (sku.length < 3) return
     setLoading(true)
-    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-    const branchParam = branch && branch !== 'all' ? `&branch=${encodeURIComponent(branch)}` : ''
-    const res = await fetch(`/api/products?sku=${encodeURIComponent(sku)}${branchParam}`)
+    const res = await fetch(`/api/products?sku=${encodeURIComponent(sku)}`)
     const data = await res.json()
     if (data.success) {
       setProducts(data.products)
@@ -127,9 +82,7 @@ export default function Home() {
   async function checkPrices() {
     setLoading(true)
     setStatus('กำลังตรวจสอบราคา...')
-    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-    const url = branch && branch !== 'all' ? `/api/prices?branch=${encodeURIComponent(branch)}` : '/api/prices'
-    const res = await fetch(url)
+    const res = await fetch('/api/prices')
     const data = await res.json()
     if (data.success) {
       setProducts(data.mismatched)
@@ -242,6 +195,14 @@ function parsePriceRobust(str: string): number | null {
   return isNaN(n) ? null : n
 }
 
+function renderBranchFlag(value: any) {
+  return value ? '✓' : '-'
+}
+
+function getBranchLabel(branch: 'src' | 'kkl' | 'sss') {
+  return branch.toUpperCase()
+}
+
 async function handleGrabCheck(file: File) {
   setGrabSource('GRAB')
   setStatus('กำลังตรวจสอบราคา GRAB...')
@@ -268,10 +229,23 @@ async function handleGrabCheck(file: File) {
     return
   }
 
-  // ดึงข้อมูลจาก Supabase เฉพาะ SKU ที่มีใน CSV
+  // ซิงก์สถานะว่าสาขาที่เลือกมี SKU ไหนบ้างตาม Grab_menu
   const skus = Object.keys(grabMap)
-  const grabBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus, branch: grabBranch }) })
+  const syncRes = await fetch('/api/products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ availabilityBranch: grabTargetBranch, skus })
+  })
+  const syncData = await syncRes.json()
+
+  if (!syncData.success) {
+    setStatus('เกิดข้อผิดพลาดในการอัปเดตสถานะสาขา')
+    setGrabResults([{ error: 'อัปเดตสถานะสาขาไม่สำเร็จ กรุณาลองใหม่อีกครั้ง' }])
+    return
+  }
+
+  // ดึงข้อมูล Master มาเทียบราคาและสถานะการมีสินค้า
+  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus }) })
   const data = await res.json()
 
   if (!data.success) {
@@ -309,7 +283,9 @@ async function handleGrabCheck(file: File) {
   const mismatchSkus = new Set(mismatch.map((r: any) => r.sku))
   setGrabMismatchProducts(data.products.filter((p: Product) => mismatchSkus.has(p['รหัสสินค้า (SKU NUMBER)'])))
   setGrabResults(results)
-  setStatus(`GRAB: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} รายการ`)
+  await loadProducts(selectedSheet)
+  await loadStats()
+  setStatus(`Grab ${getBranchLabel(grabTargetBranch)}: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} | เพิ่มสถานะ ${syncData.inserted || 0} | ลบสถานะ ${syncData.deleted || 0}`)
 }
 
   const IMPORT_FIELDS = [
@@ -358,12 +334,6 @@ async function handleGrabCheck(file: File) {
   }
 
   async function handleImportXlsx(file: File) {
-    const importBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-    if (!importBranch || importBranch === 'all') {
-      setStatus('กรุณาเลือกสาขาก่อน Import Excel')
-      return
-    }
-
     const XLSX = await import('xlsx')
     const buffer = await file.arrayBuffer()
     const wb = XLSX.read(buffer, { type: 'array' })
@@ -408,10 +378,7 @@ async function handleGrabCheck(file: File) {
       return
     }
 
-    const importBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-    const allRows = importSheets.flatMap(s => s.rows).map(row =>
-      importBranch && importBranch !== 'all' ? { ...row, branch: importBranch } : row
-    )
+    const allRows = importSheets.flatMap(s => s.rows)
     if (allRows.length === 0) return
     setImportingData(true)
     const chunkSize = 100
@@ -488,9 +455,7 @@ async function handleGrabCheck(file: File) {
     }
 
     setStatus(`กำลังเตรียมไฟล์ Export หมวดหมู่ ${selectedSheet}...`)
-    const branch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
-    const branchParam = branch && branch !== 'all' ? `&branch=${encodeURIComponent(branch)}` : ''
-    const url = `/api/products?sheet=${encodeURIComponent(selectedSheet)}${branchParam}`
+    const url = `/api/products?sheet=${encodeURIComponent(selectedSheet)}`
     const res = await fetch(url)
     const data = await res.json()
 
@@ -518,23 +483,22 @@ async function handleGrabCheck(file: File) {
     setStatus(`Export หมวดหมู่ ${selectedSheet} สำเร็จ (${allProducts.length} รายการ)`)
   }
 
-  async function deleteSelectedCategoryInBranch() {
+  async function deleteSelectedCategory() {
     if (selectedSheet === 'all') {
       setStatus('กรุณาเลือกหมวดหมู่ก่อนลบ')
       return
     }
 
-    const scopeLabel = selectedBranch === 'all' ? 'ทุกสาขา' : `สาขา "${selectedBranch}"`
     const ok = window.confirm(
-      `ยืนยันลบหมวดหมู่ "${selectedSheet}" ของ${scopeLabel}?\nการลบนี้ไม่สามารถย้อนกลับได้`
+      `ยืนยันลบหมวดหมู่ "${selectedSheet}" ออกจากทุกสาขา?\nการลบนี้ไม่สามารถย้อนกลับได้`
     )
     if (!ok) return
 
-    setStatus(`กำลังลบหมวดหมู่ ${selectedSheet} ของ${scopeLabel}...`)
+    setStatus(`กำลังลบหมวดหมู่ ${selectedSheet}...`)
     const res = await fetch('/api/products', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sheet: selectedSheet, branch: selectedBranch })
+      body: JSON.stringify({ sheet: selectedSheet, branch: 'all' })
     })
     const data = await res.json()
 
@@ -546,38 +510,7 @@ async function handleGrabCheck(file: File) {
     setSelectedSheet('all')
     await loadStats()
     await loadProducts('all')
-    setStatus(`ลบหมวดหมู่ ${selectedSheet} ของ${scopeLabel} สำเร็จ (${data.deleted || 0} รายการ)`)
-  }
-
-  async function deleteAllCategoriesInBranch() {
-    if (selectedBranch === 'all') {
-      setStatus('กรุณาเลือกสาขาก่อนลบหมวดหมู่ทั้งหมด')
-      return
-    }
-
-    const branchName = branches.find(b => b.name === selectedBranch)?.name ?? selectedBranch
-    const ok = window.confirm(
-      `ยืนยันลบหมวดหมู่ทั้งหมดของสาขา "${branchName}"?\nการลบนี้จะลบสินค้าทุกรายการในสาขานี้ และไม่สามารถย้อนกลับได้`
-    )
-    if (!ok) return
-
-    setStatus(`กำลังลบหมวดหมู่ทั้งหมดของสาขา ${branchName}...`)
-    const res = await fetch('/api/products', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ branch: selectedBranch, deleteAll: true })
-    })
-    const data = await res.json()
-
-    if (!data.success) {
-      setStatus('เกิดข้อผิดพลาด: ' + data.error)
-      return
-    }
-
-    setSelectedSheet('all')
-    await loadStats()
-    await loadProducts('all')
-    setStatus(`ลบหมวดหมู่ทั้งหมดของสาขา ${branchName} สำเร็จ (${data.deleted || 0} รายการ)`)
+    setStatus(`ลบหมวดหมู่ ${selectedSheet} สำเร็จ (${data.deleted || 0} รายการ)`)
   }
 
     async function handlePriceCalcUpload(file: File) {
@@ -624,9 +557,8 @@ async function handleGrabCheck(file: File) {
 
   // ดึงข้อมูลจาก Supabase เฉพาะ SKU ที่มีใน CSV
   const skus = Object.keys(calcMap)
-  const calcBranch = typeof window !== 'undefined' ? localStorage.getItem('selectedBranch') ?? 'all' : 'all'
   setStatus(`(2/3) กำลังดึงข้อมูลจากระบบ... (${skus.length} SKU)`)
-  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus, branch: calcBranch }) })
+  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus }) })
   const data = await res.json()
   console.log('[PriceCalc] API response:', JSON.stringify(data))
 
@@ -738,21 +670,7 @@ async function confirmUpdatePrices() {
 
       {/* Header */}
       <div style={{ background: '#f5f7fa', padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 18, color: '#000' }}>📦 ระบบตรวจสอบราคาสินค้า</h1>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, color: '#555' }}>สาขา:</span>
-          <select
-            value={selectedBranch}
-            onChange={e => setSelectedBranch(e.target.value)}
-            style={{ padding: '5px 10px', border: '1px solid #999', borderRadius: 3, fontSize: 13 }}
-          >
-            <option value="all">ทั้งหมด</option>
-            {branches.map(b => (
-              <option key={b.id} value={b.name}>{b.name}</option>
-            ))}
-          </select>
-          <button onClick={() => setShowAddBranchModal(true)} style={{ padding: '5px 10px', border: '1px solid #999', borderRadius: 3, fontSize: 12, cursor: 'pointer', background: '#fff' }}>+ สาขาใหม่</button>
-        </div>
+        <h1 style={{ fontSize: 18, color: '#000' }}>Master รายการสินค้าทั้งหมด</h1>
         <span style={{ fontSize: 11, color: '#000' }}>อัพเดทราคาล่าสุด: {lastPriceUpdate ?? '-'}</span>
       </div>
 
@@ -786,10 +704,19 @@ async function confirmUpdatePrices() {
         <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
         <button onClick={() => document.getElementById('csvConvertInput')?.click()} style={btnStyle} title="แปลงไฟล์ CSV จาก POS (TIS-620) เป็น CSV UTF-8">🔄 แปลง CSV เป็น UTF-8</button>
         <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ R05.105 อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ตรวจสอบราคา Promaxx</button>
+        <select
+          value={grabTargetBranch}
+          onChange={e => setGrabTargetBranch(e.target.value as 'src' | 'kkl' | 'sss')}
+          style={{ padding: '6px 10px', border: '1px solid #999', borderRadius: 6, fontSize: 12, background: '#fff' }}
+        >
+          <option value="src">SRC</option>
+          <option value="kkl">KKL</option>
+          <option value="sss">SSS</option>
+        </select>
         <button onClick={() => document.getElementById('grabInput')?.click()} style={btnStyle} title="ไฟล์เมนูที่ download จาก GrabMart สำหรับตรวจสอบชื่อสินค้าและราคา">🛵 ตรวจสอบราคา GRAB</button>
-      </div>
 
       {/* Main Layout */}
+      </div>
       <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', flex: 1, overflow: 'hidden' }}>
 
         {/* Left Panel */}
@@ -823,7 +750,7 @@ async function confirmUpdatePrices() {
               📥 Export หมวดหมู่ที่เลือก
             </button>
             <button
-              onClick={deleteSelectedCategoryInBranch}
+              onClick={deleteSelectedCategory}
               disabled={selectedSheet === 'all'}
               style={{
                 ...btnStyle,
@@ -837,28 +764,9 @@ async function confirmUpdatePrices() {
                 color: '#721c24',
                 opacity: selectedSheet === 'all' ? 0.5 : 1
               }}
-              title={selectedBranch === 'all' ? 'ลบหมวดหมู่นี้ออกจากทุกสาขา' : 'ลบเฉพาะหมวดหมู่ในสาขาที่เลือก'}
+              title="ลบหมวดหมู่นี้ออกจากทุกสาขา"
             >
-              🗑️ {selectedBranch === 'all' ? 'ลบหมวดหมู่นี้ทุกสาขา' : 'ลบหมวดหมู่ของสาขานี้'}
-            </button>
-            <button
-              onClick={deleteAllCategoriesInBranch}
-              disabled={selectedBranch === 'all'}
-              style={{
-                ...btnStyle,
-                width: '100%',
-                marginTop: 8,
-                padding: '7px 10px',
-                borderRadius: 6,
-                fontSize: 11,
-                background: '#dc3545',
-                borderColor: '#a71d2a',
-                color: '#fff',
-                opacity: selectedBranch === 'all' ? 0.5 : 1
-              }}
-              title="ลบหมวดหมู่ทั้งหมดในสาขาที่เลือก"
-            >
-              ⚠️ ลบหมวดหมู่ทั้งหมดของสาขา
+              🗑️ ลบหมวดหมู่นี้ทุกสาขา
             </button>
           </div>
           {stats.sheets.map(s => (
@@ -893,6 +801,9 @@ async function confirmUpdatePrices() {
                   <th style={th}>ชื่อสินค้า</th>
                   <th style={th}>ใบอนุญาต</th>
                   <th style={th}>ราคา</th>
+                  <th style={th}>SRC</th>
+                  <th style={th}>KKL</th>
+                  <th style={th}>SSS</th>
                   <th style={th}>ดำเนินการ</th>
                 </tr>
               </thead>
@@ -918,6 +829,9 @@ async function confirmUpdatePrices() {
                     <td style={td}>{p['*ชื่อสินค้า (NAME)'] || '-'}</td>
                     <td style={td}>{p['*เลขที่ใบอนุญาตโฆษณา'] || '-'}</td>
                     <td style={{ ...td, color: '#c74634', fontWeight: 600 }}>{p['*ราคาสินค้า'] || '-'}</td>
+                    <td style={{ ...td, textAlign: 'center', fontWeight: 700 }}>{renderBranchFlag(p.src)}</td>
+                    <td style={{ ...td, textAlign: 'center', fontWeight: 700 }}>{renderBranchFlag(p.kkl)}</td>
+                    <td style={{ ...td, textAlign: 'center', fontWeight: 700 }}>{renderBranchFlag(p.sss)}</td>
                     <td style={td}>
                       <button
                         onClick={() => setEditProduct({ ...p, _originalSku: p['รหัสสินค้า (SKU NUMBER)'] })}
@@ -1151,11 +1065,6 @@ async function confirmUpdatePrices() {
               พบ <strong>{importSheets.length}</strong> ชีท | รวม <strong>{importSheets.reduce((s, sh) => s + sh.rows.length, 0)}</strong> รายการ
             </div>
             <div style={{ overflowY: 'auto', flex: 1, padding: 16 }}>
-              {selectedBranch !== 'all' && (
-                <div style={{ marginBottom: 12, padding: '10px 12px', background: '#fff3cd', border: '1px solid #ffe08a', borderRadius: 6, fontSize: 12, color: '#7a5d00' }}>
-                  หาก import ไฟล์ผิดคอลัมน์มาก่อน สามารถลบข้อมูลของสาขา <strong>{selectedBranch}</strong> แล้วค่อย import ใหม่ได้
-                </div>
-              )}
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ background: '#f5f5f5' }}>
@@ -1186,15 +1095,6 @@ async function confirmUpdatePrices() {
               )}
             </div>
             <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              {selectedBranch !== 'all' && (
-                <button
-                  onClick={deleteAllCategoriesInBranch}
-                  disabled={importingData}
-                  style={{ ...btnStyle, background: '#f8d7da', color: '#721c24', borderColor: '#dc3545', opacity: importingData ? 0.6 : 1 }}
-                >
-                  🗑️ ลบข้อมูลสาขานี้ก่อน
-                </button>
-              )}
               <button onClick={() => setShowImportModal(false)} style={btnStyle}>ปิด</button>
               <button
                 onClick={confirmImport}
@@ -1328,38 +1228,6 @@ async function confirmUpdatePrices() {
         </div>
       )}
 
-      {/* Add Branch Modal */}
-      {showAddBranchModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', borderRadius: 6, width: 360, boxShadow: '0 10px 40px rgba(0,0,0,0.3)', overflow: 'hidden' }}>
-            <div style={{ background: '#2d6a2d', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>+ เพิ่มสาขาใหม่</strong>
-              <button onClick={() => setShowAddBranchModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
-            </div>
-            <div style={{ padding: 20 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>ชื่อสาขา</label>
-              <input
-                style={{ width: '100%', padding: '8px 10px', border: '1px solid #ccc', borderRadius: 4, fontSize: 13, boxSizing: 'border-box' }}
-                placeholder="เช่น สาขาสีลม, สาขาลาดพร้าว"
-                value={newBranchName}
-                onChange={e => setNewBranchName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') addBranch() }}
-                autoFocus
-              />
-            </div>
-            <div style={{ padding: '0 20px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <button onClick={() => { setShowAddBranchModal(false); setNewBranchName('') }} style={btnStyle}>ยกเลิก</button>
-              <button
-                onClick={addBranch}
-                disabled={addingBranch || !newBranchName.trim()}
-                style={{ ...btnStyle, background: '#28a745', color: '#fff', borderColor: '#1e7e34', opacity: addingBranch ? 0.6 : 1 }}
-              >
-                {addingBranch ? '⏳ กำลังเพิ่ม...' : '✅ เพิ่มสาขา'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
     </div>
   )
