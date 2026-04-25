@@ -7,6 +7,11 @@ function normalizeBranchName(value: any) {
   return String(value ?? '').trim().toLowerCase()
 }
 
+function parseBranches(branch: any): string[] {
+  if (!branch) return []
+  return String(branch).split(',').map((b: string) => b.trim()).filter(Boolean)
+}
+
 function aggregateProducts(rows: any[]) {
   const grouped = new Map<string, any>()
 
@@ -15,20 +20,16 @@ function aggregateProducts(rows: any[]) {
     if (!sku) continue
 
     if (!grouped.has(sku)) {
-      grouped.set(sku, {
-        ...row,
-        src: false,
-        kkl: false,
-        sss: false,
-        _branches: [] as string[]
-      })
+      grouped.set(sku, { ...row, src: false, kkl: false, sss: false, _branches: [] as string[] })
     }
 
     const current = grouped.get(sku)
-    const normalizedBranch = normalizeBranchName(row.branch)
-    if (BRANCH_KEYS.includes(normalizedBranch as (typeof BRANCH_KEYS)[number])) {
-      current[normalizedBranch] = true
-      if (!current._branches.includes(normalizedBranch)) current._branches.push(normalizedBranch)
+    for (const b of parseBranches(row.branch)) {
+      const nb = normalizeBranchName(b)
+      if (BRANCH_KEYS.includes(nb as (typeof BRANCH_KEYS)[number])) {
+        current[nb] = true
+        if (!current._branches.includes(nb)) current._branches.push(nb)
+      }
     }
   }
 
@@ -62,85 +63,88 @@ export async function POST(req: NextRequest) {
     }
 
     const skuSet: string[] = Array.from(new Set(body.skus.map((sku: any) => String(sku ?? '').trim()).filter(Boolean)))
+    const skuSetSet = new Set(skuSet)
     const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
     const CHUNK = 200
 
-    // ดึง targetRows แบบ paginate ไม่มี limit ตัด
-    const targetRows: any[] = []
-    let tFrom = 0
+    // ดึงสินค้าทั้งหมดพร้อม branch ปัจจุบัน (paginate)
+    const allProducts: any[] = []
+    let from = 0
     while (true) {
       const { data, error } = await supabase
         .from('products')
-        .select('*')
-        .eq('branch', availabilityBranch)
-        .range(tFrom, tFrom + 999)
-      if (error) return NextResponse.json({ success: false, error: `targetRows: ${error.message}` })
-      targetRows.push(...(data || []))
+        .select(`${skuColumn}, branch`)
+        .range(from, from + 999)
+      if (error) return NextResponse.json({ success: false, error: `fetch: ${error.message}` })
+      allProducts.push(...(data || []))
       if (!data || data.length < 1000) break
-      tFrom += 1000
+      from += 1000
     }
 
-    // ดึง sourceRows แบบ chunk ป้องกัน URL limit
-    const sourceRows: any[] = []
-    for (let i = 0; i < skuSet.length; i += CHUNK) {
-      const chunk = skuSet.slice(i, i + CHUNK)
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .in(skuColumn, chunk)
-      if (error) return NextResponse.json({ success: false, error: `sourceRows: ${error.message}` })
-      sourceRows.push(...(data || []))
+    // สร้าง map SKU → branches ปัจจุบัน
+    const branchMap = new Map<string, string[]>()
+    for (const p of allProducts) {
+      const sku = p['รหัสสินค้า (SKU NUMBER)']
+      if (sku) branchMap.set(sku, parseBranches(p.branch))
     }
 
-    const existingTargetSkus = new Set(targetRows.map((row: any) => row['รหัสสินค้า (SKU NUMBER)']).filter(Boolean))
-    const sourceBySku = new Map<string, any>()
-    for (const row of sourceRows) {
-      const sku = row['รหัสสินค้า (SKU NUMBER)']
-      if (sku && !sourceBySku.has(sku)) sourceBySku.set(sku, row)
+    const existingSkus = new Set(branchMap.keys())
+    const missingBase = skuSet.filter(sku => !existingSkus.has(sku))
+
+    // SKU ที่ต้องเพิ่ม branch (อยู่ใน CSV, มีใน DB, ยังไม่มี branch นี้)
+    const toAdd = skuSet.filter(sku => {
+      const b = branchMap.get(sku) || []
+      return existingSkus.has(sku) && !b.includes(availabilityBranch)
+    })
+
+    // SKU ที่ต้องถอน branch (ไม่อยู่ใน CSV, มีใน DB, มี branch นี้อยู่)
+    const toRemove = Array.from(existingSkus).filter(sku => {
+      const b = branchMap.get(sku) || []
+      return !skuSetSet.has(sku) && b.includes(availabilityBranch)
+    })
+
+    // จัดกลุ่มตาม new branch value เพื่อ bulk UPDATE รอบเดียวต่อกลุ่ม
+    const addGroups = new Map<string, string[]>()
+    for (const sku of toAdd) {
+      const newVal = [...(branchMap.get(sku) || []), availabilityBranch].sort().join(',')
+      if (!addGroups.has(newVal)) addGroups.set(newVal, [])
+      addGroups.get(newVal)!.push(sku)
     }
 
-    const skuSetSet = new Set(skuSet)
-    const toDelete = targetRows
-      .map((row: any) => row['รหัสสินค้า (SKU NUMBER)'])
-      .filter((sku: string) => sku && !skuSetSet.has(sku))
-
-    const toInsert = skuSet
-      .filter((sku: string) => !existingTargetSkus.has(sku))
-      .map((sku: string) => {
-        const base = sourceBySku.get(sku)
-        if (!base) return null
-        const { id, created_at, updated_at, ...clone } = base
-        return { ...clone, branch: availabilityBranch }
-      })
-      .filter(Boolean)
-
-    const missingBase = skuSet.filter((sku: string) => !sourceBySku.has(sku))
-
-    // ลบแบบ chunk
-    for (let i = 0; i < toDelete.length; i += CHUNK) {
-      const chunk = toDelete.slice(i, i + CHUNK)
-      const { error: deleteError } = await supabase
-        .from('products')
-        .delete()
-        .eq('branch', availabilityBranch)
-        .in(skuColumn, chunk)
-      if (deleteError) return NextResponse.json({ success: false, error: `delete: ${deleteError.message}` })
+    const removeGroups = new Map<string, string[]>()
+    for (const sku of toRemove) {
+      const newVal = (branchMap.get(sku) || []).filter(b => b !== availabilityBranch).sort().join(',')
+      if (!removeGroups.has(newVal)) removeGroups.set(newVal, [])
+      removeGroups.get(newVal)!.push(sku)
     }
 
-    // insert แบบ chunk
-    for (let i = 0; i < toInsert.length; i += CHUNK) {
-      const chunk = toInsert.slice(i, i + CHUNK)
-      const { error: insertError } = await supabase
-        .from('products')
-        .insert(chunk)
-      if (insertError) return NextResponse.json({ success: false, error: `insert: ${insertError.message}` })
+    // UPDATE เพิ่ม branch
+    for (const [newVal, skus] of addGroups) {
+      for (let i = 0; i < skus.length; i += CHUNK) {
+        const { error } = await supabase
+          .from('products')
+          .update({ branch: newVal })
+          .in(skuColumn, skus.slice(i, i + CHUNK))
+        if (error) return NextResponse.json({ success: false, error: `add: ${error.message}` })
+      }
+    }
+
+    // UPDATE ถอน branch
+    for (const [newVal, skus] of removeGroups) {
+      for (let i = 0; i < skus.length; i += CHUNK) {
+        const { error } = await supabase
+          .from('products')
+          .update({ branch: newVal || null })
+          .in(skuColumn, skus.slice(i, i + CHUNK))
+        if (error) return NextResponse.json({ success: false, error: `remove: ${error.message}` })
+      }
     }
 
     return NextResponse.json({
       success: true,
       syncedBranch: availabilityBranch,
-      inserted: toInsert.length,
-      deleted: toDelete.length,
+      inserted: toAdd.length,
+      deleted: toRemove.length,
       missingBase: missingBase.length
     })
   }
