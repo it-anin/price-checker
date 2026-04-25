@@ -43,11 +43,20 @@ export default function Home() {
   const [selectedSkus, setSelectedSkus] = useState<Set<string>>(new Set())
   const [masterSkuCount, setMasterSkuCount] = useState<number | null>(null)
   const [masterFileName, setMasterFileName] = useState<string | null>(null)
+  const [masterMissingCount, setMasterMissingCount] = useState<number | null>(null)
+  const [exportingMissing, setExportingMissing] = useState(false)
 
   useEffect(() => {
     loadStats()
     loadProducts('all')
+    loadMasterCount()
   }, [])
+
+  async function loadMasterCount() {
+    const res = await fetch('/api/master')
+    const data = await res.json()
+    if (data.success && data.count > 0) setMasterSkuCount(data.count)
+  }
 
   async function loadStats() {
     const res = await fetch('/api/stats')
@@ -510,9 +519,61 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     const skus = raw.slice(1)
       .map(row => String(row[0] ?? '').trim())
       .filter(Boolean)
-    const unique = new Set(skus)
-    setMasterSkuCount(unique.size)
-    setStatus(`Product Master: ${unique.size.toLocaleString()} SKU`)
+
+    setStatus(`กำลังบันทึก ${skus.length.toLocaleString()} SKU ลง Supabase...`)
+    const res = await fetch('/api/master', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skus })
+    })
+    const data = await res.json()
+    if (!data.success) {
+      setStatus('เกิดข้อผิดพลาด: ' + data.error)
+      return
+    }
+    setMasterSkuCount(data.count)
+    setStatus(`บันทึก Product Master สำเร็จ: ${data.count.toLocaleString()} SKU — กำลังเปรียบเทียบ...`)
+    await refreshMissingCount()
+    setStatus(`Product Master: ${data.count.toLocaleString()} SKU`)
+  }
+
+  async function refreshMissingCount() {
+    const res = await fetch('/api/master?compare=true')
+    const data = await res.json()
+    if (data.success) {
+      setMasterSkuCount(data.masterCount)
+      setMasterMissingCount(data.missingCount)
+    }
+  }
+
+  async function exportMissingSkus() {
+    setExportingMissing(true)
+    setStatus('กำลังดึงรายการสินค้าที่ขาด...')
+    const res = await fetch('/api/master?compare=true')
+    const data = await res.json()
+    if (!data.success) {
+      setStatus('เกิดข้อผิดพลาด: ' + data.error)
+      setExportingMissing(false)
+      return
+    }
+    if (data.missingSkus.length === 0) {
+      setStatus('ไม่มีรายการสินค้าที่ขาดใน GrabMart ✅')
+      setExportingMissing(false)
+      return
+    }
+    const XLSX = await import('xlsx')
+    const rows = data.missingSkus.map((sku: string) => ({ 'รหัสสินค้า (SKU NUMBER)': sku }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'ขาดใน GrabMart')
+    const now = new Date()
+    const dd = String(now.getDate()).padStart(2, '0')
+    const mm = String(now.getMonth() + 1).padStart(2, '0')
+    const yyyy = now.getFullYear()
+    XLSX.writeFile(wb, `Missing GrabMart ${dd}.${mm}.${yyyy}.xlsx`)
+    setMasterMissingCount(data.missingCount)
+    setStatus(`Export สำเร็จ: ${data.missingCount.toLocaleString()} รายการที่ขาดใน GrabMart`)
+    setExportingMissing(false)
   }
 
   async function deleteSelectedCategory() {
@@ -795,6 +856,28 @@ async function confirmUpdatePrices() {
                     {stats.totalProducts.toLocaleString()} / {masterSkuCount.toLocaleString()} SKU
                     ({masterSkuCount > 0 ? Math.round(stats.totalProducts / masterSkuCount * 100) : 0}%)
                   </div>
+                  <button
+                    onClick={exportMissingSkus}
+                    disabled={exportingMissing}
+                    style={{
+                      ...btnStyle,
+                      width: '100%',
+                      marginTop: 8,
+                      fontSize: 11,
+                      padding: '5px 8px',
+                      borderRadius: 4,
+                      background: '#fff3cd',
+                      borderColor: '#f0ad4e',
+                      color: '#856404',
+                      opacity: exportingMissing ? 0.6 : 1
+                    }}
+                  >
+                    {exportingMissing
+                      ? '⏳ กำลังดึงข้อมูล...'
+                      : masterMissingCount !== null
+                        ? `📥 Export ที่ขาดใน GrabMart (${masterMissingCount.toLocaleString()})`
+                        : '📥 Export ที่ขาดใน GrabMart'}
+                  </button>
                 </div>
               )}
             </div>
