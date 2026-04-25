@@ -41,6 +41,8 @@ export default function Home() {
   const [importLog, setImportLog] = useState('')
   const [importError, setImportError] = useState('')
   const [selectedSkus, setSelectedSkus] = useState<Set<string>>(new Set())
+  const [masterSkuCount, setMasterSkuCount] = useState<number | null>(null)
+  const [masterFileName, setMasterFileName] = useState<string | null>(null)
 
   useEffect(() => {
     loadStats()
@@ -497,6 +499,22 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     setStatus(`Export ${selected.length} รายการที่เลือกสำเร็จ ✅`)
   }
 
+  async function handleMasterUpload(file: File) {
+    setStatus('กำลังอ่าน Product Master...')
+    setMasterFileName(file.name)
+    const XLSX = await import('xlsx')
+    const buffer = await file.arrayBuffer()
+    const wb = XLSX.read(buffer, { type: 'array' })
+    const ws = wb.Sheets[wb.SheetNames[0]]
+    const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+    const skus = raw.slice(1)
+      .map(row => String(row[0] ?? '').trim())
+      .filter(Boolean)
+    const unique = new Set(skus)
+    setMasterSkuCount(unique.size)
+    setStatus(`Product Master: ${unique.size.toLocaleString()} SKU`)
+  }
+
   async function deleteSelectedCategory() {
     if (selectedSheet === 'all') {
       setStatus('กรุณาเลือกหมวดหมู่ก่อนลบ')
@@ -741,8 +759,44 @@ async function confirmUpdatePrices() {
           <div style={{ padding: '6px 10px', background: '#e0e0e0', borderBottom: '1px solid #ccc', fontWeight: 700, fontSize: 13 }}>📊 สถิติ</div>
           <div style={{ padding: 15 }}>
             <div style={statCard}>
-              <div style={{ fontSize: 11, color: '#000' }}>สินค้าทั้งหมด</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: '#c74634' }}>{stats.totalProducts.toLocaleString()}</div>
+              <div style={{ fontSize: 11, color: '#555', marginBottom: 6 }}>📋 Product Master</div>
+              <input
+                type="file"
+                id="masterInput"
+                accept=".xlsx,.xls,.csv"
+                style={{ display: 'none' }}
+                onChange={e => { if (e.target.files?.[0]) { handleMasterUpload(e.target.files[0]); e.target.value = '' } }}
+              />
+              <button
+                onClick={() => document.getElementById('masterInput')?.click()}
+                style={{ ...btnStyle, width: '100%', fontSize: 11, padding: '5px 8px', borderRadius: 4 }}
+              >
+                📂 {masterFileName ? masterFileName : 'อัพโหลด Product Master'}
+              </button>
+              {masterSkuCount !== null && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                    <span style={{ color: '#555' }}>Product Master</span>
+                    <strong style={{ color: '#c74634' }}>{masterSkuCount.toLocaleString()}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                    <span style={{ color: '#555' }}>GrabMart</span>
+                    <strong style={{ color: '#4a8bc4' }}>{stats.totalProducts.toLocaleString()}</strong>
+                  </div>
+                  <div style={{ background: '#eee', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                    <div style={{
+                      background: stats.totalProducts >= masterSkuCount ? '#28a745' : '#c74634',
+                      height: '100%',
+                      width: `${Math.min(100, Math.round(stats.totalProducts / masterSkuCount * 100))}%`,
+                      transition: 'width 0.3s'
+                    }} />
+                  </div>
+                  <div style={{ fontSize: 10, color: '#555', marginTop: 4, textAlign: 'right' }}>
+                    {stats.totalProducts.toLocaleString()} / {masterSkuCount.toLocaleString()} SKU
+                    ({masterSkuCount > 0 ? Math.round(stats.totalProducts / masterSkuCount * 100) : 0}%)
+                  </div>
+                </div>
+              )}
             </div>
             <div style={statCard}>
               <div style={{ fontSize: 11, color: '#000' }}>หมวดหมู่</div>
