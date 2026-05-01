@@ -549,16 +549,20 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
       for (let i = 1; i < mmeRows.length; i++) {
         const row = mmeRows[i]
         if (!row || row.length < 5) continue
-        const name = String(row[1] || '').trim()
+        const type     = String(row[0] || '').trim()
+        const name     = String(row[1] || '').trim()
+        const license  = String(row[2] || '').trim()
         const mmePrice = parsePriceRobust(String(row[3] || ''))
-        const sku = String(row[4] || '').trim()
+        const sku      = String(row[4] || '').trim()
+        const image    = String(row[5] || '').trim()
+        const category = String(row[6] || '').trim()
         if (!sku) continue
         const grabPrice = grabMap[sku]
         if (grabPrice === undefined) {
-          results.push({ sku, name, mmePrice, grabPrice: null, status: 'notFound' })
+          results.push({ sku, name, mmePrice, grabPrice: null, status: 'notFound', type, license, image, category })
         } else {
           const matched = mmePrice !== null && Math.abs(mmePrice - grabPrice) < 0.01
-          results.push({ sku, name, mmePrice, grabPrice, status: matched ? 'updated' : 'notUpdated' })
+          results.push({ sku, name, mmePrice, grabPrice, status: matched ? 'updated' : 'notUpdated', type, license, image, category })
         }
       }
       return results
@@ -1742,10 +1746,13 @@ async function confirmUpdatePrices() {
                           if (notUpdated.length === 0) return
                           const XLSX = await import('xlsx')
                           const rows = notUpdated.map((r: any) => ({
-                            'รหัสสินค้า (SKU)': r.sku,
-                            'ชื่อสินค้า': r.name,
-                            'ราคาที่ยื่นแก้ไข (GM MME)': r.mmePrice,
-                            'ราคาใน GRAB ปัจจุบัน': r.grabPrice,
+                            '*ประเภทสินค้า': r.type || '',
+                            '*ชื่อสินค้า': r.name || '',
+                            '*เลขที่ใบอนุญาตโฆษณา': r.license || '',
+                            '*ราคาสินค้า': r.mmePrice ?? '',
+                            'รหัสสินค้า': r.sku || '',
+                            '*รูปภาพสินค้า': r.image || '',
+                            'หมวดหมู่รายการสินค้า': r.category || '',
                           }))
                           const ws = XLSX.utils.json_to_sheet(rows)
                           const wb2 = XLSX.utils.book_new()
