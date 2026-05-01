@@ -45,6 +45,11 @@ export default function Home() {
   const [masterFileName, setMasterFileName] = useState<string | null>(null)
   const [masterMissingCount, setMasterMissingCount] = useState<number | null>(null)
   const [exportingMissing, setExportingMissing] = useState(false)
+  const [showMmeCheckModal, setShowMmeCheckModal] = useState(false)
+  const [mmeCheckResults, setMmeCheckResults] = useState<any[]>([])
+  const [mmeCheckGrabFile, setMmeCheckGrabFile] = useState<File | null>(null)
+  const [mmeCheckMmeFile, setMmeCheckMmeFile] = useState<File | null>(null)
+  const [mmeChecking, setMmeChecking] = useState(false)
 
   useEffect(() => {
     loadStats()
@@ -508,6 +513,54 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     setStatus(`Export ${selected.length} รายการที่เลือกสำเร็จ ✅`)
   }
 
+  async function handleMmeVsGrabCheck() {
+    if (!mmeCheckGrabFile || !mmeCheckMmeFile) return
+    setMmeChecking(true)
+    setStatus('กำลังตรวจสอบ GM MME vs GRAB...')
+
+    const grabText = await mmeCheckGrabFile.text()
+    const grabRows = parseCSVRows(grabText.replace(/^﻿/, ''))
+    const grabMap: Record<string, number> = {}
+    for (let i = 2; i < grabRows.length; i++) {
+      const row = grabRows[i]
+      if (!row || row.length < 9) continue
+      const sku = row[8]?.trim()
+      const price = parsePriceRobust(row[2])
+      if (sku && price !== null) grabMap[sku] = price
+    }
+
+    const XLSX = await import('xlsx')
+    const mmeBuffer = await mmeCheckMmeFile.arrayBuffer()
+    const wbMme = XLSX.read(mmeBuffer, { type: 'array' })
+    const wsMme = wbMme.Sheets[wbMme.SheetNames[0]]
+    const mmeRows = XLSX.utils.sheet_to_json(wsMme, { header: 1 }) as any[][]
+
+    const results: any[] = []
+    for (let i = 1; i < mmeRows.length; i++) {
+      const row = mmeRows[i]
+      if (!row || row.length < 5) continue
+      const name = String(row[1] || '').trim()
+      const mmePrice = parsePriceRobust(String(row[3] || ''))
+      const sku = String(row[4] || '').trim()
+      if (!sku) continue
+
+      const grabPrice = grabMap[sku]
+      if (grabPrice === undefined) {
+        results.push({ sku, name, mmePrice, grabPrice: null, status: 'notFound' })
+      } else {
+        const matched = mmePrice !== null && Math.abs(mmePrice - grabPrice) < 0.01
+        results.push({ sku, name, mmePrice, grabPrice, status: matched ? 'updated' : 'notUpdated' })
+      }
+    }
+
+    setMmeCheckResults(results)
+    setMmeChecking(false)
+    const updated = results.filter(r => r.status === 'updated').length
+    const notUpdated = results.filter(r => r.status === 'notUpdated').length
+    const notFound = results.filter(r => r.status === 'notFound').length
+    setStatus(`GM MME: แก้ไขแล้ว ${updated} | ยังไม่แก้ไข ${notUpdated} | ไม่พบใน GRAB ${notFound}`)
+  }
+
   async function handleMasterUpload(file: File) {
     setStatus('กำลังอ่าน Product Master...')
     setMasterFileName(file.name)
@@ -810,6 +863,15 @@ async function confirmUpdatePrices() {
         <button onClick={() => document.getElementById('grabInputSrc')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SRC">🛵 GRAB SRC</button>
         <button onClick={() => document.getElementById('grabInputKkl')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา KKL">🛵 GRAB KKL</button>
         <button onClick={() => document.getElementById('grabInputSss')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SSS">🛵 GRAB SSS</button>
+        <input type="file" accept=".csv" id="mmeCheckGrabInput" style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.[0]) { setMmeCheckGrabFile(e.target.files[0]); e.target.value = '' } }} />
+        <input type="file" accept=".xlsx,.xls" id="mmeCheckMmeInput" style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.[0]) { setMmeCheckMmeFile(e.target.files[0]); e.target.value = '' } }} />
+        <button
+          onClick={() => { setShowMmeCheckModal(true); setMmeCheckResults([]) }}
+          style={{ ...btnStyle, background: '#e8f4ff', borderColor: '#4a8bc4' }}
+          title="ตรวจสอบว่าสินค้าที่ยื่นแก้ไขใน GM MME ถูกอัพเดทราคาใน GRAB แล้วหรือยัง"
+        >📋 ตรวจ GM MME vs GRAB</button>
 
       {/* Main Layout */}
       </div>
@@ -1382,6 +1444,128 @@ async function confirmUpdatePrices() {
                 style={{ ...btnStyle, background: isAdding ? '#28a745' : '#4a8bc4', color: '#fff', borderColor: isAdding ? '#1e7e34' : '#3d7ab3' }}>
                 {isAdding ? '➕ เพิ่มสินค้า' : '💾 บันทึก'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GM MME vs GRAB Modal */}
+      {showMmeCheckModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', borderRadius: 6, width: 740, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+
+            {/* Header */}
+            <div style={{ background: '#2d5fa6', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <strong>📋 ตรวจสอบ GM MME vs GRAB Menu</strong>
+              <button onClick={() => setShowMmeCheckModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
+            </div>
+
+            {/* Upload controls */}
+            <div style={{ padding: '12px 20px', background: '#f0f7ff', borderBottom: '1px solid #c8dff8', display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#444', whiteSpace: 'nowrap' }}>1. Grab_menu (.csv):</span>
+                <button onClick={() => document.getElementById('mmeCheckGrabInput')?.click()} style={{ ...btnStyle, fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {mmeCheckGrabFile ? `✅ ${mmeCheckGrabFile.name}` : '📂 เลือกไฟล์'}
+                </button>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#444', whiteSpace: 'nowrap' }}>2. GM MME (.xlsx):</span>
+                <button onClick={() => document.getElementById('mmeCheckMmeInput')?.click()} style={{ ...btnStyle, fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {mmeCheckMmeFile ? `✅ ${mmeCheckMmeFile.name}` : '📂 เลือกไฟล์'}
+                </button>
+              </div>
+              <button
+                onClick={handleMmeVsGrabCheck}
+                disabled={!mmeCheckGrabFile || !mmeCheckMmeFile || mmeChecking}
+                style={{ ...btnStyle, background: mmeCheckGrabFile && mmeCheckMmeFile ? '#2d5fa6' : '#ccc', color: mmeCheckGrabFile && mmeCheckMmeFile ? '#fff' : '#999', borderColor: '#2d5fa6', marginLeft: 'auto', opacity: mmeChecking ? 0.6 : 1 }}
+              >
+                {mmeChecking ? '⏳ กำลังตรวจสอบ...' : '🔍 ตรวจสอบ'}
+              </button>
+            </div>
+
+            {/* Summary */}
+            {mmeCheckResults.length > 0 && (
+              <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
+                <span>ทั้งหมด: <strong>{mmeCheckResults.length}</strong></span>
+                <span style={{ color: '#28a745' }}>✅ แก้ไขแล้ว: <strong>{mmeCheckResults.filter(r => r.status === 'updated').length}</strong></span>
+                <span style={{ color: '#dc3545' }}>❌ ยังไม่แก้ไข: <strong>{mmeCheckResults.filter(r => r.status === 'notUpdated').length}</strong></span>
+                {mmeCheckResults.filter(r => r.status === 'notFound').length > 0 && (
+                  <span style={{ color: '#856404' }}>⚠ ไม่พบใน GRAB: <strong>{mmeCheckResults.filter(r => r.status === 'notFound').length}</strong></span>
+                )}
+              </div>
+            )}
+
+            {/* Table */}
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {mmeCheckResults.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#888', fontSize: 13 }}>
+                  เลือกไฟล์ Grab_menu (.csv) และ GM MME (.xlsx) แล้วกด &quot;ตรวจสอบ&quot;
+                </div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+                      <th style={th}>#</th>
+                      <th style={th}>SKU</th>
+                      <th style={th}>ชื่อสินค้า</th>
+                      <th style={th}>ราคาใน GM MME</th>
+                      <th style={th}>ราคาใน GRAB ปัจจุบัน</th>
+                      <th style={th}>สถานะ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {mmeCheckResults.map((r: any, i: number) => (
+                      <tr key={i} style={{ background: r.status === 'updated' ? 'transparent' : r.status === 'notFound' ? '#f5f5f5' : '#fff0f0' }}>
+                        <td style={td}>{i + 1}</td>
+                        <td style={{ ...td, color: '#000' }}><strong>{r.sku}</strong></td>
+                        <td style={{ ...td, color: '#000' }}>{r.name || '-'}</td>
+                        <td style={{ ...td, fontWeight: 600 }}>{r.mmePrice?.toLocaleString() ?? '-'}</td>
+                        <td style={{ ...td, fontWeight: 600 }}>{r.grabPrice?.toLocaleString() ?? '-'}</td>
+                        <td style={td}>
+                          {r.status === 'updated'
+                            ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✅ แก้ไขแล้ว</span>
+                            : r.status === 'notFound'
+                              ? <span style={{ background: '#e0e0e0', color: '#555', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบใน GRAB</span>
+                              : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>❌ ยังไม่แก้ไข</span>
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={async () => {
+                    const notUpdated = mmeCheckResults.filter(r => r.status === 'notUpdated')
+                    if (notUpdated.length === 0) return
+                    const XLSX = await import('xlsx')
+                    const rows = notUpdated.map(r => ({
+                      'รหัสสินค้า (SKU)': r.sku,
+                      'ชื่อสินค้า': r.name,
+                      'ราคาที่ยื่นแก้ไข (GM MME)': r.mmePrice,
+                      'ราคาใน GRAB ปัจจุบัน': r.grabPrice,
+                    }))
+                    const ws = XLSX.utils.json_to_sheet(rows)
+                    const wb2 = XLSX.utils.book_new()
+                    XLSX.utils.book_append_sheet(wb2, ws, 'ยังไม่แก้ไข')
+                    const now = new Date()
+                    const dd = String(now.getDate()).padStart(2, '0')
+                    const mm2 = String(now.getMonth() + 1).padStart(2, '0')
+                    const yyyy = now.getFullYear()
+                    XLSX.writeFile(wb2, `GM MME ยังไม่แก้ไข ${dd}.${mm2}.${yyyy}.xlsx`)
+                  }}
+                  disabled={mmeCheckResults.filter(r => r.status === 'notUpdated').length === 0}
+                  style={{ ...btnStyle, background: '#f8d7da', borderColor: '#dc3545', color: '#721c24', opacity: mmeCheckResults.filter(r => r.status === 'notUpdated').length === 0 ? 0.5 : 1 }}
+                >
+                  📥 Export ยังไม่แก้ไข ({mmeCheckResults.filter(r => r.status === 'notUpdated').length})
+                </button>
+              </div>
+              <button onClick={() => setShowMmeCheckModal(false)} style={btnStyle}>ปิด</button>
             </div>
           </div>
         </div>
