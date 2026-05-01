@@ -52,7 +52,7 @@ export default function Home() {
   const [mmeCheckGrabFileSss, setMmeCheckGrabFileSss] = useState<File | null>(null)
   const [mmeCheckMmeFile, setMmeCheckMmeFile] = useState<File | null>(null)
   const [mmeChecking, setMmeChecking] = useState(false)
-  const [mmeActiveTab, setMmeActiveTab] = useState<'src'|'kkl'|'sss'>('src')
+  const [mmeActiveTab, setMmeActiveTab] = useState<'src'|'kkl'|'sss'|'compare'>('src')
 
   useEffect(() => {
     loadStats()
@@ -1479,19 +1479,41 @@ async function confirmUpdatePrices() {
 
       {/* GM MME vs GRAB Modal */}
       {showMmeCheckModal && (() => {
-        const branches: { key: 'src'|'kkl'|'sss'; label: string; file: File|null; inputId: string; setFile: (f: File|null) => void }[] = [
-          { key: 'src', label: 'SRC', file: mmeCheckGrabFileSrc, inputId: 'mmeCheckGrabInputSrc', setFile: setMmeCheckGrabFileSrc },
-          { key: 'kkl', label: 'KKL', file: mmeCheckGrabFileKkl, inputId: 'mmeCheckGrabInputKkl', setFile: setMmeCheckGrabFileKkl },
-          { key: 'sss', label: 'SSS', file: mmeCheckGrabFileSss, inputId: 'mmeCheckGrabInputSss', setFile: setMmeCheckGrabFileSss },
+        const branches: { key: 'src'|'kkl'|'sss'; label: string; file: File|null; inputId: string }[] = [
+          { key: 'src', label: 'SRC', file: mmeCheckGrabFileSrc, inputId: 'mmeCheckGrabInputSrc' },
+          { key: 'kkl', label: 'KKL', file: mmeCheckGrabFileKkl, inputId: 'mmeCheckGrabInputKkl' },
+          { key: 'sss', label: 'SSS', file: mmeCheckGrabFileSss, inputId: 'mmeCheckGrabInputSss' },
         ]
         const hasAnyGrab = !!(mmeCheckGrabFileSrc || mmeCheckGrabFileKkl || mmeCheckGrabFileSss)
         const canCheck = hasAnyGrab && !!mmeCheckMmeFile && !mmeChecking
-        const tabResults = mmeCheckResults[mmeActiveTab] ?? []
+        const tabResults = mmeActiveTab !== 'compare' ? (mmeCheckResults[mmeActiveTab] ?? []) : []
         const hasResults = Object.values(mmeCheckResults).some(r => r.length > 0)
+        const checkedBranches = branches.filter(b => mmeCheckResults[b.key].length > 0)
         const tabHasFile = branches.find(b => b.key === mmeActiveTab)?.file
+
+        // build compare rows: union of all SKUs
+        const skuMap: Record<string, { name: string; mmePrice: number|null; src?: any; kkl?: any; sss?: any }> = {}
+        checkedBranches.forEach(b => {
+          mmeCheckResults[b.key].forEach((r: any) => {
+            if (!skuMap[r.sku]) skuMap[r.sku] = { name: r.name, mmePrice: r.mmePrice }
+            skuMap[r.sku][b.key] = r
+          })
+        })
+        const compareRows = Object.entries(skuMap).map(([sku, v]) => ({ sku, ...v }))
+        const compareNotUpdatedCount = compareRows.filter(r =>
+          checkedBranches.some(b => r[b.key as 'src'|'kkl'|'sss']?.status === 'notUpdated')
+        ).length
+
+        const statusBadge = (r: any) => {
+          if (!r) return <span style={{ color: '#bbb', fontSize: 11 }}>—</span>
+          if (r.status === 'updated') return <span style={{ background: '#d4edda', color: '#155724', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>✅</span>
+          if (r.status === 'notFound') return <span style={{ background: '#e0e0e0', color: '#555', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>⚠</span>
+          return <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>❌</span>
+        }
+
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ background: '#fff', borderRadius: 6, width: 800, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+            <div style={{ background: '#fff', borderRadius: 6, width: mmeActiveTab === 'compare' ? 920 : 800, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)', transition: 'width 0.2s' }}>
 
               {/* Header */}
               <div style={{ background: '#2d5fa6', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '6px 6px 0 0' }}>
@@ -1501,7 +1523,6 @@ async function confirmUpdatePrices() {
 
               {/* Upload section */}
               <div style={{ padding: '12px 20px', background: '#f0f7ff', borderBottom: '1px solid #c8dff8' }}>
-                {/* Grab_menu per branch */}
                 <div style={{ display: 'flex', gap: 10, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                   <span style={{ fontSize: 12, color: '#444', whiteSpace: 'nowrap', fontWeight: 600 }}>Grab_menu (.csv):</span>
                   {branches.map(b => (
@@ -1513,7 +1534,6 @@ async function confirmUpdatePrices() {
                     </button>
                   ))}
                 </div>
-                {/* GM MME + ปุ่มตรวจสอบ */}
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 12, color: '#444', whiteSpace: 'nowrap', fontWeight: 600 }}>GM MME (.xlsx):</span>
                   <button onClick={() => document.getElementById('mmeCheckMmeInput')?.click()}
@@ -1530,27 +1550,34 @@ async function confirmUpdatePrices() {
                 </div>
               </div>
 
-              {/* Branch Tabs */}
+              {/* Tabs */}
               {hasResults && (
                 <div style={{ display: 'flex', borderBottom: '2px solid #ddd', background: '#fafafa' }}>
-                  {branches.filter(b => mmeCheckResults[b.key].length > 0).map(b => {
-                    const res = mmeCheckResults[b.key]
-                    const notUpd = res.filter((r: any) => r.status === 'notUpdated').length
+                  {checkedBranches.map(b => {
+                    const notUpd = mmeCheckResults[b.key].filter((r: any) => r.status === 'notUpdated').length
                     const isActive = mmeActiveTab === b.key
                     return (
                       <button key={b.key} onClick={() => setMmeActiveTab(b.key)}
-                        style={{ padding: '8px 20px', border: 'none', borderBottom: isActive ? '2px solid #2d5fa6' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: isActive ? 700 : 400, color: isActive ? '#2d5fa6' : '#555', fontSize: 13, marginBottom: -2 }}
+                        style={{ padding: '8px 18px', border: 'none', borderBottom: isActive ? '2px solid #2d5fa6' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: isActive ? 700 : 400, color: isActive ? '#2d5fa6' : '#555', fontSize: 13, marginBottom: -2 }}
                       >
                         🛵 {b.label}
-                        {notUpd > 0 && <span style={{ marginLeft: 6, background: '#dc3545', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{notUpd}</span>}
+                        {notUpd > 0 && <span style={{ marginLeft: 5, background: '#dc3545', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{notUpd}</span>}
                       </button>
                     )
                   })}
+                  {checkedBranches.length >= 2 && (
+                    <button onClick={() => setMmeActiveTab('compare')}
+                      style={{ padding: '8px 18px', border: 'none', borderBottom: mmeActiveTab === 'compare' ? '2px solid #6f42c1' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: mmeActiveTab === 'compare' ? 700 : 400, color: mmeActiveTab === 'compare' ? '#6f42c1' : '#555', fontSize: 13, marginBottom: -2, marginLeft: 'auto' }}
+                    >
+                      📊 เปรียบเทียบ
+                      {compareNotUpdatedCount > 0 && <span style={{ marginLeft: 5, background: '#dc3545', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{compareNotUpdatedCount}</span>}
+                    </button>
+                  )}
                 </div>
               )}
 
-              {/* Summary for active tab */}
-              {tabResults.length > 0 && (
+              {/* Summary bar */}
+              {mmeActiveTab !== 'compare' && tabResults.length > 0 && (
                 <div style={{ padding: '8px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
                   <span>ทั้งหมด: <strong>{tabResults.length}</strong></span>
                   <span style={{ color: '#28a745' }}>✅ แก้ไขแล้ว: <strong>{tabResults.filter((r: any) => r.status === 'updated').length}</strong></span>
@@ -1560,18 +1587,66 @@ async function confirmUpdatePrices() {
                   )}
                 </div>
               )}
+              {mmeActiveTab === 'compare' && compareRows.length > 0 && (
+                <div style={{ padding: '8px 20px', background: '#f3eeff', borderBottom: '1px solid #d6c8f5', display: 'flex', gap: 20, fontSize: 13 }}>
+                  <span>SKU ทั้งหมด: <strong>{compareRows.length}</strong></span>
+                  <span style={{ color: '#dc3545' }}>❌ มีสาขาที่ยังไม่แก้ไข: <strong>{compareNotUpdatedCount}</strong></span>
+                  <span style={{ color: '#28a745' }}>✅ แก้ไขครบทุกสาขา: <strong>{compareRows.filter(r => checkedBranches.every(b => r[b.key as 'src'|'kkl'|'sss']?.status === 'updated')).length}</strong></span>
+                </div>
+              )}
 
-              {/* Table */}
+              {/* Table area */}
               <div style={{ overflowY: 'auto', flex: 1 }}>
                 {!hasResults ? (
                   <div style={{ padding: 40, textAlign: 'center', color: '#888', fontSize: 13 }}>
                     เลือกไฟล์ Grab_menu อย่างน้อย 1 สาขา และ GM MME (.xlsx) แล้วกด &quot;ตรวจสอบ&quot;
                   </div>
+                ) : mmeActiveTab === 'compare' ? (
+                  /* Compare table */
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: '#f0ebff', position: 'sticky', top: 0 }}>
+                        <th style={th}>#</th>
+                        <th style={th}>SKU</th>
+                        <th style={th}>ชื่อสินค้า</th>
+                        <th style={{ ...th, textAlign: 'center' }}>ราคา GM MME</th>
+                        {checkedBranches.map(b => (
+                          <th key={b.key} style={{ ...th, textAlign: 'center', minWidth: 110 }}>🛵 {b.label}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {compareRows.map((r, i) => {
+                        const anyNotUpdated = checkedBranches.some(b => r[b.key as 'src'|'kkl'|'sss']?.status === 'notUpdated')
+                        const allUpdated = checkedBranches.every(b => r[b.key as 'src'|'kkl'|'sss']?.status === 'updated')
+                        return (
+                          <tr key={r.sku} style={{ background: anyNotUpdated ? '#fff0f0' : allUpdated ? '#f6fff6' : 'transparent' }}>
+                            <td style={td}>{i + 1}</td>
+                            <td style={{ ...td, color: '#000' }}><strong>{r.sku}</strong></td>
+                            <td style={{ ...td, color: '#000' }}>{r.name || '-'}</td>
+                            <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{r.mmePrice?.toLocaleString() ?? '-'}</td>
+                            {checkedBranches.map(b => {
+                              const br = r[b.key as 'src'|'kkl'|'sss']
+                              return (
+                                <td key={b.key} style={{ ...td, textAlign: 'center' }}>
+                                  {statusBadge(br)}
+                                  {br?.grabPrice != null && (
+                                    <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>{br.grabPrice.toLocaleString()}</div>
+                                  )}
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 ) : tabResults.length === 0 ? (
                   <div style={{ padding: 40, textAlign: 'center', color: '#888', fontSize: 13 }}>
                     {tabHasFile ? 'ไม่มีข้อมูล' : 'ไม่ได้อัพโหลดไฟล์สาขานี้'}
                   </div>
                 ) : (
+                  /* Single branch table */
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
                       <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
@@ -1609,31 +1684,61 @@ async function confirmUpdatePrices() {
               {/* Footer */}
               <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    onClick={async () => {
-                      const notUpdated = tabResults.filter((r: any) => r.status === 'notUpdated')
-                      if (notUpdated.length === 0) return
-                      const XLSX = await import('xlsx')
-                      const rows = notUpdated.map((r: any) => ({
-                        'รหัสสินค้า (SKU)': r.sku,
-                        'ชื่อสินค้า': r.name,
-                        'ราคาที่ยื่นแก้ไข (GM MME)': r.mmePrice,
-                        'ราคาใน GRAB ปัจจุบัน': r.grabPrice,
-                      }))
-                      const ws = XLSX.utils.json_to_sheet(rows)
-                      const wb2 = XLSX.utils.book_new()
-                      XLSX.utils.book_append_sheet(wb2, ws, 'ยังไม่แก้ไข')
-                      const now = new Date()
-                      const dd = String(now.getDate()).padStart(2, '0')
-                      const mm2 = String(now.getMonth() + 1).padStart(2, '0')
-                      const yyyy = now.getFullYear()
-                      XLSX.writeFile(wb2, `GM MME ยังไม่แก้ไข ${mmeActiveTab.toUpperCase()} ${dd}.${mm2}.${yyyy}.xlsx`)
-                    }}
-                    disabled={tabResults.filter((r: any) => r.status === 'notUpdated').length === 0}
-                    style={{ ...btnStyle, background: '#f8d7da', borderColor: '#dc3545', color: '#721c24', opacity: tabResults.filter((r: any) => r.status === 'notUpdated').length === 0 ? 0.5 : 1 }}
-                  >
-                    📥 Export ยังไม่แก้ไข {mmeActiveTab.toUpperCase()} ({tabResults.filter((r: any) => r.status === 'notUpdated').length})
-                  </button>
+                  {mmeActiveTab !== 'compare' ? (
+                    <button
+                      onClick={async () => {
+                        const notUpdated = tabResults.filter((r: any) => r.status === 'notUpdated')
+                        if (notUpdated.length === 0) return
+                        const XLSX = await import('xlsx')
+                        const rows = notUpdated.map((r: any) => ({
+                          'รหัสสินค้า (SKU)': r.sku,
+                          'ชื่อสินค้า': r.name,
+                          'ราคาที่ยื่นแก้ไข (GM MME)': r.mmePrice,
+                          'ราคาใน GRAB ปัจจุบัน': r.grabPrice,
+                        }))
+                        const ws = XLSX.utils.json_to_sheet(rows)
+                        const wb2 = XLSX.utils.book_new()
+                        XLSX.utils.book_append_sheet(wb2, ws, 'ยังไม่แก้ไข')
+                        const now = new Date()
+                        const dd = String(now.getDate()).padStart(2, '0')
+                        const mm2 = String(now.getMonth() + 1).padStart(2, '0')
+                        const yyyy = now.getFullYear()
+                        XLSX.writeFile(wb2, `GM MME ยังไม่แก้ไข ${mmeActiveTab.toUpperCase()} ${dd}.${mm2}.${yyyy}.xlsx`)
+                      }}
+                      disabled={tabResults.filter((r: any) => r.status === 'notUpdated').length === 0}
+                      style={{ ...btnStyle, background: '#f8d7da', borderColor: '#dc3545', color: '#721c24', opacity: tabResults.filter((r: any) => r.status === 'notUpdated').length === 0 ? 0.5 : 1 }}
+                    >
+                      📥 Export ยังไม่แก้ไข {mmeActiveTab.toUpperCase()} ({tabResults.filter((r: any) => r.status === 'notUpdated').length})
+                    </button>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        if (compareNotUpdatedCount === 0) return
+                        const XLSX = await import('xlsx')
+                        const wb2 = XLSX.utils.book_new()
+                        checkedBranches.forEach(b => {
+                          const notUpd = mmeCheckResults[b.key].filter((r: any) => r.status === 'notUpdated')
+                          if (notUpd.length === 0) return
+                          const rows = notUpd.map((r: any) => ({
+                            'รหัสสินค้า (SKU)': r.sku,
+                            'ชื่อสินค้า': r.name,
+                            'ราคาที่ยื่นแก้ไข (GM MME)': r.mmePrice,
+                            'ราคาใน GRAB ปัจจุบัน': r.grabPrice,
+                          }))
+                          XLSX.utils.book_append_sheet(wb2, XLSX.utils.json_to_sheet(rows), b.label)
+                        })
+                        const now = new Date()
+                        const dd = String(now.getDate()).padStart(2, '0')
+                        const mm2 = String(now.getMonth() + 1).padStart(2, '0')
+                        const yyyy = now.getFullYear()
+                        XLSX.writeFile(wb2, `GM MME ยังไม่แก้ไข ทุกสาขา ${dd}.${mm2}.${yyyy}.xlsx`)
+                      }}
+                      disabled={compareNotUpdatedCount === 0}
+                      style={{ ...btnStyle, background: '#e8d5ff', borderColor: '#6f42c1', color: '#4a1980', opacity: compareNotUpdatedCount === 0 ? 0.5 : 1 }}
+                    >
+                      📥 Export ยังไม่แก้ไข ทุกสาขา ({compareNotUpdatedCount})
+                    </button>
+                  )}
                 </div>
                 <button onClick={() => setShowMmeCheckModal(false)} style={btnStyle}>ปิด</button>
               </div>
