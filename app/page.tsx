@@ -35,6 +35,8 @@ export default function Home() {
   const [priceCalcResults, setPriceCalcResults] = useState<any[]>([])
   const [updatingPrices, setUpdatingPrices] = useState(false)
   const [lastPriceUpdate, setLastPriceUpdate] = useState<string | null>(null)
+  const [priceCalcGrabFile, setPriceCalcGrabFile] = useState<File | null>(null)
+  const [priceCalcGrabMap, setPriceCalcGrabMap] = useState<Record<string, number>>({})
   const [showImportModal, setShowImportModal] = useState(false)
   const [importSheets, setImportSheets] = useState<{ name: string; rows: any[] }[]>([])
   const [importingData, setImportingData] = useState(false)
@@ -683,6 +685,21 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     setStatus(`ลบหมวดหมู่ ${selectedSheet} สำเร็จ (${data.deleted || 0} รายการ)`)
   }
 
+  async function handlePriceCalcGrabUpload(file: File) {
+    setPriceCalcGrabFile(file)
+    const text = await file.text()
+    const rows = parseCSVRows(text.replace(/^﻿/, ''))
+    const map: Record<string, number> = {}
+    for (let i = 2; i < rows.length; i++) {
+      const row = rows[i]
+      if (!row || row.length < 9) continue
+      const sku = row[8]?.trim()
+      const price = parsePriceRobust(row[2])
+      if (sku && price !== null) map[sku] = price
+    }
+    setPriceCalcGrabMap(map)
+  }
+
     async function handlePriceCalcUpload(file: File) {
   setStatus('กำลังคำนวณราคา...')
   setShowPriceCalcModal(true)
@@ -863,6 +880,8 @@ async function confirmUpdatePrices() {
         type="file" accept=".csv" id="priceCalcInput" style={{ display: 'none' }}
         onChange={e => { if (e.target.files?.[0]) handlePriceCalcUpload(e.target.files[0]) }}
         />
+        <input type="file" accept=".csv" id="priceCalcGrabInput" style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.[0]) { handlePriceCalcGrabUpload(e.target.files[0]); e.target.value = '' } }} />
         <input
         type="file" accept=".xlsx,.xls" id="importInput" style={{ display: 'none' }}
         onChange={e => { if (e.target.files?.[0]) { handleImportXlsx(e.target.files[0]); e.target.value = '' } }}
@@ -1220,113 +1239,143 @@ async function confirmUpdatePrices() {
   </div>
 )}
 
-      {showPriceCalcModal && (
-  <div style={{
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-    display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
-  }}>
-    <div style={{ background: '#fff', borderRadius: 6, width: 750, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+      {showPriceCalcModal && (() => {
+        const hasGrabMap = Object.keys(priceCalcGrabMap).length > 0
+        const enriched = priceCalcResults.filter(r => !r.error).map((r: any) => {
+          const grabCurrent = hasGrabMap ? priceCalcGrabMap[r.sku] : undefined
+          const effectiveChanged = hasGrabMap
+            ? (grabCurrent !== undefined ? Math.abs(r.newPrice - grabCurrent) > 0.01 : r.changed)
+            : r.changed
+          return { ...r, grabCurrent, effectiveChanged }
+        })
+        const displayRows = enriched.filter(r => r.effectiveChanged)
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', borderRadius: 6, width: 800, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
 
-      {/* Header */}
-      <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <strong>🧮 ผลคำนวณราคา</strong>
-        <button onClick={() => setShowPriceCalcModal(false)}
-          style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
-      </div>
+              {/* Header */}
+              <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '6px 6px 0 0' }}>
+                <strong>🧮 ผลคำนวณราคา</strong>
+                <button onClick={() => setShowPriceCalcModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
+              </div>
 
-      {/* Summary */}
-      {priceCalcResults.length > 0 && !priceCalcResults[0]?.error && (
-        <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
-          <span>ทั้งหมด: <strong>{priceCalcResults.length}</strong></span>
-          <span style={{ color: '#28a745' }}>เปลี่ยนแปลง: <strong>{priceCalcResults.filter(r => r.changed).length}</strong></span>
-          <span style={{ color: '#000' }}>ราคาเดิม: <strong>{priceCalcResults.filter(r => !r.changed).length}</strong></span>
-          <div style={{ marginLeft: 'auto', fontSize: 11, color: '#000' }}>
-            สูตร Grab = ราคาระดับ 0 ใหม่ × 0.95 × 1.20 × 1.07
+              {/* Grab_menu upload bar */}
+              <div style={{ padding: '10px 20px', background: '#f0f7ff', borderBottom: '1px solid #c8dff8', display: 'flex', gap: 10, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#444', fontWeight: 600, whiteSpace: 'nowrap' }}>Grab_menu (.csv):</span>
+                <button onClick={() => document.getElementById('priceCalcGrabInput')?.click()}
+                  style={{ ...btnStyle, fontSize: 11, padding: '5px 12px', background: priceCalcGrabFile ? '#d4edda' : '#fff', borderColor: priceCalcGrabFile ? '#28a745' : '#999', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={priceCalcGrabFile ? priceCalcGrabFile.name : 'เลือกไฟล์ Grab_menu เพื่อเปรียบเทียบราคาจริง'}
+                >
+                  {priceCalcGrabFile ? `✅ ${priceCalcGrabFile.name}` : '📂 เลือกไฟล์ Grab_menu'}
+                </button>
+                {!priceCalcGrabFile && (
+                  <span style={{ fontSize: 11, color: '#888' }}>← อัพโหลดเพื่อแสดงราคา Grab จริง (ปัจจุบันใช้ราคาจาก DB)</span>
+                )}
+                {hasGrabMap && (
+                  <span style={{ fontSize: 11, color: '#28a745', marginLeft: 4 }}>✅ โหลด {Object.keys(priceCalcGrabMap).length.toLocaleString()} SKU จาก Grab_menu</span>
+                )}
+              </div>
+
+              {/* Summary */}
+              {priceCalcResults.length > 0 && !priceCalcResults[0]?.error && (
+                <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
+                  <span>ทั้งหมด: <strong>{enriched.length}</strong></span>
+                  <span style={{ color: '#28a745' }}>เปลี่ยนแปลง: <strong>{displayRows.length}</strong></span>
+                  <span style={{ color: '#000' }}>ราคาเดิม: <strong>{enriched.length - displayRows.length}</strong></span>
+                  <div style={{ marginLeft: 'auto', fontSize: 11, color: '#666' }}>
+                    สูตร Grab = ระดับ 0 × 0.95 × 1.20 × 1.07
+                  </div>
+                </div>
+              )}
+
+              {/* Table */}
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {priceCalcResults[0]?.error ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{priceCalcResults[0].error}</div>
+                ) : priceCalcResults.length === 0 ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: '#000' }}>กำลังคำนวณ...</div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+                        <th style={th}>#</th>
+                        <th style={th}>SKU</th>
+                        <th style={th}>ชื่อสินค้า</th>
+                        <th style={th}>ราคาระดับ 0 ใหม่</th>
+                        <th style={{ ...th, color: hasGrabMap ? '#000' : '#999' }}>
+                          ราคาขาย Grab ปัจจุบัน{!hasGrabMap && <span style={{ fontWeight: 400, fontSize: 10 }}> (DB)</span>}
+                        </th>
+                        <th style={th}>ราคาขาย Grab ใหม่</th>
+                        <th style={th}>สถานะ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayRows.map((r: any, i: number) => (
+                        <tr key={i} style={{ background: '#fff3cd' }}>
+                          <td style={td}>{i + 1}</td>
+                          <td style={td}><strong>{r.sku}</strong></td>
+                          <td style={td}>{r.name}</td>
+                          <td style={td}>{r.level0.toLocaleString()}</td>
+                          <td style={td}>
+                            {hasGrabMap
+                              ? r.grabCurrent !== undefined
+                                ? <strong>{r.grabCurrent.toLocaleString()}</strong>
+                                : <span style={{ color: '#999', fontSize: 11 }}>ไม่พบใน Grab</span>
+                              : r.oldPrice.toLocaleString()
+                            }
+                          </td>
+                          <td style={{ ...td, color: '#28a745', fontWeight: 600 }}>{r.newPrice.toLocaleString()}</td>
+                          <td style={td}>
+                            <span style={{ background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ เปลี่ยนแปลง</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button onClick={() => setShowPriceCalcModal(false)} style={btnStyle}>ยกเลิก</button>
+                <button
+                  onClick={async () => {
+                    const toExport = displayRows
+                    if (toExport.length === 0) return
+                    const XLSX = await import('xlsx')
+                    const now = new Date()
+                    const dd = String(now.getDate()).padStart(2, '0')
+                    const mm = String(now.getMonth() + 1).padStart(2, '0')
+                    const yyyy = now.getFullYear()
+                    const exportRows = toExportRows(
+                      toExport.map((r: any) => ({
+                        ...r._product,
+                        '*ราคาสินค้า': r.newPrice,
+                        'รหัสสินค้า (SKU NUMBER)': r.sku
+                      }))
+                    )
+                    const ws = XLSX.utils.json_to_sheet(exportRows)
+                    const wb = XLSX.utils.book_new()
+                    XLSX.utils.book_append_sheet(wb, ws, 'อัพเดทราคา')
+                    XLSX.writeFile(wb, `GM MME ${dd}.${mm}.${yyyy}.xlsx`)
+                  }}
+                  disabled={displayRows.length === 0}
+                  style={{ ...btnStyle, background: '#17a2b8', color: '#fff', borderColor: '#117a8b' }}
+                >
+                  📥 Export Excel
+                </button>
+                <button
+                  onClick={confirmUpdatePrices}
+                  disabled={updatingPrices || displayRows.length === 0}
+                  style={{ ...btnStyle, background: '#28a745', color: '#fff', borderColor: '#1e7e34', opacity: updatingPrices ? 0.6 : 1 }}
+                >
+                  {updatingPrices ? '⏳ กำลังอัพเดท...' : `💾 อัพเดท ${displayRows.length} รายการ`}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
-
-      {/* Table */}
-      <div style={{ overflowY: 'auto', flex: 1 }}>
-        {priceCalcResults[0]?.error ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{priceCalcResults[0].error}</div>
-        ) : priceCalcResults.length === 0 ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#000' }}>กำลังคำนวณ...</div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
-                <th style={th}>#</th>
-                <th style={th}>SKU</th>
-                <th style={th}>ชื่อสินค้า</th>
-                <th style={th}>ราคาในระบบใหม่</th>
-                <th style={th}>ราคาขาย Grab ปัจจุบัน</th>
-                <th style={th}>ราคาขาย Grab ใหม่</th>
-                <th style={th}>สถานะ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {priceCalcResults.filter((r: any) => r.changed).map((r: any, i: number) => (
-                <tr key={i} style={{ background: r.changed ? '#fff3cd' : 'transparent' }}>
-                  <td style={td}>{i + 1}</td>
-                  <td style={td}><strong>{r.sku}</strong></td>
-                  <td style={td}>{r.name}</td>
-                  <td style={td}>{r.level0.toLocaleString()}</td>
-                  <td style={td}>{r.oldPrice.toLocaleString()}</td>
-                  <td style={{ ...td, color: '#28a745', fontWeight: 600 }}>{r.newPrice.toLocaleString()}</td>
-                  <td style={td}>
-                    {r.changed
-                      ? <span style={{ background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ เปลี่ยนแปลง</span>
-                      : <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ เดิม</span>
-                    }
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button onClick={() => setShowPriceCalcModal(false)} style={btnStyle}>ยกเลิก</button>
-        <button
-          onClick={async () => {
-            const toExport = priceCalcResults.filter((r: any) => r.changed)
-            if (toExport.length === 0) return
-            const XLSX = await import('xlsx')
-            const now = new Date()
-            const dd = String(now.getDate()).padStart(2, '0')
-            const mm = String(now.getMonth() + 1).padStart(2, '0')
-            const yyyy = now.getFullYear()
-            const exportRows = toExportRows(
-              toExport.map((r: any) => ({
-                ...r._product,
-                '*ราคาสินค้า': r.newPrice,
-                'รหัสสินค้า (SKU NUMBER)': r.sku
-              }))
-            )
-            const ws = XLSX.utils.json_to_sheet(exportRows)
-            const wb = XLSX.utils.book_new()
-            XLSX.utils.book_append_sheet(wb, ws, 'อัพเดทราคา')
-            XLSX.writeFile(wb, `GM MME ${dd}.${mm}.${yyyy}.xlsx`)
-          }}
-          disabled={priceCalcResults.filter((r: any) => r.changed).length === 0}
-          style={{ ...btnStyle, background: '#17a2b8', color: '#fff', borderColor: '#117a8b' }}
-        >
-          📥 Export Excel
-        </button>
-        <button
-          onClick={confirmUpdatePrices}
-          disabled={updatingPrices || priceCalcResults.filter(r => r.changed).length === 0}
-          style={{ ...btnStyle, background: '#28a745', color: '#fff', borderColor: '#1e7e34', opacity: updatingPrices ? 0.6 : 1 }}
-        >
-          {updatingPrices ? '⏳ กำลังอัพเดท...' : `💾 อัพเดท ${priceCalcResults.filter(r => r.changed).length} รายการ`}
-        </button>
-      </div>
-    </div>
-  </div>
-)}
+        )
+      })()}
 
 
       {/* Import Modal */}
