@@ -1732,62 +1732,36 @@ async function confirmUpdatePrices() {
 
               {/* Footer */}
               <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {mmeActiveTab !== 'compare' ? (
-                    <button
-                      onClick={async () => {
-                        const notUpdated = tabResults.filter((r: any) => r.status === 'notUpdated')
-                        if (notUpdated.length === 0) return
-                        const XLSX = await import('xlsx')
-                        const rows = notUpdated.map((r: any) => ({
-                          'รหัสสินค้า (SKU)': r.sku,
-                          'ชื่อสินค้า': r.name,
-                          'ราคาที่ยื่นแก้ไข (GM MME)': r.mmePrice,
-                          'ราคาใน GRAB ปัจจุบัน': r.grabPrice,
-                        }))
-                        const ws = XLSX.utils.json_to_sheet(rows)
-                        const wb2 = XLSX.utils.book_new()
-                        XLSX.utils.book_append_sheet(wb2, ws, 'ยังไม่แก้ไข')
-                        const now = new Date()
-                        const dd = String(now.getDate()).padStart(2, '0')
-                        const mm2 = String(now.getMonth() + 1).padStart(2, '0')
-                        const yyyy = now.getFullYear()
-                        XLSX.writeFile(wb2, `GM MME ยังไม่แก้ไข ${mmeActiveTab.toUpperCase()} ${dd}.${mm2}.${yyyy}.xlsx`)
-                      }}
-                      disabled={tabResults.filter((r: any) => r.status === 'notUpdated').length === 0}
-                      style={{ ...btnStyle, background: '#f8d7da', borderColor: '#dc3545', color: '#721c24', opacity: tabResults.filter((r: any) => r.status === 'notUpdated').length === 0 ? 0.5 : 1 }}
-                    >
-                      📥 Export ยังไม่แก้ไข {mmeActiveTab.toUpperCase()} ({tabResults.filter((r: any) => r.status === 'notUpdated').length})
-                    </button>
-                  ) : (
-                    <button
-                      onClick={async () => {
-                        if (compareNotUpdatedCount === 0) return
-                        const XLSX = await import('xlsx')
-                        const wb2 = XLSX.utils.book_new()
-                        checkedBranches.forEach(b => {
-                          const notUpd = mmeCheckResults[b.key].filter((r: any) => r.status === 'notUpdated')
-                          if (notUpd.length === 0) return
-                          const rows = notUpd.map((r: any) => ({
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {checkedBranches.map(b => {
+                    const notUpdated = mmeCheckResults[b.key].filter((r: any) => r.status === 'notUpdated')
+                    return (
+                      <button key={b.key}
+                        disabled={notUpdated.length === 0}
+                        onClick={async () => {
+                          if (notUpdated.length === 0) return
+                          const XLSX = await import('xlsx')
+                          const rows = notUpdated.map((r: any) => ({
                             'รหัสสินค้า (SKU)': r.sku,
                             'ชื่อสินค้า': r.name,
                             'ราคาที่ยื่นแก้ไข (GM MME)': r.mmePrice,
                             'ราคาใน GRAB ปัจจุบัน': r.grabPrice,
                           }))
-                          XLSX.utils.book_append_sheet(wb2, XLSX.utils.json_to_sheet(rows), b.label)
-                        })
-                        const now = new Date()
-                        const dd = String(now.getDate()).padStart(2, '0')
-                        const mm2 = String(now.getMonth() + 1).padStart(2, '0')
-                        const yyyy = now.getFullYear()
-                        XLSX.writeFile(wb2, `GM MME ยังไม่แก้ไข ทุกสาขา ${dd}.${mm2}.${yyyy}.xlsx`)
-                      }}
-                      disabled={compareNotUpdatedCount === 0}
-                      style={{ ...btnStyle, background: '#e8d5ff', borderColor: '#6f42c1', color: '#4a1980', opacity: compareNotUpdatedCount === 0 ? 0.5 : 1 }}
-                    >
-                      📥 Export ยังไม่แก้ไข ทุกสาขา ({compareNotUpdatedCount})
-                    </button>
-                  )}
+                          const ws = XLSX.utils.json_to_sheet(rows)
+                          const wb2 = XLSX.utils.book_new()
+                          XLSX.utils.book_append_sheet(wb2, ws, 'ยังไม่แก้ไข')
+                          const now = new Date()
+                          const dd = String(now.getDate()).padStart(2, '0')
+                          const mm2 = String(now.getMonth() + 1).padStart(2, '0')
+                          const yyyy = now.getFullYear()
+                          XLSX.writeFile(wb2, `GM MME ยังไม่แก้ไข ${b.label} ${dd}.${mm2}.${yyyy}.xlsx`)
+                        }}
+                        style={{ ...btnStyle, background: '#f8d7da', borderColor: '#dc3545', color: '#721c24', opacity: notUpdated.length === 0 ? 0.5 : 1 }}
+                      >
+                        📥 Export {b.label} ({notUpdated.length})
+                      </button>
+                    )
+                  })}
                 </div>
                 <button onClick={() => setShowMmeCheckModal(false)} style={btnStyle}>ปิด</button>
               </div>
