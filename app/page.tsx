@@ -1755,6 +1755,12 @@ async function confirmUpdatePrices() {
                             'หมวดหมู่รายการสินค้า': r.category || '',
                           }))
                           const ws = XLSX.utils.json_to_sheet(rows)
+                          notUpdated.forEach((r: any, i: number) => {
+                            const url = r.image || ''
+                            if (!url) return
+                            const cellRef = `F${i + 2}`
+                            if (ws[cellRef]) ws[cellRef].l = { Target: url }
+                          })
                           const wb2 = XLSX.utils.book_new()
                           XLSX.utils.book_append_sheet(wb2, ws, 'ยังไม่แก้ไข')
                           const now = new Date()
