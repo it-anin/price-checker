@@ -1912,7 +1912,10 @@ async function confirmUpdatePrices() {
                     onClick={async () => {
                       if (tabData.length === 0) return
                       const XLSX = await import('xlsx')
-                      const rows = tabData.map((p: any) => ({
+                      const sorted = [...tabData].sort((a: any, b: any) =>
+                        (a['หมวดหมู่สินค้า (CATEGORIES)'] || '').localeCompare(b['หมวดหมู่สินค้า (CATEGORIES)'] || '', 'th')
+                      )
+                      const rows = sorted.map((p: any) => ({
                         '*ประเภทสินค้า': p['ประเภทสินค้า'] || '',
                         '*ชื่อสินค้า': p['*ชื่อสินค้า (NAME)'] || '',
                         '*เลขที่ใบอนุญาตโฆษณา': p['*เลขที่ใบอนุญาตโฆษณา'] || '',
@@ -1922,7 +1925,7 @@ async function confirmUpdatePrices() {
                         'หมวดหมู่รายการสินค้า': p['หมวดหมู่สินค้า (CATEGORIES)'] || '',
                       }))
                       const ws = XLSX.utils.json_to_sheet(rows)
-                      tabData.forEach((p: any, i: number) => {
+                      sorted.forEach((p: any, i: number) => {
                         const url = p['*รูปภาพสินค้า'] || ''
                         if (!url) return
                         const cellRef = `F${i + 2}`
