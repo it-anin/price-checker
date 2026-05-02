@@ -736,19 +736,19 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
 
   setStatus('(1/3) กำลังอ่านไฟล์ CSV...')
 
-  // Col B (index 1) = SKU, Col F (index 5) = filter เฉพาะ 0, Col G (index 6) = ราคาระดับ 0
+  // Col A (index 0) = SKU, Col D (index 3) = หน่วย filter 1, Col E (index 4) = ระดับราคา filter 0, Col F (index 5) = ราคา
   // เริ่มจาก row 2 (index 1) ข้าม header
   const calcMap: Record<string, { sku: string; level0: number; D: number }> = {}
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i]
-    if (!row || row.length < 7) continue
-    const sku = row[1]?.trim()
+    if (!row || row.length < 6) continue
+    const sku = row[0]?.trim()
     const colD = row[3]?.trim()
-    const colF = row[5]?.trim()
+    const colE = row[4]?.trim()
     if (colD !== '1') continue  // หน่วยเล็กที่สุดขายหน้าร้าน
-    if (colF !== '0') continue
-    const level0 = parsePriceRobust(row[6])
+    if (colE !== '0') continue
+    const level0 = parsePriceRobust(row[5])
     if (!sku || level0 === null) continue
 
     const A = level0 * 0.95
@@ -927,7 +927,7 @@ async function confirmUpdatePrices() {
         <button onClick={() => { setIsAdding(true); setEditProduct({ 'ประเภทสินค้า': '', '*ชื่อสินค้า (NAME)': '', '*เลขที่ใบอนุญาตโฆษณา': '', '*ราคาสินค้า': '', 'รหัสสินค้า (SKU NUMBER)': '', '*รูปภาพสินค้า': '', 'หมวดหมู่สินค้า (CATEGORIES)': '' }) }} style={btnStyle}>➕ เพิ่มรายการสินค้า</button>
         <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
         <button onClick={() => document.getElementById('csvConvertInput')?.click()} style={btnStyle} title="แปลงไฟล์ CSV จาก POS (TIS-620) เป็น CSV UTF-8">🔄 แปลง CSV เป็น UTF-8</button>
-        <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ R05.105 อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ตรวจสอบราคา Promaxx</button>
+        <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ Price อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ตรวจสอบราคา Promaxx</button>
         <button onClick={() => document.getElementById('grabInputSrc')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SRC">🛵 GRAB SRC</button>
         <button onClick={() => document.getElementById('grabInputKkl')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา KKL">🛵 GRAB KKL</button>
         <button onClick={() => document.getElementById('grabInputSss')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SSS">🛵 GRAB SSS</button>
