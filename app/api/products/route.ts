@@ -39,6 +39,7 @@ function aggregateProducts(rows: any[]) {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const sku = searchParams.get('sku')
+  const q_param = searchParams.get('q')
   const sheet = searchParams.get('sheet')
   const skus = searchParams.get('skus')
   const missingBranch = searchParams.get('missingBranch')
@@ -65,7 +66,8 @@ export async function GET(req: NextRequest) {
 
   let q = supabase.from('products').select('*')
 
-  if (sku) q = q.ilike('"รหัสสินค้า (SKU NUMBER)"', `%${sku}%`)
+  if (q_param) q = q.or(`"รหัสสินค้า (SKU NUMBER)".ilike.%${q_param}%,"*ชื่อสินค้า (NAME)".ilike.%${q_param}%`)
+  else if (sku) q = q.ilike('"รหัสสินค้า (SKU NUMBER)"', `%${sku}%`)
   if (sheet) q = q.eq('"หมวดหมู่สินค้า (CATEGORIES)"', sheet)
   if (skus) q = q.in('"รหัสสินค้า (SKU NUMBER)"', skus.split(','))
 

@@ -99,7 +99,7 @@ export default function Home() {
   async function searchProducts(sku: string) {
     if (sku.length < 3) return
     setLoading(true)
-    const res = await fetch(`/api/products?sku=${encodeURIComponent(sku)}`)
+    const res = await fetch(`/api/products?q=${encodeURIComponent(sku)}`)
     const data = await res.json()
     if (data.success) {
       setProducts(data.products)
@@ -888,7 +888,7 @@ async function confirmUpdatePrices() {
       <div style={{ background: '#f8f8f8', borderBottom: '1px solid #bbb', padding: '10px 20px', display: 'flex', gap: 12, alignItems: 'center' }}>
         <input
           type="text"
-          placeholder="ค้นหารหัสสินค้า..."
+          placeholder="ค้นหารหัสสินค้า / ชื่อสินค้า..."
           value={search}
           onChange={e => { setSearch(e.target.value); searchProducts(e.target.value) }}
           style={{ padding: '6px 10px', border: '1px solid #999', borderRadius: 3, fontSize: 13, width: 220 }}
