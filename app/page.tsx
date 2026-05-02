@@ -736,26 +736,15 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
 
   setStatus('(1/3) กำลังอ่านไฟล์ CSV...')
 
-  // Col A (index 0) = SKU, Col D (index 3) = หน่วย filter 1, Col E (index 4) = ระดับราคา filter 0, Col F (index 5) = ราคา
+  // Col A (index 0) = SKU, Col E (index 4) = ราคาระดับ 0 (header ชื่อ '0')
   // เริ่มจาก row 2 (index 1) ข้าม header
   const calcMap: Record<string, { sku: string; level0: number; D: number }> = {}
 
-  console.log('[PriceCalc] total rows:', rows.length)
-  if (rows.length > 1) {
-    console.log('[PriceCalc] row[0] (header):', rows[0])
-    console.log('[PriceCalc] row[1] (first data):', rows[1])
-    console.log('[PriceCalc] row[2]:', rows[2])
-  }
-
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i]
-    if (!row || row.length < 6) continue
+    if (!row || row.length < 5) continue
     const sku = row[0]?.trim()
-    const colD = row[3]?.trim()
-    const colE = row[4]?.trim()
-    if (colD !== '1') continue  // หน่วยเล็กที่สุดขายหน้าร้าน
-    if (colE !== '0') continue
-    const level0 = parsePriceRobust(row[5])
+    const level0 = parsePriceRobust(row[4])
     if (!sku || level0 === null) continue
 
     const A = level0 * 0.95
