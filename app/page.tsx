@@ -47,6 +47,11 @@ export default function Home() {
   const [masterFileName, setMasterFileName] = useState<string | null>(null)
   const [masterMissingCount, setMasterMissingCount] = useState<number | null>(null)
   const [exportingMissing, setExportingMissing] = useState(false)
+  const [showMissingBranchModal, setShowMissingBranchModal] = useState(false)
+  const [missingBranchResults, setMissingBranchResults] = useState<Record<string, Product[]>>({ src: [], kkl: [], sss: [] })
+  const [missingBranchLoaded, setMissingBranchLoaded] = useState<Record<string, boolean>>({ src: false, kkl: false, sss: false })
+  const [missingBranchLoading, setMissingBranchLoading] = useState(false)
+  const [missingBranchTab, setMissingBranchTab] = useState<'src'|'kkl'|'sss'>('src')
   const [showMmeCheckModal, setShowMmeCheckModal] = useState(false)
   const [mmeCheckResults, setMmeCheckResults] = useState<Record<string, any[]>>({ src: [], kkl: [], sss: [] })
   const [mmeCheckGrabFileSrc, setMmeCheckGrabFileSrc] = useState<File | null>(null)
@@ -518,6 +523,22 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     setStatus(`Export ${selected.length} รายการที่เลือกสำเร็จ ✅`)
   }
 
+  async function loadMissingBranch(branch: 'src'|'kkl'|'sss') {
+    if (missingBranchLoaded[branch]) return
+    setMissingBranchLoading(true)
+    setStatus(`กำลังโหลดสินค้าที่ขาดใน GRAB ${branch.toUpperCase()}...`)
+    const res = await fetch(`/api/products?missingBranch=${branch}`)
+    const data = await res.json()
+    if (data.success) {
+      setMissingBranchResults(prev => ({ ...prev, [branch]: data.products }))
+      setMissingBranchLoaded(prev => ({ ...prev, [branch]: true }))
+      setStatus(`ขาดใน GRAB ${branch.toUpperCase()}: ${data.products.length} รายการ`)
+    } else {
+      setStatus('เกิดข้อผิดพลาด: ' + data.error)
+    }
+    setMissingBranchLoading(false)
+  }
+
   async function handleMmeVsGrabCheck() {
     if (!mmeCheckMmeFile) return
     if (!mmeCheckGrabFileSrc && !mmeCheckGrabFileKkl && !mmeCheckGrabFileSss) return
@@ -923,6 +944,17 @@ async function confirmUpdatePrices() {
           style={{ ...btnStyle, background: '#e8f4ff', borderColor: '#4a8bc4' }}
           title="ตรวจสอบว่าสินค้าที่ยื่นแก้ไขใน GM MME ถูกอัพเดทราคาใน GRAB แล้วหรือยัง"
         >📋 ตรวจ GM MME vs GRAB</button>
+        <button
+          onClick={() => {
+            setShowMissingBranchModal(true)
+            setMissingBranchResults({ src: [], kkl: [], sss: [] })
+            setMissingBranchLoaded({ src: false, kkl: false, sss: false })
+            setMissingBranchTab('src')
+            setTimeout(() => loadMissingBranch('src'), 0)
+          }}
+          style={{ ...btnStyle, background: '#fff3e0', borderColor: '#e65100' }}
+          title="ตรวจสอบสินค้าที่ยังไม่มีใน GRAB แต่ละสาขา"
+        >🔍 สินค้าขาด GRAB</button>
 
       {/* Main Layout */}
       </div>
@@ -1777,6 +1809,154 @@ async function confirmUpdatePrices() {
                   })}
                 </div>
                 <button onClick={() => setShowMmeCheckModal(false)} style={btnStyle}>ปิด</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Missing Branch Modal */}
+      {showMissingBranchModal && (() => {
+        const branches: { key: 'src'|'kkl'|'sss'; label: string }[] = [
+          { key: 'src', label: 'SRC' },
+          { key: 'kkl', label: 'KKL' },
+          { key: 'sss', label: 'SSS' },
+        ]
+        const tabData = missingBranchResults[missingBranchTab] ?? []
+        const isLoaded = missingBranchLoaded[missingBranchTab]
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', borderRadius: 6, width: 820, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+
+              {/* Header */}
+              <div style={{ background: '#e65100', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '6px 6px 0 0' }}>
+                <strong>🔍 สินค้าที่ขาดใน GRAB</strong>
+                <button onClick={() => setShowMissingBranchModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
+              </div>
+
+              {/* Tabs */}
+              <div style={{ display: 'flex', borderBottom: '2px solid #ddd', background: '#fafafa' }}>
+                {branches.map(b => {
+                  const isActive = missingBranchTab === b.key
+                  const count = missingBranchLoaded[b.key] ? missingBranchResults[b.key].length : null
+                  return (
+                    <button key={b.key}
+                      onClick={() => { setMissingBranchTab(b.key); loadMissingBranch(b.key) }}
+                      style={{ padding: '8px 24px', border: 'none', borderBottom: isActive ? '2px solid #e65100' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: isActive ? 700 : 400, color: isActive ? '#e65100' : '#555', fontSize: 13, marginBottom: -2 }}
+                    >
+                      🛵 {b.label}
+                      {count !== null && (
+                        <span style={{ marginLeft: 6, background: count > 0 ? '#e65100' : '#28a745', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{count}</span>
+                      )}
+                    </button>
+                  )
+                })}
+                <div style={{ marginLeft: 'auto', padding: '8px 16px', fontSize: 11, color: '#888', alignSelf: 'center' }}>
+                  ข้อมูลอ้างอิงจาก branch field ใน DB (อัพเดทเมื่ออัพโหลด GRAB CSV)
+                </div>
+              </div>
+
+              {/* Summary */}
+              {isLoaded && (
+                <div style={{ padding: '8px 20px', background: '#fff8f2', borderBottom: '1px solid #ffe0cc', display: 'flex', gap: 20, fontSize: 13 }}>
+                  <span>สินค้าทั้งหมดที่ขาดใน {missingBranchTab.toUpperCase()}: <strong style={{ color: tabData.length > 0 ? '#e65100' : '#28a745' }}>{tabData.length} รายการ</strong></span>
+                </div>
+              )}
+
+              {/* Table */}
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {!isLoaded || missingBranchLoading ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: '#888', fontSize: 13 }}>⏳ กำลังโหลด...</div>
+                ) : tabData.length === 0 ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: '#28a745', fontSize: 14 }}>
+                    ✅ ไม่มีสินค้าที่ขาดใน GRAB {missingBranchTab.toUpperCase()}
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+                        <th style={th}>#</th>
+                        <th style={th}>SKU</th>
+                        <th style={th}>ชื่อสินค้า</th>
+                        <th style={th}>ราคา</th>
+                        <th style={th}>หมวดหมู่</th>
+                        <th style={{ ...th, textAlign: 'center' }}>SRC</th>
+                        <th style={{ ...th, textAlign: 'center' }}>KKL</th>
+                        <th style={{ ...th, textAlign: 'center' }}>SSS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tabData.map((p: any, i: number) => (
+                        <tr key={p['รหัสสินค้า (SKU NUMBER)']} style={{ background: '#fff8f2' }}>
+                          <td style={td}>{i + 1}</td>
+                          <td style={{ ...td, color: '#000' }}><strong>{p['รหัสสินค้า (SKU NUMBER)']}</strong></td>
+                          <td style={{ ...td, color: '#000' }}>{p['*ชื่อสินค้า (NAME)'] || '-'}</td>
+                          <td style={{ ...td, fontWeight: 600 }}>{p['*ราคาสินค้า'] || '-'}</td>
+                          <td style={td}>{p['หมวดหมู่สินค้า (CATEGORIES)'] || '-'}</td>
+                          {(['src','kkl','sss'] as const).map(b => (
+                            <td key={b} style={{ ...td, textAlign: 'center' }}>
+                              {p[b]
+                                ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>✅</span>
+                                : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>❌</span>
+                              }
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    disabled={!isLoaded || tabData.length === 0}
+                    onClick={async () => {
+                      if (tabData.length === 0) return
+                      const XLSX = await import('xlsx')
+                      const rows = tabData.map((p: any) => ({
+                        '*ประเภทสินค้า': p['ประเภทสินค้า'] || '',
+                        '*ชื่อสินค้า': p['*ชื่อสินค้า (NAME)'] || '',
+                        '*เลขที่ใบอนุญาตโฆษณา': p['*เลขที่ใบอนุญาตโฆษณา'] || '',
+                        '*ราคาสินค้า': p['*ราคาสินค้า'] || '',
+                        'รหัสสินค้า': p['รหัสสินค้า (SKU NUMBER)'] || '',
+                        '*รูปภาพสินค้า': p['*รูปภาพสินค้า'] || '',
+                        'หมวดหมู่รายการสินค้า': p['หมวดหมู่สินค้า (CATEGORIES)'] || '',
+                      }))
+                      const ws = XLSX.utils.json_to_sheet(rows)
+                      tabData.forEach((p: any, i: number) => {
+                        const url = p['*รูปภาพสินค้า'] || ''
+                        if (!url) return
+                        const cellRef = `F${i + 2}`
+                        if (ws[cellRef]) ws[cellRef].l = { Target: url }
+                      })
+                      const wb = XLSX.utils.book_new()
+                      XLSX.utils.book_append_sheet(wb, ws, `ขาด ${missingBranchTab.toUpperCase()}`)
+                      const now = new Date()
+                      const dd = String(now.getDate()).padStart(2, '0')
+                      const mm2 = String(now.getMonth() + 1).padStart(2, '0')
+                      const yyyy = now.getFullYear()
+                      XLSX.writeFile(wb, `สินค้าขาด GRAB ${missingBranchTab.toUpperCase()} ${dd}.${mm2}.${yyyy}.xlsx`)
+                    }}
+                    style={{ ...btnStyle, background: '#fff3e0', borderColor: '#e65100', color: '#e65100', opacity: (!isLoaded || tabData.length === 0) ? 0.5 : 1 }}
+                  >
+                    📥 Export {missingBranchTab.toUpperCase()} ({tabData.length})
+                  </button>
+                  <button
+                    disabled={missingBranchLoading}
+                    onClick={() => {
+                      setMissingBranchLoaded({ src: false, kkl: false, sss: false })
+                      setMissingBranchResults({ src: [], kkl: [], sss: [] })
+                      setTimeout(() => loadMissingBranch(missingBranchTab), 0)
+                    }}
+                    style={{ ...btnStyle, opacity: missingBranchLoading ? 0.5 : 1 }}
+                  >
+                    🔄 รีโหลด
+                  </button>
+                </div>
+                <button onClick={() => setShowMissingBranchModal(false)} style={btnStyle}>ปิด</button>
               </div>
             </div>
           </div>

@@ -41,6 +41,27 @@ export async function GET(req: NextRequest) {
   const sku = searchParams.get('sku')
   const sheet = searchParams.get('sheet')
   const skus = searchParams.get('skus')
+  const missingBranch = searchParams.get('missingBranch')
+
+  // สินค้าที่ขาดจากสาขา — fetch ทั้งหมด aggregate แล้ว filter
+  if (missingBranch) {
+    const nb = normalizeBranchName(missingBranch)
+    if (!BRANCH_KEYS.includes(nb as (typeof BRANCH_KEYS)[number])) {
+      return NextResponse.json({ success: false, error: 'Invalid branch' })
+    }
+    const all: any[] = []
+    let from = 0
+    while (true) {
+      const { data, error } = await supabase.from('products').select('*').range(from, from + 999)
+      if (error) return NextResponse.json({ success: false, error: error.message })
+      all.push(...(data || []))
+      if (!data || data.length < 1000) break
+      from += 1000
+    }
+    const aggregated = aggregateProducts(all)
+    const missing = aggregated.filter((p: any) => !p[nb])
+    return NextResponse.json({ success: true, products: missing })
+  }
 
   let q = supabase.from('products').select('*')
 
