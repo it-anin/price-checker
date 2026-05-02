@@ -740,6 +740,13 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
   // เริ่มจาก row 2 (index 1) ข้าม header
   const calcMap: Record<string, { sku: string; level0: number; D: number }> = {}
 
+  console.log('[PriceCalc] total rows:', rows.length)
+  if (rows.length > 1) {
+    console.log('[PriceCalc] row[0] (header):', rows[0])
+    console.log('[PriceCalc] row[1] (first data):', rows[1])
+    console.log('[PriceCalc] row[2]:', rows[2])
+  }
+
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i]
     if (!row || row.length < 6) continue
