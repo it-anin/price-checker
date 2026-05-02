@@ -52,6 +52,7 @@ export default function Home() {
   const [missingBranchLoaded, setMissingBranchLoaded] = useState<Record<string, boolean>>({ src: false, kkl: false, sss: false })
   const [missingBranchLoading, setMissingBranchLoading] = useState(false)
   const [missingBranchTab, setMissingBranchTab] = useState<'src'|'kkl'|'sss'>('src')
+  const [missingBranchExportCat, setMissingBranchExportCat] = useState<string>('all')
   const [showMmeCheckModal, setShowMmeCheckModal] = useState(false)
   const [mmeCheckResults, setMmeCheckResults] = useState<Record<string, any[]>>({ src: [], kkl: [], sss: [] })
   const [mmeCheckGrabFileSrc, setMmeCheckGrabFileSrc] = useState<File | null>(null)
@@ -1837,7 +1838,7 @@ async function confirmUpdatePrices() {
                   const count = missingBranchLoaded[b.key] ? missingBranchResults[b.key].length : null
                   return (
                     <button key={b.key}
-                      onClick={() => { setMissingBranchTab(b.key); loadMissingBranch(b.key) }}
+                      onClick={() => { setMissingBranchTab(b.key); setMissingBranchExportCat('all'); loadMissingBranch(b.key) }}
                       style={{ padding: '8px 24px', border: 'none', borderBottom: isActive ? '2px solid #e65100' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: isActive ? 700 : 400, color: isActive ? '#e65100' : '#555', fontSize: 13, marginBottom: -2 }}
                     >
                       🛵 {b.label}
@@ -1906,43 +1907,63 @@ async function confirmUpdatePrices() {
 
               {/* Footer */}
               <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    disabled={!isLoaded || tabData.length === 0}
-                    onClick={async () => {
-                      if (tabData.length === 0) return
-                      const XLSX = await import('xlsx')
-                      const sorted = [...tabData].sort((a: any, b: any) =>
-                        (a['หมวดหมู่สินค้า (CATEGORIES)'] || '').localeCompare(b['หมวดหมู่สินค้า (CATEGORIES)'] || '', 'th')
-                      )
-                      const rows = sorted.map((p: any) => ({
-                        '*ประเภทสินค้า': p['ประเภทสินค้า'] || '',
-                        '*ชื่อสินค้า': p['*ชื่อสินค้า (NAME)'] || '',
-                        '*เลขที่ใบอนุญาตโฆษณา': p['*เลขที่ใบอนุญาตโฆษณา'] || '',
-                        '*ราคาสินค้า': p['*ราคาสินค้า'] || '',
-                        'รหัสสินค้า': p['รหัสสินค้า (SKU NUMBER)'] || '',
-                        '*รูปภาพสินค้า': p['*รูปภาพสินค้า'] || '',
-                        'หมวดหมู่รายการสินค้า': p['หมวดหมู่สินค้า (CATEGORIES)'] || '',
-                      }))
-                      const ws = XLSX.utils.json_to_sheet(rows)
-                      sorted.forEach((p: any, i: number) => {
-                        const url = p['*รูปภาพสินค้า'] || ''
-                        if (!url) return
-                        const cellRef = `F${i + 2}`
-                        if (ws[cellRef]) ws[cellRef].l = { Target: url }
-                      })
-                      const wb = XLSX.utils.book_new()
-                      XLSX.utils.book_append_sheet(wb, ws, `ขาด ${missingBranchTab.toUpperCase()}`)
-                      const now = new Date()
-                      const dd = String(now.getDate()).padStart(2, '0')
-                      const mm2 = String(now.getMonth() + 1).padStart(2, '0')
-                      const yyyy = now.getFullYear()
-                      XLSX.writeFile(wb, `สินค้าขาด GRAB ${missingBranchTab.toUpperCase()} ${dd}.${mm2}.${yyyy}.xlsx`)
-                    }}
-                    style={{ ...btnStyle, background: '#fff3e0', borderColor: '#e65100', color: '#e65100', opacity: (!isLoaded || tabData.length === 0) ? 0.5 : 1 }}
-                  >
-                    📥 Export {missingBranchTab.toUpperCase()} ({tabData.length})
-                  </button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {(() => {
+                    const cats = isLoaded ? [...new Set(tabData.map((p: any) => p['หมวดหมู่สินค้า (CATEGORIES)'] || '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th')) : []
+                    const exportData = missingBranchExportCat === 'all' ? tabData : tabData.filter((p: any) => (p['หมวดหมู่สินค้า (CATEGORIES)'] || '') === missingBranchExportCat)
+                    return (<>
+                      <select
+                        value={missingBranchExportCat}
+                        onChange={e => setMissingBranchExportCat(e.target.value)}
+                        disabled={!isLoaded || tabData.length === 0}
+                        style={{ padding: '5px 8px', fontSize: 12, borderRadius: 4, border: '1px solid #ccc', cursor: 'pointer' }}
+                      >
+                        <option value="all">ทุกหมวดหมู่ ({tabData.length})</option>
+                        {cats.map((c: string) => {
+                          const cnt = tabData.filter((p: any) => (p['หมวดหมู่สินค้า (CATEGORIES)'] || '') === c).length
+                          return <option key={c} value={c}>{c} ({cnt})</option>
+                        })}
+                      </select>
+                      <button
+                        disabled={!isLoaded || exportData.length === 0}
+                        onClick={async () => {
+                          if (exportData.length === 0) return
+                          const XLSX = await import('xlsx')
+                          const sorted = [...exportData].sort((a: any, b: any) =>
+                            (a['หมวดหมู่สินค้า (CATEGORIES)'] || '').localeCompare(b['หมวดหมู่สินค้า (CATEGORIES)'] || '', 'th')
+                          )
+                          const rows = sorted.map((p: any) => ({
+                            '*ประเภทสินค้า': p['ประเภทสินค้า'] || '',
+                            '*ชื่อสินค้า': p['*ชื่อสินค้า (NAME)'] || '',
+                            '*เลขที่ใบอนุญาตโฆษณา': p['*เลขที่ใบอนุญาตโฆษณา'] || '',
+                            '*ราคาสินค้า': p['*ราคาสินค้า'] || '',
+                            'รหัสสินค้า': p['รหัสสินค้า (SKU NUMBER)'] || '',
+                            '*รูปภาพสินค้า': p['*รูปภาพสินค้า'] || '',
+                            'หมวดหมู่รายการสินค้า': p['หมวดหมู่สินค้า (CATEGORIES)'] || '',
+                          }))
+                          const ws = XLSX.utils.json_to_sheet(rows)
+                          sorted.forEach((p: any, i: number) => {
+                            const url = p['*รูปภาพสินค้า'] || ''
+                            if (!url) return
+                            const cellRef = `F${i + 2}`
+                            if (ws[cellRef]) ws[cellRef].l = { Target: url }
+                          })
+                          const wb = XLSX.utils.book_new()
+                          const sheetName = missingBranchExportCat === 'all' ? `ขาด ${missingBranchTab.toUpperCase()}` : missingBranchExportCat.slice(0, 31)
+                          XLSX.utils.book_append_sheet(wb, ws, sheetName)
+                          const now = new Date()
+                          const dd = String(now.getDate()).padStart(2, '0')
+                          const mm2 = String(now.getMonth() + 1).padStart(2, '0')
+                          const yyyy = now.getFullYear()
+                          const catSuffix = missingBranchExportCat === 'all' ? '' : ` ${missingBranchExportCat}`
+                          XLSX.writeFile(wb, `สินค้าขาด GRAB ${missingBranchTab.toUpperCase()}${catSuffix} ${dd}.${mm2}.${yyyy}.xlsx`)
+                        }}
+                        style={{ ...btnStyle, background: '#fff3e0', borderColor: '#e65100', color: '#e65100', opacity: (!isLoaded || exportData.length === 0) ? 0.5 : 1 }}
+                      >
+                        📥 Export ({exportData.length})
+                      </button>
+                    </>)
+                  })()}
                   <button
                     disabled={missingBranchLoading}
                     onClick={() => {
