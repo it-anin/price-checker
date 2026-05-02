@@ -53,6 +53,7 @@ export default function Home() {
   const [missingBranchLoading, setMissingBranchLoading] = useState(false)
   const [missingBranchTab, setMissingBranchTab] = useState<'src'|'kkl'|'sss'>('src')
   const [missingBranchExportCat, setMissingBranchExportCat] = useState<string>('all')
+  const [missingBranchSearch, setMissingBranchSearch] = useState<string>('')
   const [showMmeCheckModal, setShowMmeCheckModal] = useState(false)
   const [mmeCheckResults, setMmeCheckResults] = useState<Record<string, any[]>>({ src: [], kkl: [], sss: [] })
   const [mmeCheckGrabFileSrc, setMmeCheckGrabFileSrc] = useState<File | null>(null)
@@ -1838,7 +1839,7 @@ async function confirmUpdatePrices() {
                   const count = missingBranchLoaded[b.key] ? missingBranchResults[b.key].length : null
                   return (
                     <button key={b.key}
-                      onClick={() => { setMissingBranchTab(b.key); setMissingBranchExportCat('all'); loadMissingBranch(b.key) }}
+                      onClick={() => { setMissingBranchTab(b.key); setMissingBranchExportCat('all'); setMissingBranchSearch(''); loadMissingBranch(b.key) }}
                       style={{ padding: '8px 24px', border: 'none', borderBottom: isActive ? '2px solid #e65100' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: isActive ? 700 : 400, color: isActive ? '#e65100' : '#555', fontSize: 13, marginBottom: -2 }}
                     >
                       🛵 {b.label}
@@ -1853,10 +1854,23 @@ async function confirmUpdatePrices() {
                 </div>
               </div>
 
-              {/* Summary */}
+              {/* Summary + Search */}
               {isLoaded && (
-                <div style={{ padding: '8px 20px', background: '#fff8f2', borderBottom: '1px solid #ffe0cc', display: 'flex', gap: 20, fontSize: 13 }}>
-                  <span>สินค้าทั้งหมดที่ขาดใน {missingBranchTab.toUpperCase()}: <strong style={{ color: tabData.length > 0 ? '#e65100' : '#28a745' }}>{tabData.length} รายการ</strong></span>
+                <div style={{ padding: '8px 20px', background: '#fff8f2', borderBottom: '1px solid #ffe0cc', display: 'flex', gap: 16, fontSize: 13, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <span>ทั้งหมด: <strong style={{ color: tabData.length > 0 ? '#e65100' : '#28a745' }}>{tabData.length} รายการ</strong></span>
+                  <input
+                    type="text"
+                    placeholder="ค้นหาชื่อ / SKU..."
+                    value={missingBranchSearch}
+                    onChange={e => setMissingBranchSearch(e.target.value)}
+                    style={{ padding: '3px 10px', fontSize: 12, borderRadius: 4, border: '1px solid #ccc', width: 200 }}
+                  />
+                  {missingBranchSearch && (
+                    <span style={{ color: '#888' }}>พบ {tabData.filter((p: any) => {
+                      const q = missingBranchSearch.toLowerCase()
+                      return (p['*ชื่อสินค้า (NAME)'] || '').toLowerCase().includes(q) || (p['รหัสสินค้า (SKU NUMBER)'] || '').toLowerCase().includes(q)
+                    }).length} รายการ</span>
+                  )}
                 </div>
               )}
 
@@ -1883,7 +1897,11 @@ async function confirmUpdatePrices() {
                       </tr>
                     </thead>
                     <tbody>
-                      {tabData.map((p: any, i: number) => (
+                      {tabData.filter((p: any) => {
+                        if (!missingBranchSearch) return true
+                        const q = missingBranchSearch.toLowerCase()
+                        return (p['*ชื่อสินค้า (NAME)'] || '').toLowerCase().includes(q) || (p['รหัสสินค้า (SKU NUMBER)'] || '').toLowerCase().includes(q)
+                      }).map((p: any, i: number) => (
                         <tr key={p['รหัสสินค้า (SKU NUMBER)']} style={{ background: '#fff8f2' }}>
                           <td style={td}>{i + 1}</td>
                           <td style={{ ...td, color: '#000' }}><strong>{p['รหัสสินค้า (SKU NUMBER)']}</strong></td>
