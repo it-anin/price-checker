@@ -268,7 +268,7 @@ export default function Home() {
     if (!url) return ''
     const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) ||
       url.match(/[?&]id=([a-zA-Z0-9_-]+)/)
-    if (match) return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w300`
+    if (match) return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w200`
     return url.startsWith('http') ? url : ''
   }
 
