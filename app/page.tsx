@@ -1216,7 +1216,7 @@ async function confirmUpdatePrices() {
                     onMouseEnter={e => {
                       if (!isChecked) e.currentTarget.style.background = '#e8f4fc'
                       const imgUrl = convertDriveLink(p['*รูปภาพสินค้า'] || '')
-                      setTooltip({ x: e.clientX, y: e.clientY, url: imgUrl })
+                      if (imgUrl) setTooltip({ x: e.clientX, y: e.clientY, url: imgUrl })
                     }}
                     onMouseMove={e => {
                       setTooltip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)
