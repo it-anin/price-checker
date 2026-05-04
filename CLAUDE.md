@@ -73,6 +73,11 @@ lib/
 - **GET** — จำนวน master SKU; `?compare=true` → เปรียบเทียบกับ products table
 - **POST** — replace master SKU list ทั้งหมด
 
+### `/api/upload-drive`
+- **POST** (multipart/form-data) `file`, `filename` — อัพโหลดรูปไป Google Drive folder ที่กำหนด, ตั้ง permission `anyone with the link`, คืน `{ success, link, id }`
+- ใช้ Service Account JWT (RS256) → exchange เป็น access token → upload (multipart) → set permission
+- ENV ที่ต้องตั้ง: `GOOGLE_DRIVE_FOLDER_ID`, `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` (รองรับ `\n` literal)
+
 ---
 
 ## page.tsx — ฟีเจอร์หลัก

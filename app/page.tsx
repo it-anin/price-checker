@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { supabase } from '../lib/supabase'
 
 interface Product {
   [key: string]: any
@@ -62,6 +63,12 @@ export default function Home() {
   const [mmeCheckMmeFile, setMmeCheckMmeFile] = useState<File | null>(null)
   const [mmeChecking, setMmeChecking] = useState(false)
   const [mmeActiveTab, setMmeActiveTab] = useState<'src'|'kkl'|'sss'|'compare'>('src')
+  const [editImageSrc, setEditImageSrc] = useState<string>('')
+  const [editImageOverlay, setEditImageOverlay] = useState<string>('')
+  const [editImageMime, setEditImageMime] = useState<string>('image/png')
+  const [editImageFileName, setEditImageFileName] = useState<string>('')
+  const [editImageMsg, setEditImageMsg] = useState<string>('')
+  const editCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
     loadStats()
@@ -154,6 +161,85 @@ export default function Home() {
       setStatus('เกิดข้อผิดพลาด: ' + data.error)
     }
   }
+
+  function drawImageOnCanvas(src: string, overlayText: string) {
+    const canvas = editCanvasRef.current
+    if (!canvas) return
+    const img = new window.Image()
+    img.onload = () => {
+      const maxW = 1024
+      const scale = img.width > maxW ? maxW / img.width : 1
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.fillStyle = '#fff'
+      ctx.fillRect(0, 0, w, h)
+      ctx.drawImage(img, 0, 0, w, h)
+      const text = (overlayText || '').trim()
+      if (text) {
+        const fontSize = Math.max(10, Math.round(h * 0.028))
+        ctx.font = `bold ${fontSize}px Arial, sans-serif`
+        ctx.textBaseline = 'bottom'
+        ctx.textAlign = 'right'
+        ctx.fillStyle = '#000'
+        ctx.fillText(text, w - 16, h - 40)
+      }
+    }
+    img.onerror = () => { setEditImageMsg('โหลดรูปไม่สำเร็จ') }
+    img.src = src
+  }
+
+  function onPickEditImage(file: File | null) {
+    if (!file) return
+    setEditImageMsg('')
+    setEditImageMime(file.type || 'image/png')
+    setEditImageFileName(file.name)
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = String(reader.result || '')
+      setEditImageSrc(dataUrl)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  function downloadEditImage() {
+    const canvas = editCanvasRef.current
+    if (!canvas || !editImageSrc) {
+      setEditImageMsg('กรุณาเลือกรูปภาพก่อน')
+      return
+    }
+    const isJpeg = editImageMime.includes('jpeg') || editImageMime.includes('jpg')
+    const outMime = isJpeg ? 'image/jpeg' : 'image/png'
+    const ext = isJpeg ? 'jpg' : 'png'
+    const name = (editProduct?.['*ชื่อสินค้า (NAME)'] || editProduct?.['รหัสสินค้า (SKU NUMBER)'] || `product-${Date.now()}`).toString().trim()
+    const baseName = name.replace(/[^a-zA-Z0-9ก-๙._-]/g, '_')
+    const filename = `${baseName}.${ext}`
+    const url = canvas.toDataURL(outMime, 0.92)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    setEditImageMsg('ดาวน์โหลดสำเร็จ ✅')
+  }
+
+  useEffect(() => {
+    if (editImageSrc) drawImageOnCanvas(editImageSrc, editImageOverlay)
+  }, [editImageSrc, editImageOverlay])
+
+  useEffect(() => {
+    if (!editProduct) {
+      setEditImageSrc('')
+      setEditImageOverlay('')
+      setEditImageFileName('')
+      setEditImageMsg('')
+      return
+    }
+    const sku = (editProduct['รหัสสินค้า (SKU NUMBER)'] || '').toString()
+    setEditImageOverlay(prev => prev || sku)
+  }, [editProduct])
 
   async function downloadProductXlsx(p: Product) {
     const XLSX = await import('xlsx')
@@ -1474,8 +1560,8 @@ async function confirmUpdatePrices() {
           display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
         }}>
           <div style={{
-            background: '#fff', borderRadius: 6, width: 480,
-            boxShadow: '0 10px 40px rgba(0,0,0,0.3)', overflow: 'hidden'
+            background: '#fff', borderRadius: 6, width: 560, maxHeight: '92vh', overflowY: 'auto',
+            boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
           }}>
             {/* Modal Header */}
             <div style={{ background: isAdding ? '#2d6a2d' : '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1508,6 +1594,92 @@ async function confirmUpdatePrices() {
                 />
               </div>
               <div style={{ gridColumn: 'span 2' }}>
+                <div style={{ marginTop: 4, padding: 14, borderRadius: 10, border: '2px dashed #1a73e8', background: '#f4f8ff' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <label style={{ ...labelStyle, margin: 0, fontSize: 15, color: '#0b57d0', fontWeight: 700 }}>
+                      รูปภาพสินค้า + ข้อความมุมขวาล่าง
+                    </label>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#0b57d0', background: '#dce9ff', borderRadius: 999, padding: '4px 8px' }}>
+                      ขั้นตอนสำคัญ
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.5, color: '#355070' }}>
+                    1. เลือกรูปสินค้า 2. ตรวจ Preview 3. กดอัพโหลด Drive 4. กดบันทึก
+                  </div>
+                  <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      id="editProductImageInput"
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={e => onPickEditImage(e.target.files?.[0] || null)}
+                      style={{ display: 'none' }}
+                    />
+                    <label
+                      htmlFor="editProductImageInput"
+                      style={{ ...btnStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 170, background: '#0b57d0', color: '#fff', borderColor: '#0842a0', cursor: 'pointer' }}
+                    >
+                      📂 เลือกรูปภาพสินค้า
+                    </label>
+                    <div style={{ flex: '1 1 220px', minHeight: 38, display: 'flex', alignItems: 'center', padding: '8px 10px', borderRadius: 6, border: '1px solid #c7d7f7', background: '#fff', fontSize: 12, color: editImageFileName ? '#1f2328' : '#6b7280' }}>
+                      {editImageFileName || 'ยังไม่ได้เลือกรูป (รองรับ PNG / JPEG / WebP)'}
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 10, fontSize: 12, color: '#4b5563' }}>
+                    ข้อความมุมขวาล่างจะใส่ SKU ให้อัตโนมัติ และแก้ไขเองได้
+                  </div>
+                  <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#355070' }}>ข้อความบนรูป:</div>
+                  <input
+                    style={{ ...inputStyle, flex: '1 1 160px', marginTop: 0 }}
+                    placeholder="ข้อความบนรูป (มุมขวาล่าง)"
+                    value={editImageOverlay}
+                    onChange={e => setEditImageOverlay(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={downloadEditImage}
+                    disabled={!editImageSrc}
+                    style={{ ...btnStyle, background: '#1a73e8', color: '#fff', borderColor: '#1558b3' }}
+                  >
+                    ⬇️ Download รูป
+                  </button>
+                  </div>
+                  <div style={{ marginTop: 10, textAlign: 'center', background: '#fff', borderRadius: 8, padding: 10, border: '1px solid #dbe4f0' }}>
+                    {editImageSrc ? (
+                      <canvas
+                        ref={editCanvasRef}
+                        style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 4, background: '#fff' }}
+                      />
+                    ) : (
+                      <div style={{ padding: '20px 12px', fontSize: 12, color: '#6b7280' }}>
+                        Preview รูปจะขึ้นที่นี่หลังจากเลือกรูปภาพ
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {editImageMsg && (
+                  <div style={{ marginTop: 6, fontSize: 12, color: editImageMsg.includes('สำเร็จ') ? '#1a7f37' : '#a52828' }}>
+                    {editImageMsg}
+                  </div>
+                )}
+                <label style={{ ...labelStyle, marginTop: 10 }}>รูปภาพสินค้า (Google Drive Link)</label>
+                <input style={inputStyle}
+                  placeholder="ลิงก์จะถูกใส่อัตโนมัติหลังอัพโหลด หรือวาง Google Drive URL ที่นี่..."
+                  value={editProduct['*รูปภาพสินค้า'] || ''}
+                  onChange={e => setEditProduct({ ...editProduct, '*รูปภาพสินค้า': e.target.value })}
+                />
+                {editProduct['*รูปภาพสินค้า'] && (
+                  <div style={{ marginTop: 8, textAlign: 'center', background: '#f8f8f8', borderRadius: 4, padding: 8, border: '1px solid #eee' }}>
+                    <img
+                      src={convertDriveLink(editProduct['*รูปภาพสินค้า'])}
+                      alt="preview"
+                      style={{ maxWidth: '100%', maxHeight: 160, borderRadius: 4, objectFit: 'contain' }}
+                      onError={e => { e.currentTarget.style.display = 'none' }}
+                    />
+                  </div>
+                )}
+              </div>
+              <div style={{ gridColumn: 'span 2' }}>
                 <label style={labelStyle}>ชื่อสินค้า</label>
                 <input style={inputStyle}
                   value={editProduct['*ชื่อสินค้า (NAME)'] || ''}
@@ -1527,24 +1699,6 @@ async function confirmUpdatePrices() {
                   value={editProduct['*ราคาสินค้า'] || ''}
                   onChange={e => setEditProduct({ ...editProduct, '*ราคาสินค้า': e.target.value })}
                 />
-              </div>
-              <div style={{ gridColumn: 'span 2' }}>
-                <label style={labelStyle}>รูปภาพสินค้า (Google Drive Link)</label>
-                <input style={inputStyle}
-                  placeholder="วาง Google Drive URL ที่นี่..."
-                  value={editProduct['*รูปภาพสินค้า'] || ''}
-                  onChange={e => setEditProduct({ ...editProduct, '*รูปภาพสินค้า': e.target.value })}
-                />
-                {editProduct['*รูปภาพสินค้า'] && (
-                  <div style={{ marginTop: 8, textAlign: 'center', background: '#f8f8f8', borderRadius: 4, padding: 8, border: '1px solid #eee' }}>
-                    <img
-                      src={convertDriveLink(editProduct['*รูปภาพสินค้า'])}
-                      alt="preview"
-                      style={{ maxWidth: '100%', maxHeight: 160, borderRadius: 4, objectFit: 'contain' }}
-                      onError={e => { e.currentTarget.style.display = 'none' }}
-                    />
-                  </div>
-                )}
               </div>
             </div>
 
