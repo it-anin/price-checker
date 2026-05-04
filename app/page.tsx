@@ -237,8 +237,10 @@ export default function Home() {
       setEditImageMsg('')
       return
     }
-    const sku = (editProduct['รหัสสินค้า (SKU NUMBER)'] || '').toString()
-    setEditImageOverlay(prev => prev || sku)
+    const license = (editProduct['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()
+    const sku = (editProduct['รหัสสินค้า (SKU NUMBER)'] || '').toString().trim()
+    const defaultText = [license, sku].filter(Boolean).join(' ')
+    setEditImageOverlay(defaultText)
   }, [editProduct])
 
   async function downloadProductXlsx(p: Product) {
