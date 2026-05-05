@@ -398,7 +398,7 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
   setGrabResults(results)
   await loadProducts(selectedSheet)
   await loadStats()
-  setStatus(`Grab ${branch.toUpperCase()}: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบในระบบ ${notFound_results.length} | เพิ่มสถานะ ${syncData.inserted || 0} | ลบสถานะ ${syncData.deleted || 0}`)
+  setStatus(`Grab ${branch.toUpperCase()}: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบข้อมูลใน Supabase ${notFound_results.length} | เพิ่มสถานะ ${syncData.inserted || 0} | ลบสถานะ ${syncData.deleted || 0}`)
 }
 
   const IMPORT_FIELDS = [
@@ -528,12 +528,12 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     }))
     const ws = XLSX.utils.json_to_sheet(rows)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'ไม่พบในระบบ')
+    XLSX.utils.book_append_sheet(wb, ws, 'ไม่พบข้อมูลใน Supabase')
     const now = new Date()
     const dd = String(now.getDate()).padStart(2, '0')
     const mm = String(now.getMonth() + 1).padStart(2, '0')
     const yyyy = now.getFullYear()
-    XLSX.writeFile(wb, `GRAB ไม่พบในระบบ ${dd}.${mm}.${yyyy}.xlsx`)
+    XLSX.writeFile(wb, `GRAB ไม่พบข้อมูลใน Supabase ${dd}.${mm}.${yyyy}.xlsx`)
   }
 
   async function exportGrabXlsx() {
@@ -1294,7 +1294,7 @@ async function confirmUpdatePrices() {
           <span style={{ color: '#28a745' }}>✓ ตรง: <strong>{grabResults.filter((r: any) => r.matched).length}</strong></span>
           <span style={{ color: '#dc3545' }}>✗ ต้องแก้ไขใน GRAB: <strong>{grabResults.filter((r: any) => !r.matched && !r.notFound).length}</strong></span>
           {grabResults.filter((r: any) => r.notFound).length > 0 && (
-            <span style={{ color: '#000' }}>⚠ ไม่พบในระบบ: <strong>{grabResults.filter((r: any) => r.notFound).length}</strong></span>
+            <span style={{ color: '#000' }}>⚠ ไม่พบข้อมูลใน Supabase: <strong>{grabResults.filter((r: any) => r.notFound).length}</strong></span>
           )}
         </div>
       )}
@@ -1327,7 +1327,7 @@ async function confirmUpdatePrices() {
                   <td style={{ ...td, fontWeight: 600, color: '#000' }}>{r.dbPrice?.toLocaleString() ?? '-'}</td>
                   <td style={td}>
                     {r.notFound
-                      ? <span style={{ background: '#e0e0e0', color: '#000', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบในระบบ</span>
+                      ? <span style={{ background: '#e0e0e0', color: '#000', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบข้อมูลใน Supabase</span>
                       : r.matched
                         ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
                         : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ แก้ไขใน GRAB</span>
@@ -1355,7 +1355,7 @@ async function confirmUpdatePrices() {
             disabled={grabResults.filter((r: any) => r.notFound).length === 0}
             style={{ ...btnStyle, background: '#e8e8e8', borderColor: '#999', color: '#000', opacity: grabResults.filter((r: any) => r.notFound).length === 0 ? 0.5 : 1 }}
           >
-            ⚠ Export ไม่พบในระบบ ({grabResults.filter((r: any) => r.notFound).length})
+            ⚠ Export ไม่พบข้อมูลใน Supabase ({grabResults.filter((r: any) => r.notFound).length})
           </button>
         </div>
         <button onClick={() => setShowGrabModal(false)} style={btnStyle}>ปิด</button>
