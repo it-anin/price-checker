@@ -1189,11 +1189,15 @@ async function confirmUpdatePrices() {
                       title="เลือกทั้งหมด"
                       checked={products.length > 0 && products.every(p => selectedSkus.has(p['รหัสสินค้า (SKU NUMBER)']))}
                       onChange={e => {
-                        if (e.target.checked) {
-                          setSelectedSkus(new Set(products.map(p => p['รหัสสินค้า (SKU NUMBER)'])))
-                        } else {
-                          setSelectedSkus(new Set())
-                        }
+                        setSelectedSkus((prev: Set<string>) => {
+                          const next = new Set(prev)
+                          if (e.target.checked) {
+                            products.forEach((p: Product) => next.add(p['รหัสสินค้า (SKU NUMBER)']))
+                          } else {
+                            products.forEach((p: Product) => next.delete(p['รหัสสินค้า (SKU NUMBER)']))
+                          }
+                          return next
+                        })
                       }}
                     />
                   </th>
