@@ -326,6 +326,14 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
   const clean = text.replace(/^\uFEFF/, '')
   const rows = parseCSVRows(clean)
 
+  const dataRows = rows.slice(2).filter(r => r && r.length >= 9)
+  const hasSkuCol = dataRows.some(r => r[8]?.trim())
+  if (rows.length < 3 || !hasSkuCol) {
+    setStatus('ไฟล์ไม่ถูกต้อง')
+    setGrabResults([{ error: 'ไฟล์ไม่ใช่ Grab_menu CSV ที่ถูกต้อง — ต้องมีอย่างน้อย 3 แถว และคอลัมน์ที่ 9 (SKU) ต้องมีข้อมูล' }])
+    return
+  }
+
   // Col I (index 8) = SKU, Col C (index 2) = ราคา, เริ่มจาก row 3 (index 2)
   const grabMap: Record<string, number> = {}
   for (let i = 2; i < rows.length; i++) {
