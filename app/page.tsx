@@ -1025,14 +1025,9 @@ async function confirmUpdatePrices() {
         <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
         <button onClick={() => document.getElementById('csvConvertInput')?.click()} style={btnStyle} title="แปลงไฟล์ CSV จาก POS (TIS-620) เป็น CSV UTF-8">🔄 แปลง CSV เป็น UTF-8</button>
         <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ Price อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ตรวจสอบราคา Promaxx</button>
-        <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, background: '#00b14f', color: '#fff', borderRadius: 10, padding: '1px 8px', letterSpacing: 0.3, whiteSpace: 'nowrap' }}>ตรวจสอบราคา&amp;สินค้า</span>
-          <div style={{ display: 'flex', gap: 4 }}>
-            <button onClick={() => document.getElementById('grabInputSrc')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SRC">🛵 GRAB SRC</button>
-            <button onClick={() => document.getElementById('grabInputKkl')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา KKL">🛵 GRAB KKL</button>
-            <button onClick={() => document.getElementById('grabInputSss')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SSS">🛵 GRAB SSS</button>
-          </div>
-        </div>
+        <button onClick={() => document.getElementById('grabInputSrc')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SRC">🛵 GRAB SRC</button>
+        <button onClick={() => document.getElementById('grabInputKkl')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา KKL">🛵 GRAB KKL</button>
+        <button onClick={() => document.getElementById('grabInputSss')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SSS">🛵 GRAB SSS</button>
         <input type="file" accept=".csv" id="mmeCheckGrabInputSrc" style={{ display: 'none' }}
           onChange={e => { if (e.target.files?.[0]) { setMmeCheckGrabFileSrc(e.target.files[0]); e.target.value = '' } }} />
         <input type="file" accept=".csv" id="mmeCheckGrabInputKkl" style={{ display: 'none' }}
