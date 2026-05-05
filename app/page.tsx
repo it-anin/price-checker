@@ -97,7 +97,6 @@ export default function Home() {
     if (data.success) {
       setProducts(data.products)
       preloadImages(data.products)
-      setSelectedSkus(new Set())
       setStatus(`พร้อมใช้งาน (${data.products.length} รายการ)`)
     }
     setLoading(false)
@@ -599,7 +598,11 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
 
   async function exportSelectedSkusXlsx() {
     if (selectedSkus.size === 0) return
-    const selected = products.filter(p => selectedSkus.has(p['รหัสสินค้า (SKU NUMBER)']))
+    setStatus('กำลัง Export รายการที่เลือก...')
+    const skuArray = Array.from(selectedSkus)
+    const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus: skuArray }) })
+    const data = await res.json()
+    const selected = data.success ? data.products : products.filter(p => selectedSkus.has(p['รหัสสินค้า (SKU NUMBER)']))
     const XLSX = await import('xlsx')
     const rows = toExportRows(selected)
     const ws = XLSX.utils.json_to_sheet(rows)
