@@ -55,6 +55,12 @@ export default function Home() {
   const [missingBranchTab, setMissingBranchTab] = useState<'src'|'kkl'|'sss'>('src')
   const [missingBranchExportCat, setMissingBranchExportCat] = useState<string>('all')
   const [missingBranchSearch, setMissingBranchSearch] = useState<string>('')
+  const [showMasterBranchModal, setShowMasterBranchModal] = useState(false)
+  const [masterBranchResults, setMasterBranchResults] = useState<Array<{sku: string, name: string, src: boolean, kkl: boolean, sss: boolean}>>([])
+  const [masterBranchLoading, setMasterBranchLoading] = useState(false)
+  const [masterBranchTab, setMasterBranchTab] = useState<'all'|'src'|'kkl'|'sss'>('all')
+  const [masterBranchSearch, setMasterBranchSearch] = useState('')
+  const [masterNameMap, setMasterNameMap] = useState<Record<string, string>>({})
   const [showMmeCheckModal, setShowMmeCheckModal] = useState(false)
   const [mmeCheckResults, setMmeCheckResults] = useState<Record<string, any[]>>({ src: [], kkl: [], sss: [] })
   const [mmeCheckGrabFileSrc, setMmeCheckGrabFileSrc] = useState<File | null>(null)
@@ -721,9 +727,16 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     const wb = XLSX.read(buffer, { type: 'array' })
     const ws = wb.Sheets[wb.SheetNames[0]]
     const raw: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+    const nameMap: Record<string, string> = {}
     const skus = raw.slice(1)
-      .map(row => String(row[0] ?? '').trim())
+      .map(row => {
+        const sku = String(row[0] ?? '').trim()
+        const name = String(row[1] ?? '').trim()
+        if (sku && name) nameMap[sku] = name
+        return sku
+      })
       .filter(Boolean)
+    setMasterNameMap(nameMap)
 
     setStatus(`กำลังบันทึก ${skus.length.toLocaleString()} SKU ลง Supabase...`)
     const res = await fetch('/api/master', {
@@ -779,6 +792,33 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     setMasterMissingCount(data.missingCount)
     setStatus(`Export สำเร็จ: ${data.missingCount.toLocaleString()} รายการที่ขาดใน GrabMart`)
     setExportingMissing(false)
+  }
+
+  async function handleMasterBranchCompare() {
+    setMasterBranchLoading(true)
+    setShowMasterBranchModal(true)
+    setMasterBranchResults([])
+    setMasterBranchTab('all')
+    setMasterBranchSearch('')
+    setStatus('กำลังเปรียบเทียบ Product Master กับทุกสาขา...')
+    const res = await fetch('/api/master?compareBranch=true')
+    const data = await res.json()
+    if (!data.success) {
+      setStatus('เกิดข้อผิดพลาด: ' + data.error)
+      setMasterBranchLoading(false)
+      return
+    }
+    const results = (data.items as any[]).map(item => ({
+      sku: String(item.sku),
+      name: masterNameMap[String(item.sku)] || '',
+      src: !!item.src,
+      kkl: !!item.kkl,
+      sss: !!item.sss
+    }))
+    setMasterBranchResults(results)
+    setMasterBranchLoading(false)
+    const missingAny = results.filter(r => !r.src || !r.kkl || !r.sss).length
+    setStatus(`เปรียบเทียบสำเร็จ: ${results.length} SKU — ขาดอย่างน้อย 1 สาขา ${missingAny} รายการ`)
   }
 
   async function deleteSelectedCategory() {
@@ -1119,6 +1159,24 @@ async function confirmUpdatePrices() {
                       : masterMissingCount !== null
                         ? `📥 Export ที่ขาดใน GrabMart (${masterMissingCount.toLocaleString()})`
                         : '📥 Export ที่ขาดใน GrabMart'}
+                  </button>
+                  <button
+                    onClick={handleMasterBranchCompare}
+                    disabled={masterBranchLoading}
+                    style={{
+                      ...btnStyle,
+                      width: '100%',
+                      marginTop: 6,
+                      fontSize: 11,
+                      padding: '5px 8px',
+                      borderRadius: 4,
+                      background: '#e8f4fd',
+                      borderColor: '#4a8bc4',
+                      color: '#1a5276',
+                      opacity: masterBranchLoading ? 0.6 : 1
+                    }}
+                  >
+                    {masterBranchLoading ? '⏳ กำลังเปรียบเทียบ...' : '🔍 เปรียบเทียบ 3 สาขา'}
                   </button>
                 </div>
               )}
@@ -2166,6 +2224,144 @@ async function confirmUpdatePrices() {
                   </button>
                 </div>
                 <button onClick={() => setShowMissingBranchModal(false)} style={btnStyle}>ปิด</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Master Branch Compare Modal */}
+      {showMasterBranchModal && (() => {
+        const branchTabs: { key: 'all'|'src'|'kkl'|'sss'; label: string }[] = [
+          { key: 'all', label: 'ทั้งหมด' },
+          { key: 'src', label: 'ขาด SRC' },
+          { key: 'kkl', label: 'ขาด KKL' },
+          { key: 'sss', label: 'ขาด SSS' },
+        ]
+        const filtered = masterBranchResults.filter(r => {
+          if (masterBranchTab === 'src') return !r.src
+          if (masterBranchTab === 'kkl') return !r.kkl
+          if (masterBranchTab === 'sss') return !r.sss
+          return true
+        }).filter(r => {
+          if (!masterBranchSearch) return true
+          const q = masterBranchSearch.toLowerCase()
+          return r.sku.toLowerCase().includes(q) || r.name.toLowerCase().includes(q)
+        })
+        const missingCounts = {
+          src: masterBranchResults.filter(r => !r.src).length,
+          kkl: masterBranchResults.filter(r => !r.kkl).length,
+          sss: masterBranchResults.filter(r => !r.sss).length,
+        }
+        const branchBadge = (has: boolean) => (
+          <span style={{
+            display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600,
+            background: has ? '#d4edda' : '#f8d7da',
+            color: has ? '#155724' : '#721c24'
+          }}>{has ? '✓' : '✗'}</span>
+        )
+        return (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
+            <div style={{ background: '#fff', borderRadius: 8, width: '90vw', maxWidth: 900, height: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+              <div style={{ padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <strong style={{ fontSize: 15 }}>🔍 Product Master vs สาขา</strong>
+                  <span style={{ marginLeft: 12, fontSize: 12, color: '#555' }}>
+                    {masterBranchResults.length} SKU
+                    {missingCounts.src + missingCounts.kkl + missingCounts.sss > 0 && (
+                      <> — ขาด SRC: <strong style={{ color: '#c74634' }}>{missingCounts.src}</strong>{' '}
+                      KKL: <strong style={{ color: '#c74634' }}>{missingCounts.kkl}</strong>{' '}
+                      SSS: <strong style={{ color: '#c74634' }}>{missingCounts.sss}</strong></>
+                    )}
+                  </span>
+                </div>
+                <button onClick={() => setShowMasterBranchModal(false)} style={{ ...btnStyle, padding: '4px 12px' }}>✕ ปิด</button>
+              </div>
+              <div style={{ display: 'flex', borderBottom: '2px solid #ddd', background: '#fafafa' }}>
+                {branchTabs.map(t => {
+                  const isActive = masterBranchTab === t.key
+                  const cnt = t.key === 'all' ? masterBranchResults.length : missingCounts[t.key]
+                  return (
+                    <button key={t.key}
+                      onClick={() => setMasterBranchTab(t.key)}
+                      style={{
+                        padding: '8px 16px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: isActive ? 700 : 400,
+                        background: isActive ? '#fff' : 'transparent',
+                        borderBottom: isActive ? '2px solid #4a8bc4' : '2px solid transparent',
+                        color: isActive ? '#4a8bc4' : (t.key !== 'all' && cnt > 0 ? '#c74634' : '#555')
+                      }}
+                    >{t.label} ({cnt})</button>
+                  )
+                })}
+              </div>
+              <div style={{ padding: '8px 16px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid #eee' }}>
+                <input
+                  type="text"
+                  placeholder="ค้นหา SKU / ชื่อสินค้า..."
+                  value={masterBranchSearch}
+                  onChange={e => setMasterBranchSearch(e.target.value)}
+                  style={{ padding: '4px 10px', fontSize: 12, borderRadius: 4, border: '1px solid #ccc', width: 220 }}
+                />
+                {masterBranchSearch && <span style={{ color: '#888', fontSize: 12 }}>พบ {filtered.length} รายการ</span>}
+                <button
+                  onClick={async () => {
+                    if (filtered.length === 0) return
+                    const XLSX = await import('xlsx')
+                    const rows = filtered.map((r, i) => ({
+                      '#': i + 1,
+                      'SKU': r.sku,
+                      'ชื่อสินค้า': r.name,
+                      'SRC': r.src ? '✓' : '✗',
+                      'KKL': r.kkl ? '✓' : '✗',
+                      'SSS': r.sss ? '✓' : '✗',
+                    }))
+                    const ws = XLSX.utils.json_to_sheet(rows)
+                    const wb = XLSX.utils.book_new()
+                    const tabLabel = masterBranchTab === 'all' ? 'ทั้งหมด' : `ขาด ${masterBranchTab.toUpperCase()}`
+                    XLSX.utils.book_append_sheet(wb, ws, tabLabel.slice(0, 31))
+                    const now = new Date()
+                    const dd = String(now.getDate()).padStart(2, '0')
+                    const mm = String(now.getMonth() + 1).padStart(2, '0')
+                    const yyyy = now.getFullYear()
+                    XLSX.writeFile(wb, `Master vs สาขา ${tabLabel} ${dd}.${mm}.${yyyy}.xlsx`)
+                  }}
+                  disabled={filtered.length === 0}
+                  style={{ ...btnStyle, fontSize: 11, padding: '4px 10px', background: '#e8f5e9', borderColor: '#388e3c', color: '#1b5e20', opacity: filtered.length === 0 ? 0.5 : 1 }}
+                >📥 Export</button>
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1 }}>
+                {masterBranchLoading ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: '#888', fontSize: 13 }}>⏳ กำลังโหลด...</div>
+                ) : filtered.length === 0 ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: '#28a745', fontSize: 14 }}>
+                    {masterBranchResults.length === 0 ? 'ไม่มีข้อมูล — กรุณาอัพโหลด Product Master ก่อน' : '✅ ไม่มีรายการที่ขาดในสาขานี้'}
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...th, width: 40 }}>#</th>
+                        <th style={th}>SKU</th>
+                        <th style={th}>ชื่อสินค้า</th>
+                        <th style={{ ...th, width: 70, textAlign: 'center' }}>SRC</th>
+                        <th style={{ ...th, width: 70, textAlign: 'center' }}>KKL</th>
+                        <th style={{ ...th, width: 70, textAlign: 'center' }}>SSS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((r, i) => (
+                        <tr key={r.sku} style={{ background: (!r.src || !r.kkl || !r.sss) ? '#fff8f8' : 'transparent' }}>
+                          <td style={{ ...td, color: '#888', textAlign: 'center' }}>{i + 1}</td>
+                          <td style={{ ...td, fontFamily: 'monospace', fontWeight: 600 }}>{r.sku}</td>
+                          <td style={td}>{r.name || <span style={{ color: '#aaa' }}>—</span>}</td>
+                          <td style={{ ...td, textAlign: 'center' }}>{branchBadge(r.src)}</td>
+                          <td style={{ ...td, textAlign: 'center' }}>{branchBadge(r.kkl)}</td>
+                          <td style={{ ...td, textAlign: 'center' }}>{branchBadge(r.sss)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
             </div>
           </div>

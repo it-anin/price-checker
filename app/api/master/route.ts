@@ -36,12 +36,50 @@ async function fetchAllGrabSkus(): Promise<{ skus: Set<string>; error: string | 
   return { skus, error: null }
 }
 
+async function fetchBranchMap(): Promise<{ map: Map<string, {src: boolean, kkl: boolean, sss: boolean}>; error: string | null }> {
+  const map = new Map<string, {src: boolean, kkl: boolean, sss: boolean}>()
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('products')
+      .select('"รหัสสินค้า (SKU NUMBER)", branch')
+      .range(from, from + 999)
+    if (error) return { map, error: error.message }
+    for (const row of data || []) {
+      const sku = String(row['รหัสสินค้า (SKU NUMBER)'] ?? '').trim()
+      if (!sku) continue
+      const branches = String(row.branch ?? '').split(',').map((b: string) => b.trim()).filter(Boolean)
+      if (!map.has(sku)) map.set(sku, { src: false, kkl: false, sss: false })
+      const entry = map.get(sku)!
+      for (const b of branches) {
+        if (b === 'src') entry.src = true
+        else if (b === 'kkl') entry.kkl = true
+        else if (b === 'sss') entry.sss = true
+      }
+    }
+    if (!data || data.length < 1000) break
+    from += 1000
+  }
+  return { map, error: null }
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const compare = searchParams.get('compare') === 'true'
+  const compareBranch = searchParams.get('compareBranch') === 'true'
 
   const { skus: masterSkus, error: masterError } = await fetchAllMasterSkus()
   if (masterError) return NextResponse.json({ success: false, error: masterError })
+
+  if (compareBranch) {
+    const { map, error: branchError } = await fetchBranchMap()
+    if (branchError) return NextResponse.json({ success: false, error: branchError })
+    const items = masterSkus.map(sku => ({
+      sku,
+      ...(map.get(sku) ?? { src: false, kkl: false, sss: false })
+    }))
+    return NextResponse.json({ success: true, items, masterCount: masterSkus.length })
+  }
 
   if (compare) {
     const { skus: grabSkus, error: grabError } = await fetchAllGrabSkus()
