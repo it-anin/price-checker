@@ -21,7 +21,7 @@ npm run lint     # ESLint
 
 ```
 app/
-├── page.tsx              # UI หลักทั้งหมด (~1,841 บรรทัด)
+├── page.tsx              # UI หลักทั้งหมด (~2,100 บรรทัด)
 ├── layout.tsx
 ├── globals.css
 └── api/
@@ -70,7 +70,7 @@ lib/
 - **POST** `{ items: [{sku, correctPrice}] }` — bulk update ราคา
 
 ### `/api/master`
-- **GET** — จำนวน master SKU; `?compare=true` → เปรียบเทียบกับ products table
+- **GET** — จำนวน master SKU; `?compare=true` → เปรียบเทียบกับ products table; `?compareBranch=true` → คืน per-SKU branch presence `{sku, src, kkl, sss}`
 - **POST** — replace master SKU list ทั้งหมด
 
 ### `/api/upload-drive`
@@ -91,7 +91,8 @@ lib/
 | Price calc | `priceCalcResults`, `priceCalcGrabMap`, `showPriceCalcModal` |
 | Import | `showImportModal`, `importSheets`, `importLog` |
 | Edit product | `editProduct` (null = modal ปิด) |
-| Master SKU | `masterSkuCount`, `masterMissingCount` |
+| Master SKU | `masterSkuCount`, `masterMissingCount`, `masterNameMap` (sku→ชื่อ) |
+| Master vs Branch | `showMasterBranchModal`, `masterBranchResults`, `masterBranchLoading`, `masterBranchTab`, `masterBranchSearch` |
 | MME vs GRAB | `mmeCheckResults` (`{src,kkl,sss}`), `mmeActiveTab`, `mmeChecking` |
 | Selection | `selectedSkus` (Set\<string\>) |
 
@@ -106,7 +107,8 @@ lib/
 | `handleImportXlsx(file)` | อ่าน Excel หลาย sheet, detect header อัตโนมัติ |
 | `confirmImport()` | bulk upsert ผ่าน PUT /api/products |
 | `confirmUpdatePrices()` | bulk update ราคา ผ่าน POST /api/prices |
-| `handleMasterUpload(file)` | upload master SKU list → POST /api/master |
+| `handleMasterUpload(file)` | อ่าน ColA=SKU, ColB=ชื่อสินค้า → บันทึก masterNameMap → POST /api/master |
+| `handleMasterBranchCompare()` | GET /api/master?compareBranch=true → merge กับ masterNameMap → modal |
 | `handleCsvToUtf8(file)` | แปลง CSV TIS-620 → UTF-8 BOM |
 | `toExportRows(list)` | format สินค้าเป็น row สำหรับ XLSX export |
 
@@ -128,6 +130,7 @@ D = Math.ceil(B × 1.07)   ← ราคาขาย Grab
 | GM MME | Excel (.xlsx) | Col A=ประเภท, B=ชื่อ, C=ใบอนุญาต, D=ราคา, E=SKU, F=รูป, G=หมวดหมู่ |
 | R05.105 | CSV | Col B=SKU, Col D=1 (หน่วยขาย), Col F=0 (ระดับ), Col G=ราคาระดับ 0 |
 | Import Excel | Excel (multi-sheet) | Header detection อัตโนมัติ 10 แถวแรก |
+| Product Master | Excel (.xlsx/.xls) / CSV | Col A=SKU, Col B=ชื่อสินค้า (optional, ใช้แสดงใน branch compare modal) |
 
 ---
 
