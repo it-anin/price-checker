@@ -1019,7 +1019,7 @@ async function confirmUpdatePrices() {
 
       {/* Header */}
       <div style={{ background: '#f5f7fa', padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 18, color: '#000' }}>Master รายการสินค้าทั้งหมด</h1>
+        <h1 style={{ fontSize: 18, color: '#000' }}>Grab Master รายการสินค้าทั้งหมด by mailforspiritwish</h1>
         <span style={{ fontSize: 11, color: '#000' }}>อัพเดทราคาล่าสุด: {lastPriceUpdate ?? '-'}</span>
       </div>
 
