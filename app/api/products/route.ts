@@ -174,6 +174,33 @@ export async function POST(req: NextRequest) {
     })
   }
 
+  // อัพเดทราคา Promaxx (updatePromaxxPrice) — รับ priceMap chunk จาก frontend
+  if (body?.updatePromaxxPrice && body?.priceMap) {
+    const priceMap: Record<string, number> = body.priceMap
+    const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
+    const CHUNK = 200
+
+    const priceGroups = new Map<number, string[]>()
+    for (const [sku, price] of Object.entries(priceMap)) {
+      const p = Number(price)
+      if (isNaN(p)) continue
+      if (!priceGroups.has(p)) priceGroups.set(p, [])
+      priceGroups.get(p)!.push(sku)
+    }
+
+    for (const [price, skus] of priceGroups) {
+      for (let i = 0; i < skus.length; i += CHUNK) {
+        const { error } = await supabase
+          .from('products')
+          .update({ promaxx_price: price })
+          .in(skuColumn, skus.slice(i, i + CHUNK))
+        if (error) return NextResponse.json({ success: false, error: `promaxx price: ${error.message}` })
+      }
+    }
+
+    return NextResponse.json({ success: true, updated: Object.keys(priceMap).length })
+  }
+
   // อัพเดทราคาสาขา (updateBranchPrice) — รับ priceMap chunk จาก frontend
   if (body?.updateBranchPrice && body?.priceMap) {
     const branch = normalizeBranchName(body.updateBranchPrice)

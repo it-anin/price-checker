@@ -916,7 +916,6 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     const rows = parseCSVRows(clean)
 
     // Col B (index 1) = SKU, Col E (index 4) = filter (เลข 5), Col G (index 6) = ราคา
-    // เริ่มจาก row 2 (index 1) ข้าม header
     const promaxxMap: Record<string, number> = {}
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i]
@@ -936,7 +935,7 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     }
 
     const skus = Object.keys(promaxxMap)
-    setStatus(`(2/2) กำลังดึงข้อมูลจาก DB... (${skus.length} SKU)`)
+    setStatus(`(1/2) กำลังดึงข้อมูลจาก DB... (${skus.length} SKU)`)
 
     const chunks: string[][] = []
     for (let i = 0; i < skus.length; i += 300) chunks.push(skus.slice(i, i + 300))
@@ -952,7 +951,6 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     }
 
     const foundSkus = new Set(allProducts.map((p: Product) => p['รหัสสินค้า (SKU NUMBER)']))
-
     const matched = allProducts.map((p: Product) => {
       const sku = p['รหัสสินค้า (SKU NUMBER)']
       const promaxxPrice = promaxxMap[sku]
@@ -966,11 +964,36 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
       .filter(sku => !foundSkus.has(sku))
       .map(sku => ({ sku, promaxxPrice: promaxxMap[sku], notFound: true }))
 
+    // แสดงผลใน modal ทันที
     setPromaxxResults([...matched, ...notFound])
     setPromaxxChecking(false)
-
     const mismatch = matched.filter((r: any) => !r.matched).length
-    setStatus(`Promaxx vs DB: ตรง ${matched.filter((r: any) => r.matched).length} | ไม่ตรง ${mismatch} | ไม่พบใน DB ${notFound.length}`)
+    setStatus(`Promaxx: ตรง ${matched.filter((r: any) => r.matched).length} | ไม่ตรง ${mismatch} | ไม่พบใน DB ${notFound.length} | กำลังบันทึกราคา...`)
+
+    // Step 2: บันทึก promaxx_price ลง DB (background, chunk 200)
+    const CHUNK = 200
+    let priceError = ''
+    for (let i = 0; i < skus.length; i += CHUNK) {
+      const chunkSkus = skus.slice(i, i + CHUNK)
+      const chunkMap: Record<string, number> = {}
+      chunkSkus.forEach(s => { chunkMap[s] = promaxxMap[s] })
+      try {
+        const res = await fetch('/api/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ updatePromaxxPrice: true, priceMap: chunkMap })
+        })
+        const data = await res.json()
+        if (!data.success) { priceError = data.error ?? 'unknown'; break }
+      } catch (e) { priceError = String(e); break }
+    }
+
+    await loadProducts(selectedSheet)
+    if (priceError) {
+      setStatus(`Promaxx: ตรง ${matched.filter((r: any) => r.matched).length} | ไม่ตรง ${mismatch} | ⚠ บันทึกราคาไม่สำเร็จ: ${priceError}`)
+    } else {
+      setStatus(`Promaxx: ตรง ${matched.filter((r: any) => r.matched).length} | ไม่ตรง ${mismatch} | ไม่พบใน DB ${notFound.length} | บันทึกราคาสำเร็จ ✅`)
+    }
   }
 
     async function handlePriceCalcUpload(file: File) {
@@ -1174,7 +1197,7 @@ async function confirmUpdatePrices() {
         <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ Price อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ราคาใน DB</button>
         <input type="file" accept=".csv" id="promaxxCheckInput" style={{ display: 'none' }}
           onChange={e => { if (e.target.files?.[0]) { handlePromaxxVsDbCheck(e.target.files[0]); e.target.value = '' } }} />
-        <button onClick={() => document.getElementById('promaxxCheckInput')?.click()} style={{ ...btnStyle, background: '#f3e8ff', borderColor: '#8b5cf6' }} title="ปุ่มสำหรับตรวจสอบราคาใน GrabMartManager กับ Promaxx(R05.103) ว่าตรงกันหรือไม่">🔍 ตรวจ Promaxx vs DB</button>
+        <button onClick={() => document.getElementById('promaxxCheckInput')?.click()} style={{ ...btnStyle, background: '#f3e8ff', borderColor: '#8b5cf6' }} title="ปุ่มสำหรับตรวจสอบราคาใน GrabMartManager กับ Promaxx(R05.103) ว่าตรงกันหรือไม่ และบันทึกราคา Promaxx ลง DB">💊 ราคาใน Promaxx</button>
         <button onClick={() => document.getElementById('grabInputSrc')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SRC">🛵 GRAB SRC</button>
         <button onClick={() => document.getElementById('grabInputKkl')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา KKL">🛵 GRAB KKL</button>
         <button onClick={() => document.getElementById('grabInputSss')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SSS">🛵 GRAB SSS</button>
@@ -1383,6 +1406,7 @@ async function confirmUpdatePrices() {
                   <th style={th}>ชื่อสินค้า</th>
                   <th style={th}>ใบอนุญาต</th>
                   <th style={th}>ราคา DB</th>
+                  <th style={{ ...th, textAlign: 'center', minWidth: 80 }}>ราคา Promaxx</th>
                   <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>SRC ราคา</th>
                   <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>KKL ราคา</th>
                   <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>SSS ราคา</th>
@@ -1428,6 +1452,25 @@ async function confirmUpdatePrices() {
                     <td style={td}>{p['*ชื่อสินค้า (NAME)'] || '-'}</td>
                     <td style={td}>{p['*เลขที่ใบอนุญาตโฆษณา'] || '-'}</td>
                     <td style={{ ...td, color: '#c74634', fontWeight: 600 }}>{p['*ราคาสินค้า'] || '-'}</td>
+                    {/* ราคา Promaxx */}
+                    {(() => {
+                      const promaxxPrice = p['promaxx_price']
+                      const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
+                      const hasPx = promaxxPrice !== null && promaxxPrice !== undefined
+                      const mismatch = hasPx && dbPrice !== null && Math.abs(Number(promaxxPrice) - dbPrice) >= 0.01
+                      return (
+                        <td style={{ ...td, textAlign: 'center', background: mismatch ? '#fde8e8' : 'transparent', padding: '4px 6px' }}>
+                          {hasPx ? (
+                            <span style={{ fontWeight: 600, color: mismatch ? '#c0392b' : '#555', fontSize: 11 }}>
+                              {Number(promaxxPrice).toLocaleString()}
+                              {mismatch && <span style={{ display: 'block', fontSize: 9, color: '#c0392b' }}>≠ DB</span>}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#ccc', fontSize: 11 }}>-</span>
+                          )}
+                        </td>
+                      )
+                    })()}
                     {(['src', 'kkl', 'sss'] as const).map(b => {
                       const branchPrice = p[`${b}_price`]
                       const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
