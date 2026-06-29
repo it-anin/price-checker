@@ -72,6 +72,7 @@ export default function Home() {
   const [showPromaxxModal, setShowPromaxxModal] = useState(false)
   const [promaxxResults, setPromaxxResults] = useState<any[]>([])
   const [promaxxChecking, setPromaxxChecking] = useState(false)
+  const [promaxxProgress, setPromaxxProgress] = useState({ current: 0, total: 0, phase: '' })
   const [editImageSrc, setEditImageSrc] = useState<string>('')
   const [editImageOverlay, setEditImageOverlay] = useState<string>('')
   const [editImageMime, setEditImageMime] = useState<string>('image/png')
@@ -940,11 +941,14 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
 
     const skus = Object.keys(promaxxMap)
     setStatus(`(1/2) กำลังดึงข้อมูลจาก DB... (${skus.length} SKU)`)
+    setPromaxxProgress({ current: 0, total: skus.length, phase: 'fetch' })
 
     const chunks: string[][] = []
     for (let i = 0; i < skus.length; i += 300) chunks.push(skus.slice(i, i + 300))
     const allProducts: Product[] = []
-    for (const chunk of chunks) {
+    for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+      const chunk = chunks[chunkIdx]
+      setPromaxxProgress({ current: chunkIdx * 300, total: skus.length, phase: 'fetch' })
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -979,7 +983,14 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     const CHUNK = 200
     let priceError = ''
     let savedCount = 0
+    const totalChunks = Math.ceil(skus.length / CHUNK)
+    setPromaxxProgress({ current: 0, total: skus.length, phase: 'save' })
+    
     for (let i = 0; i < skus.length; i += CHUNK) {
+      const chunkIdx = Math.floor(i / CHUNK)
+      setPromaxxProgress({ current: i, total: skus.length, phase: 'save' })
+      setStatus(`Promaxx: กำลังบันทึกราคา... (${chunkIdx + 1}/${totalChunks})`)
+      
       const chunkSkus = skus.slice(i, i + CHUNK)
       const chunkMap: Record<string, number> = {}
       chunkSkus.forEach(s => { chunkMap[s] = promaxxMap[s] })
@@ -996,6 +1007,7 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
       } catch (e) { priceError = String(e); console.error(`[Promaxx] chunk ${i} error:`, e); break }
     }
 
+    setPromaxxProgress({ current: 0, total: 0, phase: '' })
     await loadProducts(selectedSheet)
     console.log(`[Promaxx] total saved: ${savedCount}/${skus.length}`)
     if (priceError) {
@@ -1158,7 +1170,7 @@ async function confirmUpdatePrices() {
 
       {/* Header */}
       <div style={{ background: '#f5f7fa', padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 18, color: '#000' }}>Grab Master รายการสินค้าทั้งหมด by mailforspiritwish <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>v1.10</span></h1>
+        <h1 style={{ fontSize: 18, color: '#000' }}>Grab Master รายการสินค้าทั้งหมด by mailforspiritwish <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>v1.11</span></h1>
         <span style={{ fontSize: 11, color: '#000' }}>อัพเดทราคาล่าสุด: {lastPriceUpdate ?? '-'}</span>
       </div>
 
@@ -2590,6 +2602,18 @@ async function confirmUpdatePrices() {
                 <strong>🔍 ผลตรวจสอบ Promaxx (R05.103) vs DB</strong>
                 <button onClick={() => setShowPromaxxModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
               </div>
+              {/* Progress bar */}
+              {promaxxProgress.total > 0 && (
+                <div style={{ padding: '10px 20px', background: '#f0e6ff', borderBottom: '1px solid #d1b3ff' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#5b21b6', marginBottom: 4 }}>
+                    <span>{promaxxProgress.phase === 'fetch' ? '🔄 กำลังดึงข้อมูล...' : '💾 กำลังบันทึกราคา...'}</span>
+                    <span>{promaxxProgress.current.toLocaleString()} / {promaxxProgress.total.toLocaleString()}</span>
+                  </div>
+                  <div style={{ background: '#e9d5ff', borderRadius: 999, height: 6, overflow: 'hidden' }}>
+                    <div style={{ background: '#7c3aed', height: '100%', width: `${Math.min(100, (promaxxProgress.current / promaxxProgress.total) * 100)}%`, transition: 'width 0.3s' }} />
+                  </div>
+                </div>
+              )}
               {promaxxResults.length > 0 && !promaxxResults[0]?.error && (
                 <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
                   <span>ทั้งหมด: <strong>{promaxxResults.length}</strong></span>
