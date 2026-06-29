@@ -361,10 +361,11 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
 
   // ซิงก์สถานะ + บันทึกราคา GRAB ลง Supabase
   const skus = Object.keys(grabMap)
+  // แยก sync branch กับ update ราคา เพื่อไม่ให้ payload ใหญ่เกิน
   const syncRes = await fetch('/api/products', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ availabilityBranch: branch, skus, priceMap: grabMap })
+    body: JSON.stringify({ availabilityBranch: branch, skus })
   })
   const syncData = await syncRes.json()
 
@@ -372,6 +373,26 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     setStatus('เกิดข้อผิดพลาดในการอัปเดตสถานะสาขา')
     setGrabResults([{ error: `อัปเดตสถานะสาขาไม่สำเร็จ: ${syncData.error ?? 'unknown error'}` }])
     return
+  }
+
+  // อัพเดทราคาสาขาแยก (chunk 200 เพื่อไม่ให้ payload ใหญ่เกิน)
+  setStatus(`กำลังบันทึกราคา ${branch.toUpperCase()} (${skus.length} SKU)...`)
+  const PRICE_CHUNK = 200
+  for (let i = 0; i < skus.length; i += PRICE_CHUNK) {
+    const chunkSkus = skus.slice(i, i + PRICE_CHUNK)
+    const chunkMap: Record<string, number> = {}
+    chunkSkus.forEach(s => { chunkMap[s] = grabMap[s] })
+    const priceRes = await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updateBranchPrice: branch, priceMap: chunkMap })
+    })
+    const priceData = await priceRes.json()
+    if (!priceData.success) {
+      setStatus(`เกิดข้อผิดพลาดบันทึกราคา: ${priceData.error ?? 'unknown'}`)
+      setGrabResults([{ error: `บันทึกราคาไม่สำเร็จ: ${priceData.error ?? 'unknown error'}` }])
+      return
+    }
   }
 
   // ดึงข้อมูล Master มาเทียบราคาและสถานะการมีสินค้า

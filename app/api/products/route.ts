@@ -85,13 +85,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid branch' })
     }
 
-    // priceMap: SKU → grab price (optional, sent when uploading CSV with prices)
-    const priceMap: Record<string, number> = body.priceMap ?? {}
-
+    // priceMap: SKU → grab price — ไม่ใช้แล้วในบล็อกนี้ (ย้ายไป updateBranchPrice handler)
     const skuSet: string[] = Array.from(new Set(body.skus.map((sku: any) => String(sku ?? '').trim()).filter(Boolean)))
     const skuSetSet = new Set(skuSet)
     const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
-    const priceCol = `${availabilityBranch}_price` // e.g. src_price, kkl_price, sss_price
+    const priceCol = `${availabilityBranch}_price`
     const CHUNK = 200
 
     // ดึงสินค้าทั้งหมดพร้อม branch ปัจจุบัน (paginate)
@@ -167,28 +165,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // UPDATE ราคาแต่ละสาขาจาก priceMap (สำหรับ SKU ที่มีใน DB)
-    if (Object.keys(priceMap).length > 0) {
-      // จัดกลุ่มตามราคาเพื่อ bulk update
-      const priceGroups = new Map<number, string[]>()
-      for (const sku of skuSet) {
-        if (!existingSkus.has(sku)) continue
-        const price = priceMap[sku]
-        if (price === undefined) continue
-        if (!priceGroups.has(price)) priceGroups.set(price, [])
-        priceGroups.get(price)!.push(sku)
-      }
-      for (const [price, skus] of priceGroups) {
-        for (let i = 0; i < skus.length; i += CHUNK) {
-          const { error } = await supabase
-            .from('products')
-            .update({ [priceCol]: price })
-            .in(skuColumn, skus.slice(i, i + CHUNK))
-          if (error) return NextResponse.json({ success: false, error: `price: ${error.message}` })
-        }
-      }
-    }
-
     return NextResponse.json({
       success: true,
       syncedBranch: availabilityBranch,
@@ -196,6 +172,39 @@ export async function POST(req: NextRequest) {
       deleted: toRemove.length,
       missingBase: missingBase.length
     })
+  }
+
+  // อัพเดทราคาสาขา (updateBranchPrice) — รับ priceMap chunk จาก frontend
+  if (body?.updateBranchPrice && body?.priceMap) {
+    const branch = normalizeBranchName(body.updateBranchPrice)
+    if (!BRANCH_KEYS.includes(branch as (typeof BRANCH_KEYS)[number])) {
+      return NextResponse.json({ success: false, error: 'Invalid branch' })
+    }
+    const priceMap: Record<string, number> = body.priceMap
+    const priceCol = `${branch}_price`
+    const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
+    const CHUNK = 200
+
+    // จัดกลุ่มตามราคาเพื่อ bulk update
+    const priceGroups = new Map<number, string[]>()
+    for (const [sku, price] of Object.entries(priceMap)) {
+      const p = Number(price)
+      if (isNaN(p)) continue
+      if (!priceGroups.has(p)) priceGroups.set(p, [])
+      priceGroups.get(p)!.push(sku)
+    }
+
+    for (const [price, skus] of priceGroups) {
+      for (let i = 0; i < skus.length; i += CHUNK) {
+        const { error } = await supabase
+          .from('products')
+          .update({ [priceCol]: price })
+          .in(skuColumn, skus.slice(i, i + CHUNK))
+        if (error) return NextResponse.json({ success: false, error: `price update: ${error.message}` })
+      }
+    }
+
+    return NextResponse.json({ success: true, updated: Object.keys(priceMap).length })
   }
 
   // query by skus array (batch 300 per request to avoid Supabase limits)
