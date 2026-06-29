@@ -359,12 +359,12 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     return
   }
 
-  // ซิงก์สถานะว่าสาขาที่เลือกมี SKU ไหนบ้างตาม Grab_menu
+  // ซิงก์สถานะ + บันทึกราคา GRAB ลง Supabase
   const skus = Object.keys(grabMap)
   const syncRes = await fetch('/api/products', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ availabilityBranch: branch, skus })
+    body: JSON.stringify({ availabilityBranch: branch, skus, priceMap: grabMap })
   })
   const syncData = await syncRes.json()
 
@@ -1346,10 +1346,10 @@ async function confirmUpdatePrices() {
                   <th style={th}>รหัสสินค้า</th>
                   <th style={th}>ชื่อสินค้า</th>
                   <th style={th}>ใบอนุญาต</th>
-                  <th style={th}>ราคา</th>
-                  <th style={th}>SRC</th>
-                  <th style={th}>KKL</th>
-                  <th style={th}>SSS</th>
+                  <th style={th}>ราคา DB</th>
+                  <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>SRC ราคา</th>
+                  <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>KKL ราคา</th>
+                  <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>SSS ราคา</th>
                   <th style={th}>ดำเนินการ</th>
                 </tr>
               </thead>
@@ -1392,9 +1392,29 @@ async function confirmUpdatePrices() {
                     <td style={td}>{p['*ชื่อสินค้า (NAME)'] || '-'}</td>
                     <td style={td}>{p['*เลขที่ใบอนุญาตโฆษณา'] || '-'}</td>
                     <td style={{ ...td, color: '#c74634', fontWeight: 600 }}>{p['*ราคาสินค้า'] || '-'}</td>
-                    <td style={{ ...td, textAlign: 'center', fontWeight: 700 }}>{renderBranchFlag(p.src)}</td>
-                    <td style={{ ...td, textAlign: 'center', fontWeight: 700 }}>{renderBranchFlag(p.kkl)}</td>
-                    <td style={{ ...td, textAlign: 'center', fontWeight: 700 }}>{renderBranchFlag(p.sss)}</td>
+                    {(['src', 'kkl', 'sss'] as const).map(b => {
+                      const branchPrice = p[`${b}_price`]
+                      const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
+                      const hasBranch = !!p[b]
+                      const matched = branchPrice !== null && branchPrice !== undefined && dbPrice !== null && Math.abs(branchPrice - dbPrice) < 0.01
+                      const mismatch = hasBranch && branchPrice !== null && branchPrice !== undefined && !matched
+                      return (
+                        <td key={b} style={{ ...td, textAlign: 'center', background: mismatch ? '#fff3cd' : 'transparent', padding: '4px 6px' }}>
+                          {hasBranch ? (
+                            branchPrice !== null && branchPrice !== undefined ? (
+                              <span style={{ fontWeight: 600, color: mismatch ? '#856404' : '#155724', fontSize: 11 }}>
+                                {Number(branchPrice).toLocaleString()}
+                                {mismatch && <span style={{ display: 'block', fontSize: 9, color: '#856404' }}>≠ DB</span>}
+                              </span>
+                            ) : (
+                              <span style={{ color: '#28a745', fontWeight: 700, fontSize: 12 }}>✓</span>
+                            )
+                          ) : (
+                            <span style={{ color: '#ccc', fontSize: 11 }}>-</span>
+                          )}
+                        </td>
+                      )
+                    })}
                     <td style={td}>
                       <button
                         onClick={() => setEditProduct({ ...p, _originalSku: p['รหัสสินค้า (SKU NUMBER)'] })}

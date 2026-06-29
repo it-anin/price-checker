@@ -85,9 +85,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'Invalid branch' })
     }
 
+    // priceMap: SKU → grab price (optional, sent when uploading CSV with prices)
+    const priceMap: Record<string, number> = body.priceMap ?? {}
+
     const skuSet: string[] = Array.from(new Set(body.skus.map((sku: any) => String(sku ?? '').trim()).filter(Boolean)))
     const skuSetSet = new Set(skuSet)
     const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
+    const priceCol = `${availabilityBranch}_price` // e.g. src_price, kkl_price, sss_price
     const CHUNK = 200
 
     // ดึงสินค้าทั้งหมดพร้อม branch ปัจจุบัน (paginate)
@@ -152,14 +156,36 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // UPDATE ถอน branch
+    // UPDATE ถอน branch + เคลียร์ราคาสาขานั้น
     for (const [newVal, skus] of removeGroups) {
       for (let i = 0; i < skus.length; i += CHUNK) {
         const { error } = await supabase
           .from('products')
-          .update({ branch: newVal || null })
+          .update({ branch: newVal || null, [priceCol]: null })
           .in(skuColumn, skus.slice(i, i + CHUNK))
         if (error) return NextResponse.json({ success: false, error: `remove: ${error.message}` })
+      }
+    }
+
+    // UPDATE ราคาแต่ละสาขาจาก priceMap (สำหรับ SKU ที่มีใน DB)
+    if (Object.keys(priceMap).length > 0) {
+      // จัดกลุ่มตามราคาเพื่อ bulk update
+      const priceGroups = new Map<number, string[]>()
+      for (const sku of skuSet) {
+        if (!existingSkus.has(sku)) continue
+        const price = priceMap[sku]
+        if (price === undefined) continue
+        if (!priceGroups.has(price)) priceGroups.set(price, [])
+        priceGroups.get(price)!.push(sku)
+      }
+      for (const [price, skus] of priceGroups) {
+        for (let i = 0; i < skus.length; i += CHUNK) {
+          const { error } = await supabase
+            .from('products')
+            .update({ [priceCol]: price })
+            .in(skuColumn, skus.slice(i, i + CHUNK))
+          if (error) return NextResponse.json({ success: false, error: `price: ${error.message}` })
+        }
       }
     }
 
