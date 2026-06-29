@@ -36,6 +36,21 @@ function aggregateProducts(rows: any[]) {
   return Array.from(grouped.values())
 }
 
+const PRODUCT_COLUMNS = [
+  '"รหัสสินค้า (SKU NUMBER)"',
+  '"*ชื่อสินค้า (NAME)"',
+  '"ประเภทสินค้า"',
+  '"*เลขที่ใบอนุญาตโฆษณา"',
+  '"*ราคาสินค้า"',
+  '"*รูปภาพสินค้า"',
+  '"หมวดหมู่สินค้า (CATEGORIES)"',
+  'branch',
+  'src_price',
+  'kkl_price',
+  'sss_price',
+  'promaxx_price',
+].join(', ')
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const sku = searchParams.get('sku')
@@ -53,7 +68,7 @@ export async function GET(req: NextRequest) {
     const all: any[] = []
     let from = 0
     while (true) {
-      const { data, error } = await supabase.from('products').select('*').range(from, from + 999)
+      const { data, error } = await supabase.from('products').select(PRODUCT_COLUMNS).range(from, from + 999)
       if (error) return NextResponse.json({ success: false, error: error.message })
       all.push(...(data || []))
       if (!data || data.length < 1000) break
@@ -64,14 +79,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, products: missing })
   }
 
-  let q = supabase.from('products').select('*')
+  let q = supabase.from('products').select(PRODUCT_COLUMNS)
 
   if (q_param) q = q.or(`"รหัสสินค้า (SKU NUMBER)".ilike.%${q_param}%,"*ชื่อสินค้า (NAME)".ilike.%${q_param}%`)
   else if (sku) q = q.ilike('"รหัสสินค้า (SKU NUMBER)"', `%${sku}%`)
   if (sheet) q = q.eq('"หมวดหมู่สินค้า (CATEGORIES)"', sheet)
   if (skus) q = q.in('"รหัสสินค้า (SKU NUMBER)"', skus.split(','))
 
-  const { data, error } = await q.limit(500)
+  const { data, error } = await q.limit(2000)
   if (error) return NextResponse.json({ success: false, error: error.message })
   return NextResponse.json({ success: true, products: aggregateProducts(data || []) })
 }
@@ -240,11 +255,10 @@ export async function POST(req: NextRequest) {
     const all: any[] = []
     for (let i = 0; i < body.skus.length; i += chunkSize) {
       const chunk = body.skus.slice(i, i + chunkSize)
-      let chunkQ = supabase
+      const { data, error } = await supabase
         .from('products')
-        .select('*')
+        .select(PRODUCT_COLUMNS)
         .in('"รหัสสินค้า (SKU NUMBER)"', chunk)
-      const { data, error } = await chunkQ
       if (error) return NextResponse.json({ success: false, error: error.message })
       all.push(...(data || []))
     }
