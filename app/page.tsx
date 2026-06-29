@@ -359,9 +359,10 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     return
   }
 
-  // ซิงก์สถานะ + บันทึกราคา GRAB ลง Supabase
   const skus = Object.keys(grabMap)
-  // แยก sync branch กับ update ราคา เพื่อไม่ให้ payload ใหญ่เกิน
+
+  // Step 1: sync branch availability
+  setStatus(`(1/3) กำลัง sync สาขา ${branch.toUpperCase()} (${skus.length} SKU)...`)
   const syncRes = await fetch('/api/products', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -375,32 +376,18 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     return
   }
 
-  // อัพเดทราคาสาขาแยก (chunk 200 เพื่อไม่ให้ payload ใหญ่เกิน)
-  setStatus(`กำลังบันทึกราคา ${branch.toUpperCase()} (${skus.length} SKU)...`)
-  const PRICE_CHUNK = 200
-  for (let i = 0; i < skus.length; i += PRICE_CHUNK) {
-    const chunkSkus = skus.slice(i, i + PRICE_CHUNK)
-    const chunkMap: Record<string, number> = {}
-    chunkSkus.forEach(s => { chunkMap[s] = grabMap[s] })
-    const priceRes = await fetch('/api/products', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updateBranchPrice: branch, priceMap: chunkMap })
-    })
-    const priceData = await priceRes.json()
-    if (!priceData.success) {
-      setStatus(`เกิดข้อผิดพลาดบันทึกราคา: ${priceData.error ?? 'unknown'}`)
-      setGrabResults([{ error: `บันทึกราคาไม่สำเร็จ: ${priceData.error ?? 'unknown error'}` }])
-      return
-    }
-  }
-
-  // ดึงข้อมูล Master มาเทียบราคาและสถานะการมีสินค้า
-  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus }) })
+  // Step 2: ดึงข้อมูลจาก DB มาเทียบราคาก่อน (แสดงผลใน modal ได้เลย)
+  setStatus(`(2/3) กำลังดึงข้อมูลจาก DB...`)
+  const res = await fetch('/api/products', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ skus })
+  })
   const data = await res.json()
 
   if (!data.success) {
-    setStatus('เกิดข้อผิดพลาด')
+    setStatus('เกิดข้อผิดพลาดดึงข้อมูล')
+    setGrabResults([{ error: `ดึงข้อมูลไม่สำเร็จ: ${data.error ?? 'unknown'}` }])
     return
   }
 
@@ -410,9 +397,8 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     return
   }
 
-  // เปรียบเทียบราคา
+  // เปรียบเทียบราคา — แสดงผลทันที
   const foundSkus = new Set(data.products.map((p: Product) => p['รหัสสินค้า (SKU NUMBER)']))
-
   const matched_results = data.products
     .map((p: Product) => {
       const sku = p['รหัสสินค้า (SKU NUMBER)']
@@ -429,14 +415,43 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     .map(sku => ({ sku, grabPrice: grabMap[sku], notFound: true }))
 
   const results = [...matched_results, ...notFound_results]
-
   const mismatch = matched_results.filter((r: any) => !r.matched)
   const mismatchSkus = new Set(mismatch.map((r: any) => r.sku))
   setGrabMismatchProducts(data.products.filter((p: Product) => mismatchSkus.has(p['รหัสสินค้า (SKU NUMBER)'])))
+
+  // แสดงผลใน modal ทันที
   setGrabResults(results)
+  setStatus(`Grab ${branch.toUpperCase()}: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบใน DB ${notFound_results.length} | sync +${syncData.inserted || 0} -${syncData.deleted || 0} | กำลังบันทึกราคา...`)
+
+  // Step 3: บันทึกราคาสาขาลง DB (background — ไม่บล็อก UI)
+  const PRICE_CHUNK = 200
+  let priceError = ''
+  for (let i = 0; i < skus.length; i += PRICE_CHUNK) {
+    const chunkSkus = skus.slice(i, i + PRICE_CHUNK)
+    const chunkMap: Record<string, number> = {}
+    chunkSkus.forEach(s => { chunkMap[s] = grabMap[s] })
+    try {
+      const priceRes = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updateBranchPrice: branch, priceMap: chunkMap })
+      })
+      const priceData = await priceRes.json()
+      if (!priceData.success) { priceError = priceData.error ?? 'unknown'; break }
+    } catch (e) {
+      priceError = String(e)
+      break
+    }
+  }
+
   await loadProducts(selectedSheet)
   await loadStats()
-  setStatus(`Grab ${branch.toUpperCase()}: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบข้อมูลใน Supabase ${notFound_results.length} | เพิ่มสถานะ ${syncData.inserted || 0} | ลบสถานะ ${syncData.deleted || 0}`)
+
+  if (priceError) {
+    setStatus(`Grab ${branch.toUpperCase()}: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ⚠ บันทึกราคาไม่สำเร็จ: ${priceError}`)
+  } else {
+    setStatus(`Grab ${branch.toUpperCase()}: ตรง ${matched_results.filter((r: any) => r.matched).length} | ต้องแก้ไข ${mismatch.length} | ไม่พบใน DB ${notFound_results.length} | บันทึกราคาสำเร็จ ✅`)
+  }
 }
 
   const IMPORT_FIELDS = [
