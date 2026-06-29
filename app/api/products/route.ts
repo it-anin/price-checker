@@ -88,8 +88,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await q.limit(2000)
   if (error) return NextResponse.json({ success: false, error: error.message })
-  return NextResponse.json({ success: true, products: aggregateProducts(data || []) })
-}
+  return NextResponse.json({ success: true, products: aggregateProducts(data || []) })}
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
@@ -193,27 +192,27 @@ export async function POST(req: NextRequest) {
   if (body?.updatePromaxxPrice && body?.priceMap) {
     const priceMap: Record<string, number> = body.priceMap
     const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
-    const CHUNK = 200
 
-    const priceGroups = new Map<number, string[]>()
-    for (const [sku, price] of Object.entries(priceMap)) {
-      const p = Number(price)
-      if (isNaN(p)) continue
-      if (!priceGroups.has(p)) priceGroups.set(p, [])
-      priceGroups.get(p)!.push(sku)
+    // update ทีละ SKU โดยใช้ upsert-style: group SKU ที่ราคาเท่ากันไว้ด้วยกัน
+    // แต่ถ้าราคาต่างกันทุกตัว ให้ใช้ Promise.all เพื่อส่ง parallel (max 10 ต่อครั้ง)
+    const entries = Object.entries(priceMap)
+    const PARALLEL = 10
+    for (let i = 0; i < entries.length; i += PARALLEL) {
+      const batch = entries.slice(i, i + PARALLEL)
+      const errors = await Promise.all(
+        batch.map(([sku, price]) =>
+          supabase
+            .from('products')
+            .update({ promaxx_price: Number(price) })
+            .eq(skuColumn, sku)
+            .then(({ error }) => error?.message ?? null)
+        )
+      )
+      const firstError = errors.find(e => e !== null)
+      if (firstError) return NextResponse.json({ success: false, error: `promaxx price: ${firstError}` })
     }
 
-    for (const [price, skus] of priceGroups) {
-      for (let i = 0; i < skus.length; i += CHUNK) {
-        const { error } = await supabase
-          .from('products')
-          .update({ promaxx_price: price })
-          .in(skuColumn, skus.slice(i, i + CHUNK))
-        if (error) return NextResponse.json({ success: false, error: `promaxx price: ${error.message}` })
-      }
-    }
-
-    return NextResponse.json({ success: true, updated: Object.keys(priceMap).length })
+    return NextResponse.json({ success: true, updated: entries.length })
   }
 
   // อัพเดทราคาสาขา (updateBranchPrice) — รับ priceMap chunk จาก frontend
@@ -225,28 +224,26 @@ export async function POST(req: NextRequest) {
     const priceMap: Record<string, number> = body.priceMap
     const priceCol = `${branch}_price`
     const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
-    const CHUNK = 200
 
-    // จัดกลุ่มตามราคาเพื่อ bulk update
-    const priceGroups = new Map<number, string[]>()
-    for (const [sku, price] of Object.entries(priceMap)) {
-      const p = Number(price)
-      if (isNaN(p)) continue
-      if (!priceGroups.has(p)) priceGroups.set(p, [])
-      priceGroups.get(p)!.push(sku)
+    // parallel update 10 SKU ต่อรอบ
+    const entries = Object.entries(priceMap)
+    const PARALLEL = 10
+    for (let i = 0; i < entries.length; i += PARALLEL) {
+      const batch = entries.slice(i, i + PARALLEL)
+      const errors = await Promise.all(
+        batch.map(([sku, price]) =>
+          supabase
+            .from('products')
+            .update({ [priceCol]: Number(price) })
+            .eq(skuColumn, sku)
+            .then(({ error }) => error?.message ?? null)
+        )
+      )
+      const firstError = errors.find(e => e !== null)
+      if (firstError) return NextResponse.json({ success: false, error: `price update: ${firstError}` })
     }
 
-    for (const [price, skus] of priceGroups) {
-      for (let i = 0; i < skus.length; i += CHUNK) {
-        const { error } = await supabase
-          .from('products')
-          .update({ [priceCol]: price })
-          .in(skuColumn, skus.slice(i, i + CHUNK))
-        if (error) return NextResponse.json({ success: false, error: `price update: ${error.message}` })
-      }
-    }
-
-    return NextResponse.json({ success: true, updated: Object.keys(priceMap).length })
+    return NextResponse.json({ success: true, updated: entries.length })
   }
 
   // query by skus array (batch 300 per request to avoid Supabase limits)
