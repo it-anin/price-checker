@@ -917,15 +917,19 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
 
     // Col B (index 1) = SKU, Col E (index 4) = filter (เลข 5), Col G (index 6) = ราคา
     const promaxxMap: Record<string, number> = {}
+    let skippedCount = 0
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i]
       if (!row || row.length < 7) continue
       const sku = row[1]?.trim()
       const filter = row[4]?.trim()
       const price = parsePriceRobust(row[6])
-      if (!sku || filter !== '5' || price === null) continue
+      if (!sku) continue
+      if (filter !== '5') { skippedCount++; continue }
+      if (price === null) { console.warn(`[Promaxx] SKU ${sku} row ${i+1}: filter=5 แต่ parse ราคา Col G ไม่ได้:`, row[6]); continue }
       promaxxMap[sku] = price
     }
+    console.log(`[Promaxx] parsed ${Object.keys(promaxxMap).length} SKUs (skipped ${skippedCount} non-filter-5)`)
 
     if (Object.keys(promaxxMap).length === 0) {
       setPromaxxResults([{ error: 'ไม่พบข้อมูลในไฟล์ — ตรวจสอบว่าเป็นไฟล์ R05.103 และคอลัมน์ E มีค่าเป็น 5' }])
@@ -949,6 +953,7 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
       const data = await res.json()
       if (data.success) allProducts.push(...data.products)
     }
+    console.log(`[Promaxx] fetched ${allProducts.length} products from DB`)
 
     const foundSkus = new Set(allProducts.map((p: Product) => p['รหัสสินค้า (SKU NUMBER)']))
     const matched = allProducts.map((p: Product) => {
@@ -973,6 +978,7 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     // Step 2: บันทึก promaxx_price ลง DB (background, chunk 200)
     const CHUNK = 200
     let priceError = ''
+    let savedCount = 0
     for (let i = 0; i < skus.length; i += CHUNK) {
       const chunkSkus = skus.slice(i, i + CHUNK)
       const chunkMap: Record<string, number> = {}
@@ -984,15 +990,18 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
           body: JSON.stringify({ updatePromaxxPrice: true, priceMap: chunkMap })
         })
         const data = await res.json()
-        if (!data.success) { priceError = data.error ?? 'unknown'; break }
-      } catch (e) { priceError = String(e); break }
+        if (!data.success) { priceError = data.error ?? 'unknown'; console.error(`[Promaxx] chunk ${i}-${i+CHUNK} failed:`, data.error); break }
+        savedCount += data.updated ?? chunkSkus.length
+        console.log(`[Promaxx] saved chunk ${i}-${Math.min(i+CHUNK, skus.length)} (${data.updated} SKUs)`)
+      } catch (e) { priceError = String(e); console.error(`[Promaxx] chunk ${i} error:`, e); break }
     }
 
     await loadProducts(selectedSheet)
+    console.log(`[Promaxx] total saved: ${savedCount}/${skus.length}`)
     if (priceError) {
       setStatus(`Promaxx: ตรง ${matched.filter((r: any) => r.matched).length} | ไม่ตรง ${mismatch} | ⚠ บันทึกราคาไม่สำเร็จ: ${priceError}`)
     } else {
-      setStatus(`Promaxx: ตรง ${matched.filter((r: any) => r.matched).length} | ไม่ตรง ${mismatch} | ไม่พบใน DB ${notFound.length} | บันทึกราคาสำเร็จ ✅`)
+      setStatus(`Promaxx: ตรง ${matched.filter((r: any) => r.matched).length} | ไม่ตรง ${mismatch} | ไม่พบใน DB ${notFound.length} | บันทึกราคาสำเร็จ ${savedCount}/${skus.length} ✅`)
     }
   }
 
@@ -1149,7 +1158,7 @@ async function confirmUpdatePrices() {
 
       {/* Header */}
       <div style={{ background: '#f5f7fa', padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 18, color: '#000' }}>Grab Master รายการสินค้าทั้งหมด by mailforspiritwish <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>v1.9</span></h1>
+        <h1 style={{ fontSize: 18, color: '#000' }}>Grab Master รายการสินค้าทั้งหมด by mailforspiritwish <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>v1.10</span></h1>
         <span style={{ fontSize: 11, color: '#000' }}>อัพเดทราคาล่าสุด: {lastPriceUpdate ?? '-'}</span>
       </div>
 

@@ -2,7 +2,7 @@
 
 Every time a code change is made to this project, you MUST increment the version number in `app/page.tsx`.
 
-## Current Version: v1.9
+## Current Version: v1.10
 
 ## Location
 ```
