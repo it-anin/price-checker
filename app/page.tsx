@@ -1383,7 +1383,7 @@ async function confirmUpdatePrices() {
                 <th style={th}>SKU</th>
                 <th style={th}>ชื่อสินค้า</th>
                 <th style={th}>ราคาใน GRAB</th>
-                <th style={th}>ราคาใน DB</th>
+                <th style={th}>ราคา Promaxx</th>
                 <th style={th}>สถานะ</th>
               </tr>
             </thead>
