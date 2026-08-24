@@ -187,7 +187,7 @@ export default function Home() {
       ctx.fillStyle = '#fff'
       ctx.fillRect(0, 0, w, h)
       ctx.drawImage(img, 0, 0, w, h)
-      const text = (overlayText || '').trim()
+      const text = (overlayText || '').trim() ? `เลขที่ใบอนุญาต ${(overlayText || '').trim()}` : ''
       if (text) {
         const fontSize = Math.max(10, Math.round(h * 0.028))
         ctx.font = `bold ${fontSize}px Arial, sans-serif`
@@ -252,9 +252,7 @@ export default function Home() {
       return
     }
     const license = (editProduct['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()
-    const sku = (editProduct['รหัสสินค้า (SKU NUMBER)'] || '').toString().trim()
-    const defaultText = [license, sku].filter(Boolean).join(' ')
-    setEditImageOverlay(defaultText)
+    setEditImageOverlay(license)
   }, [editProduct])
 
   async function downloadProductXlsx(p: Product) {
@@ -1899,13 +1897,13 @@ async function confirmUpdatePrices() {
                     </div>
                   </div>
                   <div style={{ marginTop: 10, fontSize: 12, color: '#4b5563' }}>
-                    ข้อความมุมขวาล่างจะใส่ เลขที่ใบอนุญาต + SKU ให้อัตโนมัติ — ข้อความ<b style={{ color: '#a52828' }}>ต้องมีเลขที่ใบอนุญาต</b>จึงจะดาวน์โหลดรูปได้
+                    ใส่เลขที่ใบอนุญาต (เลขอย่างเดียว) — ระบบจะพิมพ์คำว่า <b style={{ color: '#355070' }}>"เลขที่ใบอนุญาต"</b> นำหน้าให้อัตโนมัติ เช่น เลขที่ใบอนุญาต 65-2-3-2-0003417
                   </div>
                   <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#355070' }}>ข้อความบนรูป:</div>
                   <input
                     style={{ ...inputStyle, flex: '1 1 160px', marginTop: 0, borderColor: (editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim() && !(editImageOverlay || '').includes((editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()) ? '#dc3545' : '#999' }}
-                    placeholder="ข้อความบนรูป (ต้องมีเลขที่ใบอนุญาต)"
+                    placeholder="ใส่เลขที่ใบอนุญาต (เลขอย่างเดียว)"
                     value={editImageOverlay}
                     onChange={e => setEditImageOverlay(e.target.value)}
                   />
