@@ -220,6 +220,11 @@ export default function Home() {
       setEditImageMsg('กรุณาเลือกรูปภาพก่อน')
       return
     }
+    const license = (editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()
+    if (license && !(editImageOverlay || '').includes(license)) {
+      setEditImageMsg(`ข้อความบนรูปต้องมีเลขที่ใบอนุญาต "${license}"`)
+      return
+    }
     const isJpeg = editImageMime.includes('jpeg') || editImageMime.includes('jpg')
     const outMime = isJpeg ? 'image/jpeg' : 'image/png'
     const ext = isJpeg ? 'jpg' : 'png'
@@ -1894,13 +1899,13 @@ async function confirmUpdatePrices() {
                     </div>
                   </div>
                   <div style={{ marginTop: 10, fontSize: 12, color: '#4b5563' }}>
-                    ข้อความมุมขวาล่างจะใส่ SKU ให้อัตโนมัติ และแก้ไขเองได้
+                    ข้อความมุมขวาล่างจะใส่ เลขที่ใบอนุญาต + SKU ให้อัตโนมัติ — ข้อความ<b style={{ color: '#a52828' }}>ต้องมีเลขที่ใบอนุญาต</b>จึงจะดาวน์โหลดรูปได้
                   </div>
                   <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#355070' }}>ข้อความบนรูป:</div>
                   <input
-                    style={{ ...inputStyle, flex: '1 1 160px', marginTop: 0 }}
-                    placeholder="ข้อความบนรูป (มุมขวาล่าง)"
+                    style={{ ...inputStyle, flex: '1 1 160px', marginTop: 0, borderColor: (editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim() && !(editImageOverlay || '').includes((editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()) ? '#dc3545' : '#999' }}
+                    placeholder="ข้อความบนรูป (ต้องมีเลขที่ใบอนุญาต)"
                     value={editImageOverlay}
                     onChange={e => setEditImageOverlay(e.target.value)}
                   />
