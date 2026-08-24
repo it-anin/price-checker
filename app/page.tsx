@@ -2247,7 +2247,7 @@ async function confirmUpdatePrices() {
         const isLoaded = missingBranchLoaded[missingBranchTab]
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ background: '#fff', borderRadius: 6, width: 820, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+            <div style={{ background: '#fff', borderRadius: 6, width: 960, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
 
               {/* Header */}
               <div style={{ background: '#e65100', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '6px 6px 0 0' }}>
@@ -2317,6 +2317,9 @@ async function confirmUpdatePrices() {
                         <th style={{ ...th, textAlign: 'center' }}>SRC</th>
                         <th style={{ ...th, textAlign: 'center' }}>KKL</th>
                         <th style={{ ...th, textAlign: 'center' }}>SSS</th>
+                        <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>SRC ราคา</th>
+                        <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>KKL ราคา</th>
+                        <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>SSS ราคา</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2339,6 +2342,23 @@ async function confirmUpdatePrices() {
                               }
                             </td>
                           ))}
+                          {(['src','kkl','sss'] as const).map(b => {
+                            const val = p[`${b}_price`]
+                            const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
+                            const mismatch = val !== null && val !== undefined && dbPrice !== null && Math.abs(Number(val) - dbPrice) >= 0.01
+                            return (
+                              <td key={`${b}-price`} style={{ ...td, textAlign: 'center', background: mismatch ? '#fff3cd' : 'transparent' }}>
+                                {val !== null && val !== undefined ? (
+                                  <span style={{ fontWeight: 600, color: mismatch ? '#856404' : '#155724', fontSize: 11 }}>
+                                    {Number(val).toLocaleString()}
+                                    {mismatch && <span style={{ display: 'block', fontSize: 9, color: '#856404' }}>≠ DB</span>}
+                                  </span>
+                                ) : (
+                                  <span style={{ color: '#ccc', fontSize: 11 }}>-</span>
+                                )}
+                              </td>
+                            )
+                          })}
                         </tr>
                       ))}
                     </tbody>
