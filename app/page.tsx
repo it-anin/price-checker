@@ -80,6 +80,8 @@ export default function Home() {
   const [editImageMsg, setEditImageMsg] = useState<string>('')
   const [uploadingDrive, setUploadingDrive] = useState(false)
   const [driveLinkOwner, setDriveLinkOwner] = useState<{ type: 'anin' | 'external' | 'error' | 'loading'; email: string } | null>(null)
+  const [saveBtnAnim, setSaveBtnAnim] = useState(false)
+  const [cleaningImage, setCleaningImage] = useState(false)
   const editCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -201,6 +203,68 @@ export default function Home() {
     }
     img.onerror = () => { setEditImageMsg('โหลดรูปไม่สำเร็จ') }
     img.src = src
+  }
+
+  async function cleanGreenBorderAndText() {
+    const canvas = editCanvasRef.current
+    if (!canvas) return
+    setCleaningImage(true)
+    setEditImageMsg('กำลังลบกรอบ+ข้อความ...')
+    try {
+      let src = editImageSrc
+      if (!src) {
+        const link = editProduct?.['*รูปภาพสินค้า'] || ''
+        const match = link.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || link.match(/[?&]id=([a-zA-Z0-9_-]+)/)
+        if (!match) { setEditImageMsg('❌ ไม่พบลิงก์รูปภาพ'); setCleaningImage(false); return }
+        src = `https://drive.google.com/thumbnail?id=${match[1]}&sz=w1024`
+      }
+      const img = new window.Image()
+      img.crossOrigin = 'anonymous'
+      await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error('โหลดรูปไม่สำเร็จ')); img.src = src })
+      const maxW = 1024
+      const scale = img.width > maxW ? maxW / img.width : 1
+      const w = Math.round(img.width * scale)
+      const h = Math.round(img.height * scale)
+      const tmpCanvas = document.createElement('canvas')
+      tmpCanvas.width = w; tmpCanvas.height = h
+      const ctx = tmpCanvas.getContext('2d')!
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h)
+      ctx.drawImage(img, 0, 0, w, h)
+      const imageData = ctx.getImageData(0, 0, w, h)
+      const px = imageData.data
+      const isGreen = (i: number) => px[i] < 100 && px[i + 1] > 120 && px[i + 2] < 100
+      const rowAllGreen = (y: number) => { for (let x = 0; x < w; x++) if (!isGreen((y * w + x) * 4)) return false; return true }
+      const colAllGreen = (x: number) => { for (let y = 0; y < h; y++) if (!isGreen((y * w + x) * 4)) return false; return true }
+      let top = 0, bottom = h - 1, left = 0, right = w - 1
+      while (top <= bottom && rowAllGreen(top)) top++
+      while (bottom >= top && rowAllGreen(bottom)) bottom--
+      while (left <= right && colAllGreen(left)) left++
+      while (right >= left && colAllGreen(right)) right--
+      const margin = 2
+      const cropTop = Math.max(0, top - margin)
+      const cropLeft = Math.max(0, left - margin)
+      const cropW = Math.min(w, right + margin + 1) - cropLeft
+      const cropH = Math.min(h, bottom + margin + 1) - cropTop
+      if (cropW < 10 || cropH < 10) { setEditImageMsg('❌ ไม่พบกรอบสีเขียว หรือรูปเล็กเกินไป'); setCleaningImage(false); return }
+      const croppedData = ctx.getImageData(cropLeft, cropTop, cropW, cropH)
+      const cpx = croppedData.data
+      const textZoneH = Math.round(cropH * 0.15)
+      const textZoneW = Math.round(cropW * 0.6)
+      for (let y = cropH - textZoneH; y < cropH; y++) {
+        for (let x = cropW - textZoneW; x < cropW; x++) {
+          const i = (y * cropW + x) * 4
+          cpx[i] = 255; cpx[i + 1] = 255; cpx[i + 2] = 255
+        }
+      }
+      const resultCanvas = document.createElement('canvas')
+      resultCanvas.width = cropW; resultCanvas.height = cropH
+      const rCtx = resultCanvas.getContext('2d')!
+      rCtx.putImageData(croppedData, 0, 0)
+      setEditImageSrc(resultCanvas.toDataURL('image/png'))
+      setEditImageOverlay('')
+      setEditImageMsg(`ลบกรอบ+ข้อความสำเร็จ ✅ (${w}x${h} → ${cropW}x${cropH})`)
+    } catch (e: any) { setEditImageMsg('❌ ' + (e?.message || 'ลบกรอบไม่สำเร็จ')) }
+    setCleaningImage(false)
   }
 
   function onPickEditImage(file: File | null) {
@@ -1989,6 +2053,14 @@ async function confirmUpdatePrices() {
                   </button>
                   <button
                     type="button"
+                    onClick={cleanGreenBorderAndText}
+                    disabled={cleaningImage || (!editImageSrc && !editProduct?.['*รูปภาพสินค้า'])}
+                    style={{ ...btnStyle, background: '#e65100', color: '#fff', borderColor: '#bf360c', opacity: cleaningImage ? 0.6 : 1 }}
+                  >
+                    {cleaningImage ? '⏳ กำลังลบกรอบ...' : '🧹 ลบกรอบ+ข้อความ'}
+                  </button>
+                  <button
+                    type="button"
                     onClick={uploadEditImageToDrive}
                     disabled={!editImageSrc || uploadingDrive}
                     style={{ ...btnStyle, background: '#188038', color: '#fff', borderColor: '#0d652d', opacity: uploadingDrive ? 0.6 : 1 }}
@@ -2077,7 +2149,8 @@ async function confirmUpdatePrices() {
             {/* Modal Footer */}
             <div style={{ padding: '0 20px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button onClick={() => { setEditProduct(null); setIsAdding(false) }} style={btnStyle}>ยกเลิก</button>
-              <button onClick={saveProduct}
+              <button onClick={() => { setSaveBtnAnim(true); setTimeout(() => setSaveBtnAnim(false), 200); saveProduct(); }}
+                className={saveBtnAnim ? 'btn-press-anim' : ''}
                 style={{ ...btnStyle, background: isAdding ? '#28a745' : '#4a8bc4', color: '#fff', borderColor: isAdding ? '#1e7e34' : '#3d7ab3' }}>
                 {isAdding ? '➕ เพิ่มสินค้า' : '💾 บันทึก'}
               </button>

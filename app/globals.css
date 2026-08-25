@@ -33,3 +33,13 @@ body {
 .edit-modal-anim {
   animation: edit-modal-anim 0.28s cubic-bezier(.2, .8, .3, 1.1) both;
 }
+
+@keyframes btn-press {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.93); }
+  100% { transform: scale(1); }
+}
+
+.btn-press-anim {
+  animation: btn-press 0.2s ease-out;
+}
