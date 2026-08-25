@@ -221,16 +221,11 @@ export default function Home() {
       setEditImageMsg('กรุณาเลือกรูปภาพก่อน')
       return
     }
-    const license = (editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()
-    if (license && !(editImageOverlay || '').includes(license)) {
-      setEditImageMsg(`ข้อความบนรูปต้องมีเลขที่ใบอนุญาต "${license}"`)
-      return
-    }
     const isJpeg = editImageMime.includes('jpeg') || editImageMime.includes('jpg')
     const outMime = isJpeg ? 'image/jpeg' : 'image/png'
     const ext = isJpeg ? 'jpg' : 'png'
     const name = (editProduct?.['*ชื่อสินค้า (NAME)'] || editProduct?.['รหัสสินค้า (SKU NUMBER)'] || `product-${Date.now()}`).toString().trim()
-    const baseName = name.replace(/[^a-zA-Z0-9ก-๙._-]/g, '_')
+    const baseName = name.replace(/[^a-zA-Z0-9ก-๙ ._-]/g, '_')
     const filename = `${baseName}.${ext}`
     const url = canvas.toDataURL(outMime, 0.92)
     const a = document.createElement('a')
@@ -246,16 +241,11 @@ export default function Home() {
       setEditImageMsg('กรุณาเลือกรูปภาพก่อน')
       return
     }
-    const license = (editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()
-    if (license && !(editImageOverlay || '').includes(license)) {
-      setEditImageMsg(`ข้อความบนรูปต้องมีเลขที่ใบอนุญาต "${license}"`)
-      return
-    }
     const isJpeg = editImageMime.includes('jpeg') || editImageMime.includes('jpg')
     const outMime = isJpeg ? 'image/jpeg' : 'image/png'
     const ext = isJpeg ? 'jpg' : 'png'
     const name = (editProduct?.['*ชื่อสินค้า (NAME)'] || editProduct?.['รหัสสินค้า (SKU NUMBER)'] || `product-${Date.now()}`).toString().trim()
-    const baseName = name.replace(/[^a-zA-Z0-9ก-๙._-]/g, '_')
+    const baseName = name.replace(/[^a-zA-Z0-9ก-๙ ._-]/g, '_')
     setUploadingDrive(true)
     setEditImageMsg('กำลังอัพโหลดไป Google Drive...')
     canvas.toBlob(async blob => {
@@ -326,6 +316,19 @@ export default function Home() {
       url.match(/[?&]id=([a-zA-Z0-9_-]+)/)
     if (match) return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w200`
     return url.startsWith('http') ? url : ''
+  }
+
+  function extractDriveFileId(url: string): string | null {
+    if (!url) return null
+    const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]{20,})/) ||
+      url.match(/[?&]id=([a-zA-Z0-9_-]{20,})/)
+    if (match) return match[1]
+    return /^[a-zA-Z0-9_-]{25,}$/.test(url.trim()) ? url.trim() : null
+  }
+
+  function driveDownloadUrl(url: string): string | null {
+    const id = extractDriveFileId(url)
+    return id ? `https://drive.usercontent.google.com/download?id=${id}&export=download&confirm=t` : null
   }
 
   function preloadImages(productList: Product[]) {
@@ -1946,7 +1949,7 @@ async function confirmUpdatePrices() {
                   <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <div style={{ fontSize: 12, fontWeight: 600, color: '#355070' }}>ข้อความบนรูป:</div>
                   <input
-                    style={{ ...inputStyle, flex: '1 1 160px', marginTop: 0, borderColor: (editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim() && !(editImageOverlay || '').includes((editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()) ? '#dc3545' : '#999' }}
+                    style={{ ...inputStyle, flex: '1 1 160px', marginTop: 0 }}
                     placeholder="ใส่เลขที่ใบอนุญาต (เลขอย่างเดียว)"
                     value={editImageOverlay}
                     onChange={e => setEditImageOverlay(e.target.value)}
@@ -1992,6 +1995,18 @@ async function confirmUpdatePrices() {
                   value={editProduct['*รูปภาพสินค้า'] || ''}
                   onChange={e => setEditProduct({ ...editProduct, '*รูปภาพสินค้า': e.target.value })}
                 />
+                {driveDownloadUrl(editProduct['*รูปภาพสินค้า'] || '') && (
+                  <div style={{ marginTop: 6 }}>
+                    <a
+                      href={driveDownloadUrl(editProduct['*รูปภาพสินค้า'])!}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ ...btnStyle, background: '#8ab4f8', color: '#174ea6', borderColor: '#aecbfa', textDecoration: 'none', display: 'inline-block', padding: '4px 12px', fontSize: 12, borderRadius: 4 }}
+                    >
+                      ⬇️ Download รูปจาก Drive
+                    </a>
+                  </div>
+                )}
                 {editProduct['*รูปภาพสินค้า'] && (
                   <div style={{ marginTop: 8, textAlign: 'center', background: '#f8f8f8', borderRadius: 4, padding: 8, border: '1px solid #eee' }}>
                     <img
