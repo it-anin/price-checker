@@ -57,7 +57,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 GOOGLE_DRIVE_FOLDER_ID=
 GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
-GOOGLE_OAUTH_REFRESH_TOKEN=           # scope: drive.file, from OAuth Playground
+GOOGLE_OAUTH_REFRESH_TOKEN=           # scope: drive (full), from OAuth consent flow
 ```
 
 ---

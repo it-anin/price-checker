@@ -79,6 +79,7 @@ export default function Home() {
   const [editImageFileName, setEditImageFileName] = useState<string>('')
   const [editImageMsg, setEditImageMsg] = useState<string>('')
   const [uploadingDrive, setUploadingDrive] = useState(false)
+  const [driveLinkOwner, setDriveLinkOwner] = useState<{ type: 'anin' | 'external' | 'error' | 'loading'; email: string } | null>(null)
   const editCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -288,6 +289,30 @@ export default function Home() {
     const license = (editProduct['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()
     setEditImageOverlay(license)
   }, [editProduct])
+
+  useEffect(() => {
+    if (!editProduct) {
+      setDriveLinkOwner(null)
+      return
+    }
+    const link = editProduct['*รูปภาพสินค้า'] || ''
+    const id = extractDriveFileId(link)
+    if (!id) {
+      setDriveLinkOwner(null)
+      return
+    }
+    setDriveLinkOwner({ type: 'loading', email: '' })
+    let cancelled = false
+    const t = setTimeout(() => {
+      fetch(`/api/upload-drive?fileId=${encodeURIComponent(id)}`)
+        .then(r => r.json())
+        .then(d => {
+          if (!cancelled) setDriveLinkOwner(d.success ? { type: d.type, email: d.owner || '' } : { type: 'error', email: '' })
+        })
+        .catch(() => { if (!cancelled) setDriveLinkOwner({ type: 'error', email: '' }) })
+    }, 400)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [editProduct?.['*รูปภาพสินค้า']])
 
   async function downloadProductXlsx(p: Product) {
     const XLSX = await import('xlsx')
@@ -1878,7 +1903,7 @@ async function confirmUpdatePrices() {
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
           display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
         }}>
-          <div style={{
+          <div className="edit-modal-anim" style={{
             background: '#fff', borderRadius: 6, width: 560, maxHeight: '92vh', overflowY: 'auto',
             boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
           }}>
@@ -1989,7 +2014,15 @@ async function confirmUpdatePrices() {
                     {editImageMsg}
                   </div>
                 )}
-                <label style={{ ...labelStyle, marginTop: 10 }}>รูปภาพสินค้า (Google Drive Link)</label>
+                <label style={{ ...labelStyle, marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  รูปภาพสินค้า (Google Drive Link)
+                  {driveLinkOwner?.type === 'anin' && (
+                    <span title={driveLinkOwner.email} style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 }}>🏢 Anin (องค์กร)</span>
+                  )}
+                  {driveLinkOwner?.type === 'external' && (
+                    <span title={driveLinkOwner.email} style={{ background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 }}>🌐 External (เมล์นอก)</span>
+                  )}
+                </label>
                 <input style={inputStyle}
                   placeholder="ลิงก์จะถูกใส่อัตโนมัติหลังอัพโหลด หรือวาง Google Drive URL ที่นี่..."
                   value={editProduct['*รูปภาพสินค้า'] || ''}

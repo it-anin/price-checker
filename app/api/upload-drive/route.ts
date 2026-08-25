@@ -90,3 +90,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: e?.message || String(e) }, { status: 500 })
   }
 }
+
+export async function GET(req: NextRequest) {
+  try {
+    const fileId = new URL(req.url).searchParams.get('fileId')
+    if (!fileId) {
+      return NextResponse.json({ success: false, error: 'กรุณาระบุ fileId' }, { status: 400 })
+    }
+    const token = await getAccessToken()
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=owners(emailAddress),name`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      return NextResponse.json({ success: false, error: err?.error?.message || 'ดึงข้อมูลไฟล์ไม่สำเร็จ' }, { status: res.status })
+    }
+    const data = await res.json()
+    const owner = data?.owners?.[0]?.emailAddress || ''
+    const type = owner.toLowerCase().endsWith('@anin.co.th') ? 'anin' : 'external'
+    return NextResponse.json({ success: true, owner, name: data?.name || '', type })
+  } catch (e: any) {
+    return NextResponse.json({ success: false, error: e?.message || String(e) }, { status: 500 })
+  }
+}
