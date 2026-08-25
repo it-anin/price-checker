@@ -232,37 +232,52 @@ export default function Home() {
       ctx.drawImage(img, 0, 0, w, h)
       const imageData = ctx.getImageData(0, 0, w, h)
       const px = imageData.data
-      const isGreen = (i: number) => px[i] < 100 && px[i + 1] > 120 && px[i + 2] < 100
-      const rowAllGreen = (y: number) => { for (let x = 0; x < w; x++) if (!isGreen((y * w + x) * 4)) return false; return true }
-      const colAllGreen = (x: number) => { for (let y = 0; y < h; y++) if (!isGreen((y * w + x) * 4)) return false; return true }
+      const isContent = (i: number) => {
+        const r = px[i], g = px[i + 1], b = px[i + 2]
+        if (r > 230 && g > 230 && b > 230) return false
+        if (g > r + 30 && g > b + 30) return false
+        return true
+      }
+      const rowHasContent = (y: number, threshold = 0.01) => { let count = 0; for (let x = 0; x < w; x++) if (isContent((y * w + x) * 4)) count++; return count / w > threshold }
+      const colHasContent = (x: number, threshold = 0.01) => { let count = 0; for (let y = 0; y < h; y++) if (isContent((y * w + x) * 4)) count++; return count / h > threshold }
       let top = 0, bottom = h - 1, left = 0, right = w - 1
-      while (top <= bottom && rowAllGreen(top)) top++
-      while (bottom >= top && rowAllGreen(bottom)) bottom--
-      while (left <= right && colAllGreen(left)) left++
-      while (right >= left && colAllGreen(right)) right--
-      const margin = 2
+      while (top <= bottom && !rowHasContent(top)) top++
+      while (bottom >= top && !rowHasContent(bottom)) bottom--
+      while (left <= right && !colHasContent(left)) left++
+      while (right >= left && !colHasContent(right)) right--
+      const margin = 5
       const cropTop = Math.max(0, top - margin)
       const cropLeft = Math.max(0, left - margin)
-      const cropW = Math.min(w, right + margin + 1) - cropLeft
-      const cropH = Math.min(h, bottom + margin + 1) - cropTop
-      if (cropW < 10 || cropH < 10) { setEditImageMsg('❌ ไม่พบกรอบสีเขียว หรือรูปเล็กเกินไป'); setCleaningImage(false); return }
-      const croppedData = ctx.getImageData(cropLeft, cropTop, cropW, cropH)
+      const cropRight = Math.min(w, right + margin + 1)
+      const cropBottom = Math.min(h, bottom + margin + 1)
+      const finalCropW = cropRight - cropLeft
+      const finalCropH = cropBottom - cropTop
+      if (finalCropW < 10 || finalCropH < 10) { setEditImageMsg('❌ ไม่พบเนื้อหาในรูป'); setCleaningImage(false); return }
+      const croppedData = ctx.getImageData(cropLeft, cropTop, finalCropW, finalCropH)
       const cpx = croppedData.data
-      const textZoneH = Math.round(cropH * 0.15)
-      const textZoneW = Math.round(cropW * 0.6)
-      for (let y = cropH - textZoneH; y < cropH; y++) {
-        for (let x = cropW - textZoneW; x < cropW; x++) {
-          const i = (y * cropW + x) * 4
-          cpx[i] = 255; cpx[i + 1] = 255; cpx[i + 2] = 255
+      const scanStartRow = Math.max(0, Math.round(finalCropH * 0.5))
+      let cutRow = finalCropH
+      for (let y = finalCropH - 1; y >= scanStartRow; y--) {
+        let contentCount = 0
+        for (let x = 0; x < finalCropW; x++) if (isContent(((y * finalCropW + x) * 4))) contentCount++
+        const density = contentCount / finalCropW
+        if (density > 0.25) { cutRow = y + 5; break }
+      }
+      if (cutRow < finalCropH) {
+        for (let y = cutRow; y < finalCropH; y++) {
+          for (let x = 0; x < finalCropW; x++) {
+            const i = (y * finalCropW + x) * 4
+            cpx[i] = 255; cpx[i + 1] = 255; cpx[i + 2] = 255
+          }
         }
       }
       const resultCanvas = document.createElement('canvas')
-      resultCanvas.width = cropW; resultCanvas.height = cropH
+      resultCanvas.width = finalCropW; resultCanvas.height = finalCropH
       const rCtx = resultCanvas.getContext('2d')!
       rCtx.putImageData(croppedData, 0, 0)
       setEditImageSrc(resultCanvas.toDataURL('image/png'))
       setEditImageOverlay('')
-      setEditImageMsg(`ลบกรอบ+ข้อความสำเร็จ ✅ (${w}x${h} → ${cropW}x${cropH})`)
+      setEditImageMsg(`ลบกรอบ+ข้อความสำเร็จ ✅ (${w}x${h} → ${finalCropW}x${finalCropH})`)
     } catch (e: any) { setEditImageMsg('❌ ' + (e?.message || 'ลบกรอบไม่สำเร็จ')) }
     setCleaningImage(false)
   }
