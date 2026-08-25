@@ -78,6 +78,7 @@ export default function Home() {
   const [editImageMime, setEditImageMime] = useState<string>('image/png')
   const [editImageFileName, setEditImageFileName] = useState<string>('')
   const [editImageMsg, setEditImageMsg] = useState<string>('')
+  const [uploadingDrive, setUploadingDrive] = useState(false)
   const editCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
   useEffect(() => {
@@ -237,6 +238,49 @@ export default function Home() {
     a.download = filename
     a.click()
     setEditImageMsg('ดาวน์โหลดสำเร็จ ✅')
+  }
+
+  function uploadEditImageToDrive() {
+    const canvas = editCanvasRef.current
+    if (!canvas || !editImageSrc) {
+      setEditImageMsg('กรุณาเลือกรูปภาพก่อน')
+      return
+    }
+    const license = (editProduct?.['*เลขที่ใบอนุญาตโฆษณา'] || '').toString().trim()
+    if (license && !(editImageOverlay || '').includes(license)) {
+      setEditImageMsg(`ข้อความบนรูปต้องมีเลขที่ใบอนุญาต "${license}"`)
+      return
+    }
+    const isJpeg = editImageMime.includes('jpeg') || editImageMime.includes('jpg')
+    const outMime = isJpeg ? 'image/jpeg' : 'image/png'
+    const ext = isJpeg ? 'jpg' : 'png'
+    const name = (editProduct?.['*ชื่อสินค้า (NAME)'] || editProduct?.['รหัสสินค้า (SKU NUMBER)'] || `product-${Date.now()}`).toString().trim()
+    const baseName = name.replace(/[^a-zA-Z0-9ก-๙._-]/g, '_')
+    setUploadingDrive(true)
+    setEditImageMsg('กำลังอัพโหลดไป Google Drive...')
+    canvas.toBlob(async blob => {
+      if (!blob) {
+        setUploadingDrive(false)
+        setEditImageMsg('❌ สร้างไฟล์จากรูปไม่สำเร็จ')
+        return
+      }
+      try {
+        const fd = new FormData()
+        fd.append('file', blob, `${baseName}.${ext}`)
+        fd.append('filename', baseName)
+        const res = await fetch('/api/upload-drive', { method: 'POST', body: fd })
+        const data = await res.json()
+        if (data.success && data.link) {
+          setEditProduct((prev: Product | null) => prev ? { ...prev, '*รูปภาพสินค้า': data.link } : prev)
+          setEditImageMsg('อัพโหลด Drive สำเร็จ ✅ — กด 💾 บันทึก เพื่อเก็บลิงก์ลง DB')
+        } else {
+          setEditImageMsg('❌ ' + (data.error || 'อัพโหลดไม่สำเร็จ'))
+        }
+      } catch (e) {
+        setEditImageMsg('❌ ' + String(e))
+      }
+      setUploadingDrive(false)
+    }, outMime, 0.92)
   }
 
   useEffect(() => {
@@ -1914,6 +1958,14 @@ async function confirmUpdatePrices() {
                     style={{ ...btnStyle, background: '#1a73e8', color: '#fff', borderColor: '#1558b3' }}
                   >
                     ⬇️ Download รูป
+                  </button>
+                  <button
+                    type="button"
+                    onClick={uploadEditImageToDrive}
+                    disabled={!editImageSrc || uploadingDrive}
+                    style={{ ...btnStyle, background: '#188038', color: '#fff', borderColor: '#0d652d', opacity: uploadingDrive ? 0.6 : 1 }}
+                  >
+                    {uploadingDrive ? '⏳ กำลังอัพโหลด...' : '☁️ อัพโหลด Drive'}
                   </button>
                   </div>
                   <div style={{ marginTop: 10, textAlign: 'center', background: '#fff', borderRadius: 8, padding: 10, border: '1px solid #dbe4f0' }}>
