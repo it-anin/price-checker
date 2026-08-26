@@ -84,6 +84,7 @@ export default function Home() {
   const [cleaningImage, setCleaningImage] = useState(false)
   const editCanvasRef = useRef<HTMLCanvasElement | null>(null)
 
+
   useEffect(() => {
     loadStats()
     loadProducts('all')
@@ -180,7 +181,9 @@ export default function Home() {
     if (!canvas) return
     const img = new window.Image()
     img.onload = () => {
-      const maxW = 1024
+      // Download and Drive upload both re-encode from this canvas, so this cap is what decides
+      // the exported file's resolution — CSS keeps the on-screen preview small regardless.
+      const maxW = 3072
       const scale = img.width > maxW ? maxW / img.width : 1
       const w = Math.round(img.width * scale)
       const h = Math.round(img.height * scale)
@@ -209,7 +212,7 @@ export default function Home() {
     const canvas = editCanvasRef.current
     if (!canvas) return
     setCleaningImage(true)
-    setEditImageMsg('กำลังลบกรอบ+ข้อความ...')
+    setEditImageMsg('กำลังลบกรอบ...')
     try {
       let src = editImageSrc
       if (!src) {
@@ -221,10 +224,7 @@ export default function Home() {
       const img = new window.Image()
       img.crossOrigin = 'anonymous'
       await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error('โหลดรูปไม่สำเร็จ')); img.src = src })
-      const maxW = 1024
-      const scale = img.width > maxW ? maxW / img.width : 1
-      const w = Math.round(img.width * scale)
-      const h = Math.round(img.height * scale)
+      const w = img.width, h = img.height
       const tmpCanvas = document.createElement('canvas')
       tmpCanvas.width = w; tmpCanvas.height = h
       const ctx = tmpCanvas.getContext('2d')!
@@ -232,52 +232,149 @@ export default function Home() {
       ctx.drawImage(img, 0, 0, w, h)
       const imageData = ctx.getImageData(0, 0, w, h)
       const px = imageData.data
-      const isContent = (i: number) => {
-        const r = px[i], g = px[i + 1], b = px[i + 2]
-        if (r > 230 && g > 230 && b > 230) return false
-        if (g > r + 30 && g > b + 30) return false
-        return true
+
+      // Treat the picture as islands of non-white pixels joined 8-ways. The decorative frame
+      // touches the image border, the promo ribbon touches (or fuses into) it, and an old logo
+      // badge sits in a corner — only the product is a big island floating over the middle. So
+      // keeping just that island drops every decoration without ever guessing at colours, which
+      // is what previous hue-based attempts kept getting wrong on green/yellow packaging.
+      const INK = 12
+      const total = w * h
+      const ink = new Uint8Array(total)
+      for (let p = 0; p < total; p++) {
+        const i = p * 4
+        if (255 - px[i] > INK || 255 - px[i + 1] > INK || 255 - px[i + 2] > INK) ink[p] = 1
       }
-      const rowHasContent = (y: number, threshold = 0.01) => { let count = 0; for (let x = 0; x < w; x++) if (isContent((y * w + x) * 4)) count++; return count / w > threshold }
-      const colHasContent = (x: number, threshold = 0.01) => { let count = 0; for (let y = 0; y < h; y++) if (isContent((y * w + x) * 4)) count++; return count / h > threshold }
-      let top = 0, bottom = h - 1, left = 0, right = w - 1
-      while (top <= bottom && !rowHasContent(top)) top++
-      while (bottom >= top && !rowHasContent(bottom)) bottom--
-      while (left <= right && !colHasContent(left)) left++
-      while (right >= left && !colHasContent(right)) right--
-      const margin = 5
-      const cropTop = Math.max(0, top - margin)
-      const cropLeft = Math.max(0, left - margin)
-      const cropRight = Math.min(w, right + margin + 1)
-      const cropBottom = Math.min(h, bottom + margin + 1)
-      const finalCropW = cropRight - cropLeft
-      const finalCropH = cropBottom - cropTop
-      if (finalCropW < 10 || finalCropH < 10) { setEditImageMsg('❌ ไม่พบเนื้อหาในรูป'); setCleaningImage(false); return }
-      const croppedData = ctx.getImageData(cropLeft, cropTop, finalCropW, finalCropH)
-      const cpx = croppedData.data
-      const scanStartRow = Math.max(0, Math.round(finalCropH * 0.5))
-      let cutRow = finalCropH
-      for (let y = finalCropH - 1; y >= scanStartRow; y--) {
-        let contentCount = 0
-        for (let x = 0; x < finalCropW; x++) if (isContent(((y * finalCropW + x) * 4))) contentCount++
-        const density = contentCount / finalCropW
-        if (density > 0.25) { cutRow = y + 5; break }
+
+      type Island = { label: number; area: number; minX: number; minY: number; maxX: number; maxY: number }
+      const labels = new Int32Array(total)
+      const stack = new Int32Array(total)
+      const islands: Island[] = []
+      let nextLabel = 0
+      for (let seed = 0; seed < total; seed++) {
+        if (!ink[seed] || labels[seed]) continue
+        nextLabel++
+        let sp = 0
+        stack[sp++] = seed
+        labels[seed] = nextLabel
+        let area = 0, minX = w, minY = h, maxX = 0, maxY = 0
+        while (sp > 0) {
+          const p = stack[--sp]
+          const x = p % w, y = (p / w) | 0
+          area++
+          if (x < minX) minX = x
+          if (x > maxX) maxX = x
+          if (y < minY) minY = y
+          if (y > maxY) maxY = y
+          for (let dy = -1; dy <= 1; dy++) {
+            const ny = y + dy
+            if (ny < 0 || ny >= h) continue
+            for (let dx = -1; dx <= 1; dx++) {
+              const nx = x + dx
+              if (nx < 0 || nx >= w) continue
+              const np = ny * w + nx
+              if (ink[np] && !labels[np]) { labels[np] = nextLabel; stack[sp++] = np }
+            }
+          }
+        }
+        islands.push({ label: nextLabel, area, minX, minY, maxX, maxY })
       }
-      if (cutRow < finalCropH) {
-        for (let y = cutRow; y < finalCropH; y++) {
-          for (let x = 0; x < finalCropW; x++) {
-            const i = (y * finalCropW + x) * 4
-            cpx[i] = 255; cpx[i + 1] = 255; cpx[i + 2] = 255
+
+      const edge = 2
+      const cx0 = w * 0.2, cx1 = w * 0.8, cy0 = h * 0.2, cy1 = h * 0.8
+      const touchesBorder = (s: Island) => s.minX <= edge || s.minY <= edge || s.maxX >= w - 1 - edge || s.maxY >= h - 1 - edge
+      const overlapsCenter = (s: Island) => s.maxX >= cx0 && s.minX <= cx1 && s.maxY >= cy0 && s.minY <= cy1
+      let product: Island | null = null
+      for (const s of islands) {
+        if (touchesBorder(s) || !overlapsCenter(s)) continue
+        if (!product || s.area > product.area) product = s
+      }
+      // Bail out rather than hand back a mangled photo — a no-op beats a clipped product.
+      if (!product || product.area / total > 0.9 ||
+        product.maxX - product.minX < w * 0.05 || product.maxY - product.minY < h * 0.05) {
+        setEditImageMsg('❌ ไม่พบสินค้าในรูป')
+        setCleaningImage(false)
+        return
+      }
+
+      // Islands sitting inside the product's own bounds belong to it (a detached cap, a sticker).
+      const keep = new Uint8Array(nextLabel + 1)
+      keep[product.label] = 1
+      const padX = (product.maxX - product.minX) * 0.08, padY = (product.maxY - product.minY) * 0.08
+      let bx0 = product.minX, by0 = product.minY, bx1 = product.maxX, by1 = product.maxY
+      for (const s of islands) {
+        if (keep[s.label] || touchesBorder(s)) continue
+        if (s.minX >= product.minX - padX && s.maxX <= product.maxX + padX &&
+          s.minY >= product.minY - padY && s.maxY <= product.maxY + padY) {
+          keep[s.label] = 1
+          if (s.minX < bx0) bx0 = s.minX
+          if (s.minY < by0) by0 = s.minY
+          if (s.maxX > bx1) bx1 = s.maxX
+          if (s.maxY > by1) by1 = s.maxY
+        }
+      }
+
+      const outCanvas = document.createElement('canvas')
+      outCanvas.width = w; outCanvas.height = h
+      const outCtx = outCanvas.getContext('2d')!
+      outCtx.fillStyle = '#fff'
+      outCtx.fillRect(0, 0, w, h)
+      // Copy the product's own bounding box across, whitening only pixels that belong to some
+      // other island. Unlabelled pixels are copied as-is so light areas inside the product survive.
+      const regionW = bx1 - bx0 + 1, regionH = by1 - by0 + 1
+      const region = ctx.getImageData(bx0, by0, regionW, regionH)
+      const rpx = region.data
+      for (let y = 0; y < regionH; y++) {
+        for (let x = 0; x < regionW; x++) {
+          const lbl = labels[(by0 + y) * w + (bx0 + x)]
+          if (lbl && !keep[lbl]) {
+            const ri = (y * regionW + x) * 4
+            rpx[ri] = 255; rpx[ri + 1] = 255; rpx[ri + 2] = 255
           }
         }
       }
-      const resultCanvas = document.createElement('canvas')
-      resultCanvas.width = finalCropW; resultCanvas.height = finalCropH
-      const rCtx = resultCanvas.getContext('2d')!
-      rCtx.putImageData(croppedData, 0, 0)
-      setEditImageSrc(resultCanvas.toDataURL('image/png'))
+      const prodTmp = document.createElement('canvas')
+      prodTmp.width = regionW; prodTmp.height = regionH
+      prodTmp.getContext('2d')!.putImageData(region, 0, 0)
+      outCtx.drawImage(prodTmp, bx0, by0)
+
+      const logoImg = new window.Image()
+      logoImg.crossOrigin = 'anonymous'
+      await new Promise<void>((resolve) => { logoImg.onload = () => resolve(); logoImg.onerror = () => resolve(); logoImg.src = '/LOGOBIGYA.jpg' })
+      if (logoImg.complete && logoImg.naturalWidth > 0) {
+        // LOGOBIGYA.jpg carries a wide white margin around the badge, so scaling the whole file
+        // would land the badge much smaller than asked for — trim to the badge itself first.
+        const lw = logoImg.naturalWidth, lh = logoImg.naturalHeight
+        const lCanvas = document.createElement('canvas')
+        lCanvas.width = lw; lCanvas.height = lh
+        const lCtx = lCanvas.getContext('2d')!
+        lCtx.fillStyle = '#fff'; lCtx.fillRect(0, 0, lw, lh)
+        lCtx.drawImage(logoImg, 0, 0)
+        const lpx = lCtx.getImageData(0, 0, lw, lh).data
+        let lx0 = lw, ly0 = lh, lx1 = -1, ly1 = -1
+        for (let y = 0; y < lh; y++) {
+          for (let x = 0; x < lw; x++) {
+            const i = (y * lw + x) * 4
+            if (255 - lpx[i] > INK || 255 - lpx[i + 1] > INK || 255 - lpx[i + 2] > INK) {
+              if (x < lx0) lx0 = x
+              if (x > lx1) lx1 = x
+              if (y < ly0) ly0 = y
+              if (y > ly1) ly1 = y
+            }
+          }
+        }
+        if (lx1 > lx0 && ly1 > ly0) {
+          const srcW = lx1 - lx0 + 1, srcH = ly1 - ly0 + 1
+          const logoW = Math.round(w * 0.18)
+          const logoH = Math.round(srcH * (logoW / srcW))
+          const margin = Math.round(w * 0.06)
+          outCtx.drawImage(lCanvas, lx0, ly0, srcW, srcH, w - logoW - margin, Math.round(h * 0.06), logoW, logoH)
+        }
+      }
+
+      setEditImageSrc(outCanvas.toDataURL('image/png'))
       setEditImageOverlay('')
-      setEditImageMsg(`ลบกรอบ+ข้อความสำเร็จ ✅ (${w}x${h} → ${finalCropW}x${finalCropH})`)
+      setEditImageMsg(`ลบกรอบสำเร็จ ✅ (${w}x${h})`)
     } catch (e: any) { setEditImageMsg('❌ ' + (e?.message || 'ลบกรอบไม่สำเร็จ')) }
     setCleaningImage(false)
   }
