@@ -1465,7 +1465,7 @@ async function confirmUpdatePrices() {
           </button>
         )}
         <button onClick={() => { setIsAdding(true); setEditProduct({ 'ประเภทสินค้า': '', '*ชื่อสินค้า (NAME)': '', '*เลขที่ใบอนุญาตโฆษณา': '', '*ราคาสินค้า': '', 'รหัสสินค้า (SKU NUMBER)': '', '*รูปภาพสินค้า': '', 'หมวดหมู่สินค้า (CATEGORIES)': '' }) }} style={btnStyle}>➕ เพิ่มรายการสินค้า</button>
-        <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Excel</button>
+        <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Menu Bulk</button>
         <button onClick={() => document.getElementById('csvConvertInput')?.click()} style={btnStyle} title="แปลงไฟล์ CSV จาก POS (TIS-620) เป็น CSV UTF-8">🔄 แปลง CSV เป็น UTF-8</button>
         <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ Price อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ราคาใน DB</button>
         <input type="file" accept=".csv" id="promaxxCheckInput" style={{ display: 'none' }}
