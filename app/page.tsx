@@ -31,6 +31,11 @@ export default function Home() {
   const [showGrabModal, setShowGrabModal] = useState(false)
   const [grabMismatchProducts, setGrabMismatchProducts] = useState<Product[]>([])
   const [grabSource, setGrabSource] = useState<'GRAB'>('GRAB')
+  const [grabSearch, setGrabSearch] = useState('')
+  const [grabShowOnlyMismatch, setGrabShowOnlyMismatch] = useState(true)
+  const [grabEdits, setGrabEdits] = useState<Record<string, number>>({})
+  const [editingGrabSku, setEditingGrabSku] = useState<string | null>(null)
+  const [editingGrabValue, setEditingGrabValue] = useState('')
   const [isAdding, setIsAdding] = useState(false)
   const [showPriceCalcModal, setShowPriceCalcModal] = useState(false)
   const [priceCalcResults, setPriceCalcResults] = useState<any[]>([])
@@ -1789,7 +1794,35 @@ async function confirmUpdatePrices() {
         {status}
       </div>
       
-      {showGrabModal && (
+      {showGrabModal && (() => {
+        const closeGrabModal = () => {
+          setShowGrabModal(false)
+          setEditingGrabSku(null)
+          setEditingGrabValue('')
+          setGrabSearch('')
+          setGrabShowOnlyMismatch(true)
+          setGrabEdits({})
+        }
+        const search = grabSearch.trim().toLowerCase()
+        const displayGrabResults = grabResults
+          .map((r: any) => {
+            const editedPrice = grabEdits[r.sku]
+            const effectiveGrabPrice = editedPrice !== undefined ? editedPrice : r.grabPrice
+            const effectiveMatched = !r.notFound && r.dbPrice !== null && r.dbPrice !== undefined && Math.abs(effectiveGrabPrice - r.dbPrice) < 0.01
+            const isEdited = editedPrice !== undefined && editedPrice !== r.grabPrice
+            return { ...r, effectiveGrabPrice, effectiveMatched, isEdited }
+          })
+          .filter((r: any) => {
+            if (search && !r.sku.toLowerCase().includes(search) && !(r.name || '').toLowerCase().includes(search)) return false
+            if (grabShowOnlyMismatch && !r.notFound && r.effectiveMatched) return false
+            return true
+          })
+        const totalCount = grabResults.length
+        const matchedCount = displayGrabResults.filter((r: any) => r.effectiveMatched).length
+        const mismatchCount = displayGrabResults.filter((r: any) => !r.effectiveMatched && !r.notFound).length
+        const notFoundCount = displayGrabResults.filter((r: any) => r.notFound).length
+
+        return (
   <div style={{
     position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
     display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
@@ -1799,19 +1832,43 @@ async function confirmUpdatePrices() {
       {/* Header */}
       <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <strong>🛵 ผลตรวจสอบราคา GRAB</strong>
-        <button onClick={() => setShowGrabModal(false)}
+        <button onClick={closeGrabModal}
           style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
       </div>
 
       {/* Summary */}
       {grabResults.length > 0 && !grabResults[0]?.error && (
-        <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
-          <span>ทั้งหมด: <strong>{grabResults.length}</strong></span>
-          <span style={{ color: '#28a745' }}>✓ ตรง: <strong>{grabResults.filter((r: any) => r.matched).length}</strong></span>
-          <span style={{ color: '#dc3545' }}>✗ ต้องแก้ไขใน GRAB: <strong>{grabResults.filter((r: any) => !r.matched && !r.notFound).length}</strong></span>
-          {grabResults.filter((r: any) => r.notFound).length > 0 && (
-            <span style={{ color: '#000' }}>⚠ ไม่พบข้อมูลใน Supabase: <strong>{grabResults.filter((r: any) => r.notFound).length}</strong></span>
+        <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13, flexWrap: 'wrap' }}>
+          <span>แสดง: <strong>{displayGrabResults.length}</strong> / {totalCount}</span>
+          <span style={{ color: '#28a745' }}>✓ ตรง: <strong>{matchedCount}</strong></span>
+          <span style={{ color: '#dc3545' }}>✗ ต้องแก้ไขใน GRAB: <strong>{mismatchCount}</strong></span>
+          {notFoundCount > 0 && (
+            <span style={{ color: '#000' }}>⚠ ไม่พบข้อมูลใน Supabase: <strong>{notFoundCount}</strong></span>
           )}
+        </div>
+      )}
+
+      {/* Toolbar */}
+      {grabResults.length > 0 && !grabResults[0]?.error && (
+        <div style={{ padding: '8px 20px', background: '#fff', borderBottom: '1px solid #eee', display: 'flex', gap: 12, alignItems: 'center' }}>
+          <input
+            type="text"
+            placeholder="ค้นหา SKU / ชื่อสินค้า..."
+            value={grabSearch}
+            onChange={(e) => setGrabSearch(e.target.value)}
+            style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: 4, fontSize: 12, width: 220 }}
+          />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={grabShowOnlyMismatch}
+              onChange={(e) => setGrabShowOnlyMismatch(e.target.checked)}
+            />
+            เฉพาะราคาไม่ตรง
+          </label>
+          <span style={{ fontSize: 11, color: '#666', marginLeft: 'auto' }}>
+            💡 คลิกที่ราคาใน GRAB เพื่อแก้ไข (ไม่บันทึกลง DB)
+          </span>
         </div>
       )}
 
@@ -1821,6 +1878,8 @@ async function confirmUpdatePrices() {
           <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{grabResults[0].error}</div>
         ) : grabResults.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: '#000' }}>กำลังโหลด...</div>
+        ) : displayGrabResults.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: '#000' }}>ไม่พบรายการที่ตรงกับเงื่อนไข</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
@@ -1834,23 +1893,66 @@ async function confirmUpdatePrices() {
               </tr>
             </thead>
             <tbody>
-              {grabResults.map((r: any, i: number) => (
-                <tr key={i} style={{ background: r.notFound ? '#f0f0f0' : r.matched ? 'transparent' : '#fff3cd' }}>
-                  <td style={td}>{i + 1}</td>
-                  <td style={{ ...td, color: '#000' }}><strong>{r.sku}</strong></td>
-                  <td style={{ ...td, color: '#000' }}>{r.name || '-'}</td>
-                  <td style={{ ...td, fontWeight: 600, color: '#000' }}>{r.grabPrice?.toLocaleString() ?? '-'}</td>
-                  <td style={{ ...td, fontWeight: 600, color: '#000' }}>{r.dbPrice?.toLocaleString() ?? '-'}</td>
-                  <td style={td}>
-                    {r.notFound
-                      ? <span style={{ background: '#e0e0e0', color: '#000', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบข้อมูลใน Supabase</span>
-                      : r.matched
-                        ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
-                        : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ แก้ไขใน GRAB</span>
-                    }
-                  </td>
-                </tr>
-              ))}
+              {displayGrabResults.map((r: any, i: number) => {
+                const isEditing = editingGrabSku === r.sku
+                const commitEdit = () => {
+                  const parsed = parsePriceRobust(editingGrabValue)
+                  if (parsed !== null) {
+                    setGrabEdits(prev => ({ ...prev, [r.sku]: parsed }))
+                  }
+                  setEditingGrabSku(null)
+                  setEditingGrabValue('')
+                }
+                const cancelEdit = () => {
+                  setEditingGrabSku(null)
+                  setEditingGrabValue('')
+                }
+                return (
+                  <tr key={r.sku || i} style={{ background: r.notFound ? '#f0f0f0' : r.effectiveMatched ? 'transparent' : '#fff3cd' }}>
+                    <td style={td}>{i + 1}</td>
+                    <td style={{ ...td, color: '#000' }}><strong>{r.sku}</strong></td>
+                    <td style={{ ...td, color: '#000' }}>{r.name || '-'}</td>
+                    <td style={{ ...td, fontWeight: 600, color: '#000' }}>
+                      {r.notFound ? (
+                        <span>-</span>
+                      ) : isEditing ? (
+                        <input
+                          type="number"
+                          autoFocus
+                          value={editingGrabValue}
+                          onChange={(e) => setEditingGrabValue(e.target.value)}
+                          onBlur={commitEdit}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitEdit()
+                            else if (e.key === 'Escape') cancelEdit()
+                          }}
+                          style={{ width: 110, padding: '3px 6px', border: '1px solid #007bff', borderRadius: 3, fontSize: 12 }}
+                        />
+                      ) : (
+                        <span
+                          onClick={() => { setEditingGrabSku(r.sku); setEditingGrabValue(String(r.effectiveGrabPrice)) }}
+                          title="คลิกเพื่อแก้ไข"
+                          style={{ cursor: 'pointer', padding: '2px 6px', borderRadius: 3, color: r.isEdited ? '#007bff' : '#000' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = '#e7f1ff')}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                        >
+                          {r.effectiveGrabPrice?.toLocaleString() ?? '-'}
+                          {r.isEdited && <span style={{ marginLeft: 4, fontSize: 10 }}>✎</span>}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ ...td, fontWeight: 600, color: '#000' }}>{r.dbPrice?.toLocaleString() ?? '-'}</td>
+                    <td style={td}>
+                      {r.notFound
+                        ? <span style={{ background: '#e0e0e0', color: '#000', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบข้อมูลใน Supabase</span>
+                        : r.effectiveMatched
+                          ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
+                          : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ แก้ไขใน GRAB</span>
+                      }
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -1874,11 +1976,12 @@ async function confirmUpdatePrices() {
             ⚠ Export ไม่พบข้อมูลใน Supabase ({grabResults.filter((r: any) => r.notFound).length})
           </button>
         </div>
-        <button onClick={() => setShowGrabModal(false)} style={btnStyle}>ปิด</button>
+        <button onClick={closeGrabModal} style={btnStyle}>ปิด</button>
       </div>
     </div>
   </div>
-)}
+        )
+      })()}
 
       {showPriceCalcModal && (() => {
         const hasGrabMap = Object.keys(priceCalcGrabMap).length > 0
