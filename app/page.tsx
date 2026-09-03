@@ -83,7 +83,7 @@ export default function Home() {
   const [saveBtnAnim, setSaveBtnAnim] = useState(false)
   const [cleaningImage, setCleaningImage] = useState(false)
   const editCanvasRef = useRef<HTMLCanvasElement | null>(null)
-
+  const searchReqId = useRef(0)
 
   useEffect(() => {
     loadStats()
@@ -122,10 +122,11 @@ export default function Home() {
       await loadProducts(selectedSheet)
       return
     }
+    const reqId = ++searchReqId.current
     setLoading(true)
     const res = await fetch(`/api/products?q=${encodeURIComponent(sku)}`)
     const data = await res.json()
-    if (data.success) {
+    if (reqId === searchReqId.current && data.success) {
       setProducts(data.products)
       preloadImages(data.products)
     }
