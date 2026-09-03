@@ -96,7 +96,8 @@ export async function GET(req: NextRequest) {
 
     const seen = new Set<string>()
     const merged: any[] = []
-    for (const row of [...(skuData || []), ...(nameData || [])]) {
+    const allRows: any[] = [...(skuData || []), ...(nameData || [])]
+    for (const row of allRows) {
       const sku = row['รหัสสินค้า (SKU NUMBER)']
       if (!sku || seen.has(sku)) continue
       seen.add(sku)
