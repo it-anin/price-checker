@@ -118,7 +118,10 @@ export default function Home() {
   }
 
   async function searchProducts(sku: string) {
-    if (sku.length < 3) return
+    if (sku.length < 3) {
+      await loadProducts(selectedSheet)
+      return
+    }
     setLoading(true)
     const res = await fetch(`/api/products?q=${encodeURIComponent(sku)}`)
     const data = await res.json()
