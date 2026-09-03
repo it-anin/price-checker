@@ -118,10 +118,7 @@ export default function Home() {
   }
 
   async function searchProducts(sku: string) {
-    if (sku.length < 3) {
-      await loadProducts(selectedSheet)
-      return
-    }
+    if (sku.length < 3) return
     const reqId = ++searchReqId.current
     setLoading(true)
     const res = await fetch(`/api/products?q=${encodeURIComponent(sku)}`)

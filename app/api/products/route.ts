@@ -81,7 +81,29 @@ export async function GET(req: NextRequest) {
 
   let q = supabase.from('products').select(PRODUCT_COLUMNS)
 
-  if (q_param) q = q.or(`"รหัสสินค้า (SKU NUMBER)".ilike.%${q_param}%,"*ชื่อสินค้า (NAME)".ilike.%${q_param}%`)
+  if (q_param) {
+    const { data: skuData, error: skuError } = await supabase
+      .from('products')
+      .select(PRODUCT_COLUMNS)
+      .ilike('"รหัสสินค้า (SKU NUMBER)"', `%${q_param}%`)
+    if (skuError) return NextResponse.json({ success: false, error: skuError.message })
+
+    const { data: nameData, error: nameError } = await supabase
+      .from('products')
+      .select(PRODUCT_COLUMNS)
+      .ilike('"*ชื่อสินค้า (NAME)"', `%${q_param}%`)
+    if (nameError) return NextResponse.json({ success: false, error: nameError.message })
+
+    const seen = new Set<string>()
+    const merged: any[] = []
+    for (const row of [...(skuData || []), ...(nameData || [])]) {
+      const sku = row['รหัสสินค้า (SKU NUMBER)']
+      if (!sku || seen.has(sku)) continue
+      seen.add(sku)
+      merged.push(row)
+    }
+    return NextResponse.json({ success: true, products: aggregateProducts(merged) })
+  }
   else if (sku) q = q.ilike('"รหัสสินค้า (SKU NUMBER)"', `%${sku}%`)
   if (sheet) q = q.eq('"หมวดหมู่สินค้า (CATEGORIES)"', sheet)
   if (skus) q = q.in('"รหัสสินค้า (SKU NUMBER)"', skus.split(','))
