@@ -420,3 +420,99 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .pc-app *, .pc-app *::before, .pc-app *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Process Engine uses the existing workspace palette and controls. */
+.pc-inspection-grid[hidden], .pc-context-strip[hidden] { display: none; }
+.pe-workspace { display: grid; gap: 20px; padding-bottom: 24px; }
+.pe-notice { display: flex; align-items: start; gap: 12px; color: #795731; background: #fff0dc; border: 1px solid #ead7ba; border-radius: 10px; padding: 14px 18px; font-size: 12px; }
+.pe-notice .pc-icon { margin-top: 2px; }
+.pe-card { background: white; border: 1px solid var(--pc-line); border-radius: 12px; padding: 22px; min-width: 0; }
+.pe-card-heading { display: flex; justify-content: space-between; gap: 18px; align-items: center; margin-bottom: 18px; }
+.pe-card h2 { font-size: 17px; font-weight: 700; margin: 5px 0; }
+.pe-card p { color: #717868; font-size: 12px; line-height: 1.8; }
+.pe-branch-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 14px; }
+.pe-branch-report { border: 1px dashed #d5d9cd; background: #fafbf8; border-radius: 9px; padding: 16px; }
+.pe-branch-report.is-ready { border: 1px solid #cddfcf; background: #f5f9f3; }
+.pe-branch-report>div { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
+.pe-branch-report strong, .pe-branch-report>b { font-family: Arial,sans-serif; font-size: 13px; }
+.pe-branch-report .pc-text-button { margin-top: 10px; }
+.pe-pairs { border-radius: 8px; background: #f7f8f4; padding: 14px 16px; font-size: 12px; margin: 16px 0; }
+.pe-pairs>div { display: flex; gap: 20px; flex-wrap: wrap; padding: 6px 0; }
+.pe-pairs>strong { display: block; border-top: 1px solid var(--pc-line); margin-top: 10px; padding-top: 10px; }
+.pe-pair-ready { color: #376a49; }
+.pe-pair-missing { color: #a74332; }
+.pe-subtract { border: 1px solid var(--pc-line); border-radius: 9px; padding: 14px 18px 18px; margin: 20px 0; }
+.pe-subtract legend { font: 700 11px Arial,sans-serif; letter-spacing: 1px; padding: 0 6px; }
+.pe-subtract>div { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 16px; margin-top: 14px; max-width: 650px; }
+.pe-subtract label { font: 700 11px Arial,sans-serif; }
+.pe-subtract input { display: block; width: 100%; min-height: 42px; padding: 8px 12px; border: 1px solid #cfd5c8; border-radius: 7px; background: white; color: var(--pc-ink); margin-top: 7px; }
+.pe-pending { background: #f5f4ee; border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; }
+.pe-pending>strong { font: 700 11px Arial,sans-serif; margin-right: 16px; }
+.pe-pending>span { font-size: 12px; color: #756d59; }
+.pe-pending p { margin-top: 5px; }
+.pe-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 16px; }
+.pe-actions>span { font-size: 11px; color: #7d806e; }
+.pe-download { background: #edf7ed; border-color: #b8d5ba; color: #326343; }
+.pe-summary { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); background: #f7f8f3; border: 1px solid var(--pc-line); border-radius: 9px; margin-top: 20px; padding: 18px 0; }
+.pe-summary>div { display: flex; flex-direction: column; text-align: center; gap: 5px; border-right: 1px solid var(--pc-line); }
+.pe-summary>div:last-child { border-right: 0; }
+.pe-summary span { font: 700 10px Arial,sans-serif; letter-spacing: 1px; color: #77816d; }
+.pe-summary strong { font: 700 28px Arial,sans-serif; color: var(--pc-accent); }
+.pe-summary small { color: #7a806f; font-size: 11px; }
+.pe-error { background: #fff2eb; color: #983a26 !important; border: 1px solid #edc9bc; border-radius: 8px; padding: 12px 14px; font-size: 12px; overflow-wrap: anywhere; margin: 14px 0; }
+.pe-error p { color: inherit; margin-top: 5px; }
+.pe-output-list { padding: 0; list-style: none; margin-top: 16px; }
+.pe-output-list li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 0; color: #457154; font-size: 12px; }
+.pe-output-list li>span { margin-left: auto; color: #747e69; font-size: 11px; }
+.pe-manager { padding: 0; }
+.pe-manager-heading { display: flex; align-items: center; gap: 10px; padding: 18px 22px; }
+.pe-manager-toggle { display: flex; align-items: center; gap: 12px; text-align: left; flex: 1; min-width: 0; }
+.pe-manager-toggle>span { font: 700 13px Arial,sans-serif; }
+.pe-manager-toggle small { display: block; font: 11px/1.8 var(--font-workspace),Arial,sans-serif; color: #818775; margin-top: 6px; }
+.pe-manager-toggle .pc-icon { width: 15px; height: 15px; }
+.pe-manager-toggle .is-expanded { transform: rotate(90deg); }
+.pe-manager-content { border-top: 1px solid var(--pc-line); padding: 18px 22px 22px; }
+.pe-security-note { font-size: 11px !important; margin: 14px 0; }
+.pe-admin-login { background: #f6f7f1; border: 1px solid var(--pc-line); border-radius: 8px; padding: 15px; margin-top: 16px; }
+.pe-admin-login h3 { font-weight: 700; font-size: 12px; }
+.pe-admin-login>div { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+.pe-admin-login label { flex: 1; min-width: 160px; font-size: 11px; }
+.pe-admin-login input { width: 100%; display: block; min-height: 40px; padding: 8px 10px; background: white; border: 1px solid #cfd5c8; border-radius: 7px; margin-top: 5px; }
+.pe-admin-session { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; background: #edf5ee; border-radius: 8px; padding: 10px 14px; margin-top: 16px; font-size: 12px; }
+.pe-table-scroll { overflow-x: auto; }
+.pe-files-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.pe-files-table th { text-align: left; background: #f4f6ef; font: 700 10px Arial,sans-serif; padding: 13px 12px; }
+.pe-files-table td { padding: 13px 12px; border-bottom: 1px solid var(--pc-line); }
+.pe-progress label { display: flex; justify-content: space-between; gap: 10px; color: #747b67; font-size: 12px; }
+.pe-progress progress { width: 100%; height: 9px; accent-color: var(--pc-accent); margin: 9px 0 16px; border: 0; border-radius: 8px; overflow: hidden; }
+.pe-progress progress::-webkit-progress-bar { background: #edece5; }
+.pe-progress progress::-webkit-progress-value { background: var(--pc-accent); border-radius: 8px; }
+.pe-log { background: #302b25; color: #e9e2d1; border-radius: 8px; padding: 16px; min-height: 150px; max-height: 340px; overflow: auto; }
+.pe-log pre { font: 11px/1.9 var(--font-workspace),monospace; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.pe-dialog-backdrop { position: fixed; inset: 0; background: #241e19a6; z-index: 1200; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.pe-dialog { background: white; border-radius: 12px; padding: 24px; width: 440px; max-width: 100%; box-shadow: 0 14px 50px #0004; }
+.pe-dialog h2 { font: 700 14px Arial,sans-serif; }
+.pe-dialog p { margin: 14px 0; color: #767d6d; }
+.pe-dialog label { font-size: 12px; }
+.pe-dialog input { width: 100%; min-height: 44px; display: block; border: 1px solid #cfd5c8; border-radius: 7px; padding: 10px 12px; margin-top: 6px; }
+@media (max-width: 640px) {
+  .pe-card { padding: 16px; }
+  .pe-card-heading { align-items: start; flex-direction: column; gap: 12px; }
+  .pe-branch-grid { grid-template-columns: 1fr; gap: 10px; }
+  .pe-branch-report { padding: 13px; }
+  .pe-branch-report>div { margin-bottom: 8px; }
+  .pe-subtract { padding: 12px; }
+  .pe-subtract>div { gap: 10px; }
+  .pe-summary span { font-size: 9px; letter-spacing: .3px; }
+  .pe-summary strong { font-size: 24px; }
+  .pe-manager { padding: 0; }
+  .pe-manager-heading { padding: 14px; flex-wrap: wrap; }
+  .pe-manager-toggle { flex-basis: 100%; }
+  .pe-manager-content { padding: 14px; }
+  .pe-manager-content .pe-actions { align-items: stretch; flex-direction: column; }
+  .pe-files-table th, .pe-files-table td { padding: 12px 8px; }
+  .pe-pairs code, .pe-output-list code { font-size: 10px; overflow-wrap: anywhere; }
+  .pe-output-list li>span { margin-left: 0; }
+  .pe-pending>span { display: block; margin-top: 6px; }
+  .pe-workspace .pe-notice { padding: 12px; }
+}

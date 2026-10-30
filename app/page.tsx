@@ -3,6 +3,9 @@
 import { useState, useEffect, useEffectEvent, useRef } from 'react'
 import Link from 'next/link'
 import NextImage from 'next/image'
+import { supabase } from '../lib/supabase'
+import { ENGINE_BRANCHES, createResultsZip, decodeCsv, engineDate, processGrabTemplate, readStockReport, templateName, validateGrabTemplate, type EngineBranch, type StockReport } from '../lib/process-engine'
+import { loadPendingSkuSets } from '../lib/process-engine-source'
 
 interface Product {
   [key: string]: any
@@ -20,6 +23,8 @@ interface Stats {
 
 type BranchKey = 'src' | 'kkl' | 'sss'
 type PriceState = 'mismatch' | 'matched' | 'unpriced' | 'absent'
+type EngineOutput = { name: string; content: string; branch: EngineBranch; total: number; updated: number; matched: number }
+type GrabFileInfo = { name: string; updated_at: string }
 
 function WorkspaceIcon({ name, className = '' }: { name: string; className?: string }) {
   const paths: Record<string, React.ReactNode> = {
@@ -39,6 +44,7 @@ function WorkspaceIcon({ name, className = '' }: { name: string; className?: str
     refresh: <><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6 6a8 8 0 0 1 13 3M5 15a8 8 0 0 0 13 3" /></>,
     plus: <path d="M12 4v16M4 12h16" />,
     close: <path d="m6 6 12 12M18 6 6 18" />,
+    engine: <><path d="m13 2-9 12h7l-1 8 10-12h-7Z" /></>,
   }
   return <svg className={`pc-icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] ?? paths.box}</svg>
 }
@@ -130,6 +136,50 @@ export default function Home() {
   const [priceReview, setPriceReview] = useState<{ sku: string; price: number; previous: number | null } | null>(null)
   const [savingPrice, setSavingPrice] = useState(false)
   const [inspectorError, setInspectorError] = useState('')
+  const [engineOpen, setEngineOpen] = useState(false)
+  const [engineReports, setEngineReports] = useState<Partial<Record<EngineBranch, StockReport>>>({})
+  const [engineSubtract, setEngineSubtract] = useState<Record<EngineBranch, string>>({ src: '5', sss: '2', kkl: '2' })
+  const [engineBusy, setEngineBusy] = useState('')
+  const engineBusyRef = useRef(false)
+  const [engineLog, setEngineLog] = useState<string[]>([])
+  const [engineProgress, setEngineProgress] = useState({ current: 0, total: 0, label: 'รอเริ่มงาน' })
+  const [engineChecks, setEngineChecks] = useState<Partial<Record<EngineBranch, boolean>> | null>(null)
+  const [engineSummary, setEngineSummary] = useState<{ processed: number; updated: number; skipped: number } | null>(null)
+  const [engineOutputs, setEngineOutputs] = useState<EngineOutput[]>([])
+  const [engineWarnings, setEngineWarnings] = useState<string[]>([])
+  const [enginePendingCounts, setEnginePendingCounts] = useState<Record<EngineBranch, number> | null>(null)
+  const [grabFiles, setGrabFiles] = useState<GrabFileInfo[]>([])
+  const [grabFilesLoading, setGrabFilesLoading] = useState(false)
+  const [grabFilesError, setGrabFilesError] = useState('')
+  const [grabManagerOpen, setGrabManagerOpen] = useState(false)
+  const [grabManagerUnlocked, setGrabManagerUnlocked] = useState(false)
+  const [grabUnlockOpen, setGrabUnlockOpen] = useState(false)
+  const [grabUnlockPassword, setGrabUnlockPassword] = useState('')
+  const [grabUnlockError, setGrabUnlockError] = useState('')
+  const [grabAdminUser, setGrabAdminUser] = useState<string | null>(null)
+  const [grabAdminEmail, setGrabAdminEmail] = useState('')
+  const [grabAdminPassword, setGrabAdminPassword] = useState('')
+  const [grabAdminError, setGrabAdminError] = useState('')
+  const engineLogRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let mounted = true
+    void supabase.auth.getSession().then(({ data }) => {
+      if (mounted) setGrabAdminUser(data.session ? data.session.user.email ?? 'บัญชีที่ล็อกอิน' : null)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (mounted) setGrabAdminUser(session ? session.user.email ?? 'บัญชีที่ล็อกอิน' : null)
+    })
+    return () => { mounted = false; subscription.unsubscribe() }
+  }, [])
+
+  useEffect(() => {
+    if (engineLogRef.current) engineLogRef.current.scrollTop = engineLogRef.current.scrollHeight
+  }, [engineLog, engineOpen])
+
+  useEffect(() => {
+    if (engineOpen) void refreshGrabFiles()
+  }, [engineOpen])
 
   const onSearchCriteriaChange = useEffectEvent(() => {
     if (search.trim().length >= 3) searchProducts(search.trim())
@@ -160,6 +210,208 @@ export default function Home() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  function engineMessage(error: unknown) {
+    return error instanceof Error ? error.message : 'เกิดข้อผิดพลาด กรุณาลองอีกครั้ง'
+  }
+
+  function logEngine(message: string) {
+    const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date())
+    setEngineLog(previous => [...previous, `[${time}] ${message}`])
+  }
+
+  function invalidateEngineResults() {
+    setEngineOutputs([])
+    setEngineSummary(null)
+    setEngineWarnings([])
+  }
+
+  async function refreshGrabFiles() {
+    setGrabFilesLoading(true)
+    setGrabFilesError('')
+    try {
+      const { data, error } = await supabase.from('grab_files').select('name,updated_at').order('name')
+      if (error) throw new Error(error.message)
+      const files = (data ?? []) as GrabFileInfo[]
+      setGrabFiles(files)
+      return files
+    } catch (error) {
+      setGrabFilesError(`อ่านรายการ Template ไม่สำเร็จ: ${engineMessage(error)}`)
+      return null
+    } finally { setGrabFilesLoading(false) }
+  }
+
+  async function handleEngineReports(files: File[]) {
+    if (!files.length || engineBusyRef.current) return
+    engineBusyRef.current = true
+    setEngineBusy('reports')
+    invalidateEngineResults()
+    setEngineChecks(null)
+    const next: Partial<Record<EngineBranch, StockReport>> = {}, problems: string[] = []
+    try {
+      for (const file of files) {
+        try {
+          const decoded = decodeCsv(await file.arrayBuffer())
+          const report = readStockReport(file.name, decoded.text, decoded.encoding)
+          if (next[report.branch]) throw new Error('เลือก R01.102 ของสาขาเดียวกันซ้ำในชุดนี้')
+          next[report.branch] = report
+          logEngine(`UPLOAD ${file.name} · ${report.stock.size} SKUs · ${report.rowCount} แถว · ${decoded.encoding}`)
+        } catch (error) {
+          const problem = `${file.name}: ${engineMessage(error)}`
+          problems.push(problem); logEngine(`BLOCKED ${problem}`)
+          // A rejected replacement must not leave an older report selected.
+          const branch = /^(src|sss|kkl)\.csv$/i.exec(file.name)?.[1].toLowerCase() as EngineBranch | undefined
+          if (branch) setEngineReports(previous => { const copy = { ...previous }; delete copy[branch]; return copy })
+        }
+      }
+      setEngineReports(previous => ({ ...previous, ...next }))
+      if (problems.length) window.alert(`ตรวจไฟล์ R01.102\n\n${problems.join('\n')}`)
+    } finally { engineBusyRef.current = false; setEngineBusy('') }
+  }
+
+  async function checkEnginePairs() {
+    if (engineBusyRef.current) return
+    engineBusyRef.current = true; setEngineBusy('check'); setEngineChecks(null)
+    try {
+      const files = await refreshGrabFiles()
+      if (!files) { logEngine('CHECK ไม่สำเร็จ: อ่านรายการ Template จาก Supabase ไม่ได้'); return }
+      const checks: Partial<Record<EngineBranch, boolean>> = {}
+      for (const branch of ENGINE_BRANCHES) {
+        const report = engineReports[branch]
+        if (!report) continue
+        checks[branch] = files.some(file => file.name === templateName(branch))
+        logEngine(`${checks[branch] ? '✔ ถูกต้อง' : '✕ ไม่พบ'} ${report.name} → ${templateName(branch)}`)
+      }
+      setEngineChecks(checks)
+      logEngine(`พร้อม ${Object.values(checks).filter(Boolean).length} คู่จากทั้งหมด ${Object.keys(checks).length} คู่`)
+    } finally { engineBusyRef.current = false; setEngineBusy('') }
+  }
+
+  async function runProcessEngine() {
+    if (engineBusyRef.current) return
+    const branches = ENGINE_BRANCHES.filter(branch => engineReports[branch])
+    if (!branches.length) return
+    const subtracts = {} as Record<EngineBranch, number>
+    for (const branch of branches) {
+      const value = engineSubtract[branch].trim()
+      if (!value || !Number.isFinite(Number(value)) || Number(value) < 0) {
+        window.alert(`SUBTRACT ${branch.toUpperCase()} ต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป`)
+        return
+      }
+      subtracts[branch] = Number(value)
+    }
+    engineBusyRef.current = true; setEngineBusy('run')
+    invalidateEngineResults(); setEnginePendingCounts(null)
+    setEngineProgress({ current: 0, total: branches.length, label: 'กำลังโหลด PENDING SKU UPDATE' })
+    const outputs: EngineOutput[] = [], warnings: string[] = []
+    let skipped = 0, updated = 0
+    try {
+      const pending = await loadPendingSkuSets()
+      setEnginePendingCounts({ src: pending.src.size, sss: pending.sss.size, kkl: pending.kkl.size })
+      logEngine(`PENDING LOADED · ${ENGINE_BRANCHES.map(branch => `${branch.toUpperCase()}=${pending[branch].size}`).join(' / ')}`)
+      const date = engineDate()
+      for (let index = 0; index < branches.length; index++) {
+        const branch = branches[index], name = templateName(branch), report = engineReports[branch]!
+        setEngineProgress({ current: index, total: branches.length, label: `กำลังประมวลผล ${branch.toUpperCase()} (${index + 1}/${branches.length})` })
+        logEngine(`RUN ${branch.toUpperCase()} · ${report.name} → ${name} · SUBTRACT=${subtracts[branch]}`)
+        try {
+          const { data, error } = await supabase.from('grab_files').select('content').eq('name', name).maybeSingle()
+          if (error) throw new Error(`โหลด Template ไม่สำเร็จ: ${error.message}`)
+          if (!data) { skipped++; logEngine(`SKIPPED ${branch.toUpperCase()} · ไม่พบ ${name}`); continue }
+          if (typeof data.content !== 'string') throw new Error('เนื้อหา Template ไม่ใช่ข้อความ CSV')
+          const result = processGrabTemplate(name, data.content, report, subtracts[branch], pending[branch])
+          const outputName = name.replace(/\.CSV$/, `_${date}.csv`)
+          outputs.push({ name: outputName, content: result.content, branch, total: result.total, updated: result.updated, matched: result.matched })
+          updated += result.updated
+          logEngine(`✔ ${branch.toUpperCase()} · ${result.total} แถว · MATCHED ${result.matched} · UPDATED ${result.updated} · IN STOCK ${result.inStock} · PENDING ${result.pendingCount}`)
+          if (!result.matched) {
+            const warning = `${branch.toUpperCase()}: ไม่มี SKU ตรงกับ R01.102 เลย คอลัมน์ CurrentStock/MaxStock จะว่างทั้งไฟล์ กรุณาตรวจว่าเลือกไฟล์ถูกสาขาก่อนดาวน์โหลด`
+            warnings.push(warning); logEngine(`⚠ ${warning}`)
+          }
+          logEngine(`READY ${outputName}`)
+        } catch (error) {
+          skipped++
+          const warning = `${branch.toUpperCase()}: ${engineMessage(error)}`
+          warnings.push(warning); logEngine(`BLOCKED / SKIPPED ${warning}`)
+        } finally {
+          setEngineProgress({ current: index + 1, total: branches.length, label: `ประมวลผลแล้ว ${index + 1}/${branches.length} สาขา` })
+        }
+        await new Promise(resolve => setTimeout(resolve, 0))
+      }
+      setEngineOutputs(outputs)
+      setEngineSummary({ processed: outputs.length, updated, skipped })
+      setEngineWarnings(warnings)
+      logEngine(`PROCESSED ${outputs.length} สาขา / UPDATED ${updated} แถว / SKIPPED ${skipped} สาขา`)
+      if (warnings.length) window.alert(`พบปัญหาระหว่างประมวลผล กรุณาตรวจ SYSTEM LOG ก่อนดาวน์โหลด\n\n${warnings.join('\n\n')}`)
+    } catch (error) {
+      const warning = engineMessage(error)
+      setEngineWarnings([warning]); setEngineSummary({ processed: 0, updated: 0, skipped: branches.length })
+      setEngineProgress({ current: 0, total: branches.length, label: 'หยุด: โหลด PENDING SKU UPDATE ไม่สำเร็จ' })
+      logEngine(`RUN STOPPED · ${warning}`)
+      window.alert(`RUN หยุดทำงาน\n\n${warning}\n\nไม่มีการสร้างไฟล์ผลลัพธ์`)
+    } finally { engineBusyRef.current = false; setEngineBusy('') }
+  }
+
+  async function uploadGrabTemplates(files: File[]) {
+    if (!grabManagerUnlocked || !files.length || engineBusyRef.current) return
+    engineBusyRef.current = true; setEngineBusy('templates')
+    const problems: string[] = []
+    let saved = 0
+    try {
+      for (const file of files) {
+        try {
+          const { text, encoding } = decodeCsv(await file.arrayBuffer())
+          const template = validateGrabTemplate(file.name, text)
+          const { error } = await supabase.from('grab_files').upsert({ name: file.name, content: text, updated_at: new Date().toISOString() }, { onConflict: 'name' })
+          if (error) throw new Error(`บันทึกไม่สำเร็จ: ${error.message}`)
+          saved++
+          logEngine(`SAVED ${file.name} · ${template.dataIndices.length} แถว · ${encoding}`)
+        } catch (error) {
+          const problem = `${file.name}: ${engineMessage(error)}`
+          problems.push(problem); logEngine(`BLOCKED ${problem}`)
+        }
+      }
+      if (saved) { invalidateEngineResults(); setEngineChecks(null) }
+      await refreshGrabFiles()
+      logEngine(`UPLOAD TEMPLATE · SAVED ${saved} / BLOCKED ${problems.length}`)
+      if (problems.length) window.alert(`บันทึกสำเร็จ ${saved} ไฟล์ / BLOCKED ${problems.length} ไฟล์\n\n${problems.join('\n\n')}`)
+    } finally { engineBusyRef.current = false; setEngineBusy('') }
+  }
+
+  function downloadEngineOutputs() {
+    if (!engineOutputs.length || engineBusyRef.current) return
+    const zip = createResultsZip(engineOutputs)
+    const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }))
+    const link = document.createElement('a')
+    link.href = url; link.download = `GRAB_ALL_${engineDate()}.zip`
+    document.body.appendChild(link); link.click(); link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    logEngine(`DOWNLOAD ALL · ${engineOutputs.length} ไฟล์ CSV ใน ZIP`)
+  }
+
+  async function signInGrabManager(event: React.FormEvent) {
+    event.preventDefault()
+    if (engineBusyRef.current) return
+    engineBusyRef.current = true; setEngineBusy('auth'); setGrabAdminError('')
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email: grabAdminEmail.trim(), password: grabAdminPassword })
+      if (error) throw new Error('เข้าสู่ระบบไม่สำเร็จ กรุณาตรวจอีเมลและรหัสผ่านของบัญชีที่มีสิทธิ์บันทึก')
+      logEngine('เข้าสู่ระบบสำหรับบันทึก Template แล้ว')
+    } catch (error) { setGrabAdminError(engineMessage(error)) }
+    finally { setGrabAdminPassword(''); engineBusyRef.current = false; setEngineBusy('') }
+  }
+
+  async function signOutGrabManager() {
+    if (engineBusyRef.current) return
+    engineBusyRef.current = true; setEngineBusy('auth'); setGrabAdminError('')
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'local' })
+      if (error) throw new Error(error.message)
+      setGrabManagerUnlocked(false)
+      logEngine('ออกจากระบบและ LOCK GRAB CSV MANAGER แล้ว')
+    } catch (error) { setGrabAdminError(engineMessage(error)) }
+    finally { engineBusyRef.current = false; setEngineBusy('') }
+  }
 
   async function loadMasterCount() {
     try {
@@ -1621,30 +1873,62 @@ async function confirmUpdatePrices() {
 
   return (
     <div className="pc-app">
-      <a className="pc-skip-link" href="#product-workspace">ข้ามไปยังรายการสินค้า</a>
+      <a className="pc-skip-link" href="#product-workspace">ข้ามไปยังพื้นที่ทำงาน</a>
       <aside className="pc-rail" aria-label="เมนูหลัก">
         <Link href="/" className="pc-brand" aria-label="Price Checker หน้าหลัก"><WorkspaceIcon name="tag" /></Link>
         <nav>
-          <button className={!toolsOpen && priceFilter === 'all' ? 'is-active' : ''} title="รายการสินค้า" aria-label="รายการสินค้า" onClick={() => { setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" /></button>
-          <button className={priceFilter === 'mismatch' ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="tag" /></button>
+          <button className={!engineOpen && !toolsOpen && priceFilter === 'all' ? 'is-active' : ''} title="รายการสินค้า" aria-label="รายการสินค้า" onClick={() => { setEngineOpen(false); setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" /></button>
+          <button className={!engineOpen && priceFilter === 'mismatch' ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setEngineOpen(false); setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="tag" /></button>
           <button title="เปรียบเทียบ 3 สาขา" aria-label="เปรียบเทียบ 3 สาขา" onClick={handleMasterBranchCompare}><WorkspaceIcon name="branch" /></button>
           <button title="นำเข้าสินค้า" aria-label="นำเข้าสินค้า" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" /></button>
-          <button className={toolsOpen ? 'is-active' : ''} title="เครื่องมือทั้งหมด" aria-label="เครื่องมือทั้งหมด" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="grid" /></button>
+          <button className={engineOpen ? 'is-active' : ''} title="PROCESS ENGINE" aria-label="PROCESS ENGINE" aria-pressed={engineOpen} onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="engine" /></button>
+          <button className={!engineOpen && toolsOpen ? 'is-active' : ''} title="เครื่องมือทั้งหมด" aria-label="เครื่องมือทั้งหมด" aria-expanded={!engineOpen && toolsOpen} aria-controls="workflow-tools" onClick={() => { setEngineOpen(false); setToolsOpen(value => !value) }}><WorkspaceIcon name="grid" /></button>
         </nav>
         <div className="pc-rail-bottom"><span className="pc-rail-divider" /><span className="pc-workspace-avatar" title="ANIN Workspace">AN</span></div>
       </aside>
 
       <main className="pc-workspace" id="product-workspace">
         <header className="pc-page-header">
-          <div><div className="pc-eyebrow">PRICE CHECKER / PRODUCT OPERATIONS</div><h1>ตรวจและปรับราคาสินค้า<span className="pc-heading-dot">.</span></h1><p>ดูผลต่าง ตรวจค่าที่เสนอ แล้วยืนยันก่อนเปลี่ยนราคา</p></div>
+          <div><div className="pc-eyebrow">PRICE CHECKER / {engineOpen ? 'STOCK OPERATIONS' : 'PRODUCT OPERATIONS'}</div><h1>{engineOpen ? 'PROCESS ENGINE' : 'ตรวจและปรับราคาสินค้า'}<span className="pc-heading-dot">.</span></h1><p>{engineOpen ? 'เติมสต็อก R01.102 ลงใน Template ที่ Grab อนุมัติ แยกตามสาขา' : 'ดูผลต่าง ตรวจค่าที่เสนอ แล้วยืนยันก่อนเปลี่ยนราคา'}</p></div>
           <div className="pc-header-actions">
             <span className="pc-workspace-label">ANIN <i /> WORKSPACE</span>
-            <button className="pc-button pc-button-subtle" onClick={openAddProduct}><WorkspaceIcon name="plus" />เพิ่มสินค้า</button>
-            <button className="pc-button" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="settings" />เครื่องมือ</button>
+            {engineOpen ? <button className="pc-button" onClick={() => setEngineOpen(false)}><WorkspaceIcon name="box" />รายการสินค้า</button> : <><button className="pc-button pc-button-subtle" onClick={openAddProduct}><WorkspaceIcon name="plus" />เพิ่มสินค้า</button><button className="pc-button" onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="engine" />PROCESS ENGINE</button><button className="pc-button" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="settings" />เครื่องมือ</button></>}
           </div>
         </header>
 
-        <div className="pc-context-strip"><span><i className="pc-context-dot" />รายการที่โหลด <b>{products.length.toLocaleString('th-TH')}</b></span><span className="pc-context-issues"><WorkspaceIcon name="clock" />ต้องตรวจ {inspectionBranch.toUpperCase()} <b>{issueCount.toLocaleString('th-TH')}</b></span><span className="pc-last-update">{lastPriceUpdate ? `บันทึกราคาล่าสุด ${lastPriceUpdate}` : 'จัดการข้อมูลสินค้าและราคาของทั้ง 3 สาขา'}</span></div>
+        <div className="pc-context-strip" hidden={engineOpen}><span><i className="pc-context-dot" />รายการที่โหลด <b>{products.length.toLocaleString('th-TH')}</b></span><span className="pc-context-issues"><WorkspaceIcon name="clock" />ต้องตรวจ {inspectionBranch.toUpperCase()} <b>{issueCount.toLocaleString('th-TH')}</b></span><span className="pc-last-update">{lastPriceUpdate ? `บันทึกราคาล่าสุด ${lastPriceUpdate}` : 'จัดการข้อมูลสินค้าและราคาของทั้ง 3 สาขา'}</span></div>
+
+        {engineOpen && <section className="pe-workspace" aria-label="PROCESS ENGINE workspace" aria-busy={Boolean(engineBusy)}>
+          <div className="pe-notice"><WorkspaceIcon name="clock" /><p>R01.102 และผลลัพธ์เก็บในหน่วยความจำของหน้านี้เท่านั้น <strong>ดาวน์โหลดก่อนรีเฟรชหรือปิดหน้า</strong> · Template เก็บไว้ใน Supabase และใช้ซ้ำได้ทุกวัน</p></div>
+          <section className="pe-card" aria-labelledby="pe-reports-heading">
+            <div className="pe-card-heading"><div><span className="pc-eyebrow">01 / PREPARE</span><h2 id="pe-reports-heading">UPLOAD REPORT R01.102</h2><p>ส่งออกสาขาละไฟล์ ตั้งชื่อ src.csv, sss.csv, kkl.csv · รองรับ UTF-8 และ TIS-620 อัตโนมัติ</p></div><button className="pc-button pc-button-primary" disabled={Boolean(engineBusy)} onClick={() => document.getElementById('engineReportInput')?.click()}><WorkspaceIcon name="upload" />UPLOAD R01.102</button><input hidden id="engineReportInput" type="file" accept=".csv" multiple disabled={Boolean(engineBusy)} onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void handleEngineReports(files) }} /></div>
+            <div className="pe-branch-grid">{ENGINE_BRANCHES.map(branch => {
+              const report = engineReports[branch]
+              return <div className={`pe-branch-report ${report ? 'is-ready' : ''}`} key={branch}><div><strong>{branch.toUpperCase()}</strong><span className={`pc-status ${report ? 'pc-status-matched' : 'pc-status-unpriced'}`}>{report ? 'อัปโหลดแล้ว' : 'รอไฟล์'}</span></div>{report ? <><b>{report.name}</b><p>{report.stock.size.toLocaleString('th-TH')} SKUs · {report.encoding}</p><button className="pc-text-button" disabled={Boolean(engineBusy)} aria-label={`นำรายงาน ${branch.toUpperCase()} ออก`} onClick={() => { setEngineReports(previous => { const next = { ...previous }; delete next[branch]; return next }); setEngineChecks(null); invalidateEngineResults() }}><WorkspaceIcon name="close" />นำไฟล์ออก</button></> : <p>เลือก {branch}.csv เพื่อเริ่มงาน</p>}</div>
+            })}</div>
+          </section>
+
+          <section className="pe-card" aria-labelledby="pe-run-heading">
+            <div className="pe-card-heading"><div><span className="pc-eyebrow">02 / PROCESS</span><h2 id="pe-run-heading">ตรวจคู่ไฟล์และเติมสต็อก</h2><p>ตรวจโครงสร้างและ StoreID ทุกครั้งก่อนสร้างผลลัพธ์ · เปลี่ยนเฉพาะคอลัมน์ E / F / P</p></div><button className="pc-button" disabled={Boolean(engineBusy) || !Object.keys(engineReports).length} onClick={() => void checkEnginePairs()}>✔ CHECK</button></div>
+            {grabFilesError && <div className="pe-error" role="alert">{grabFilesError}<p>ตรวจตาราง grab_files และสิทธิ์อ่านใน Supabase แล้วกด CHECK อีกครั้ง</p></div>}
+            {engineChecks && <div className="pe-pairs" role="status">{ENGINE_BRANCHES.filter(branch => engineReports[branch]).map(branch => <div key={branch} className={engineChecks[branch] ? 'pe-pair-ready' : 'pe-pair-missing'}><span>{engineChecks[branch] ? '✔ ถูกต้อง' : '✕ ไม่พบ'}</span><code>{engineReports[branch]!.name} → {templateName(branch)}</code></div>)}<strong>พร้อม {Object.values(engineChecks).filter(Boolean).length} คู่จากทั้งหมด {Object.keys(engineChecks).length} คู่</strong></div>}
+            <fieldset className="pe-subtract" disabled={Boolean(engineBusy)}><legend>SUBTRACT PER BRANCH</legend><p>จำนวนที่กันไว้ขายหน้าร้าน หักออกจากสต็อกของแต่ละ SKU ก่อนส่งไป Grab</p><div>{ENGINE_BRANCHES.map(branch => <label key={branch} htmlFor={`subtract-${branch}`}>{branch.toUpperCase()}<input id={`subtract-${branch}`} type="number" min="0" step="any" inputMode="decimal" value={engineSubtract[branch]} onChange={event => { setEngineSubtract(previous => ({ ...previous, [branch]: event.target.value })); invalidateEngineResults() }} /></label>)}</div></fieldset>
+            <div className="pe-pending"><strong>PENDING SKU UPDATE</strong><span>{enginePendingCounts ? ENGINE_BRANCHES.map(branch => `${branch.toUpperCase()} ${enginePendingCounts[branch]}`).join(' · ') : 'อ่านรายการล่าสุดจาก Supabase ทุกครั้งที่ RUN'}</span><p>SKU ที่อยู่ในรายการของสาขานั้นจะถูกระงับขายก่อนตรวจจำนวนสต็อก หากอ่านรายการไม่ได้ ระบบจะหยุด RUN</p></div>
+            <div className="pe-actions"><button className="pc-button pc-button-primary" disabled={Boolean(engineBusy) || !Object.keys(engineReports).length} onClick={() => void runProcessEngine()}>{engineBusy === 'run' ? 'กำลังประมวลผล...' : '▶▶ RUN'}</button>{engineOutputs.length > 0 && !engineBusy && <button className="pc-button pe-download" onClick={downloadEngineOutputs}><WorkspaceIcon name="download" />DOWNLOAD ALL ({engineOutputs.length})</button>}<span>{engineOutputs.length ? 'ไฟล์ CSV ทั้งหมดจะรวมใน ZIP เดียว' : 'DOWNLOAD ALL จะปรากฏเมื่อประมวลผลสำเร็จอย่างน้อย 1 สาขา'}</span></div>
+            {engineSummary && <div className="pe-summary" role="status"><div><span>PROCESSED</span><strong>{engineSummary.processed}</strong><small>สาขาสำเร็จ</small></div><div><span>UPDATED</span><strong>{engineSummary.updated.toLocaleString('th-TH')}</strong><small>แถวที่เปลี่ยนค่า</small></div><div><span>SKIPPED</span><strong>{engineSummary.skipped}</strong><small>สาขาที่ข้าม</small></div></div>}
+            {engineWarnings.length > 0 && <div className="pe-error" role="alert"><strong>กรุณาตรวจ SYSTEM LOG ก่อนดาวน์โหลด</strong>{engineWarnings.map((warning, index) => <p key={index}>{warning}</p>)}</div>}
+            {engineOutputs.length > 0 && <ul className="pe-output-list">{engineOutputs.map(output => <li key={output.name}><WorkspaceIcon name="check" /><code>{output.name}</code><span>{output.total.toLocaleString('th-TH')} แถว · SKU ตรง {output.matched.toLocaleString('th-TH')}</span></li>)}</ul>}
+          </section>
+
+          <section className="pe-card pe-manager" aria-label="GRAB CSV MANAGER">
+            <div className="pe-manager-heading"><button className="pe-manager-toggle" aria-expanded={grabManagerOpen} aria-controls="pe-manager-content" onClick={() => setGrabManagerOpen(value => !value)}><WorkspaceIcon name="chevron" className={grabManagerOpen ? 'is-expanded' : ''} /><span>GRAB CSV MANAGER<small>Template ที่ Grab อนุมัติแล้ว · {grabFiles.length} ไฟล์</small></span></button><button className="pc-button" disabled={Boolean(engineBusy)} onClick={() => { if (grabManagerUnlocked) { setGrabManagerUnlocked(false); logEngine('GRAB CSV MANAGER LOCKED') } else { setGrabUnlockPassword(''); setGrabUnlockError(''); setGrabUnlockOpen(true) } }}>{grabManagerUnlocked ? '🔒 LOCK' : '🔑 UNLOCK'}</button><span className={`pc-status ${grabManagerUnlocked ? 'pc-status-matched' : 'pc-status-unpriced'}`}>{grabManagerUnlocked ? 'UNLOCKED' : 'LOCKED'}</span></div>
+            {grabManagerOpen && <div id="pe-manager-content" className="pe-manager-content"><p>อัปโหลดเฉพาะเมื่อ Grab อนุมัติการเปลี่ยนรายการสินค้า ชื่อไฟล์ต้องเป็น GRAB_SRC.CSV, GRAB_SSS.CSV หรือ GRAB_KKL.CSV</p><p>เก็บข้อความ CSV ในตาราง grab_files ของ Supabase · รองรับ UTF-8 / TIS-620 · ตรวจ D/E/F และ StoreID ก่อนบันทึกทุกไฟล์</p><div className="pe-actions"><button className="pc-button pc-button-primary" disabled={!grabManagerUnlocked || Boolean(engineBusy)} onClick={() => document.getElementById('engineTemplateInput')?.click()}><WorkspaceIcon name="upload" />UPLOAD CSV</button><button className="pc-button" disabled={Boolean(engineBusy) || grabFilesLoading} onClick={() => void refreshGrabFiles()}><WorkspaceIcon name="refresh" />รีเฟรชรายการ</button><input hidden id="engineTemplateInput" type="file" accept=".csv" multiple disabled={!grabManagerUnlocked || Boolean(engineBusy)} onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void uploadGrabTemplates(files) }} /></div>{grabManagerUnlocked && (grabAdminUser ? <div className="pe-admin-session"><span>เข้าสู่ระบบแล้ว: {grabAdminUser}</span><button className="pc-text-button" disabled={Boolean(engineBusy)} onClick={() => void signOutGrabManager()}>ออกจากระบบ</button></div> : <form className="pe-admin-login" onSubmit={signInGrabManager}><h3>เข้าสู่ระบบเพื่อบันทึก Template</h3><p>ใช้บัญชีที่มีสิทธิ์เขียนข้อมูล หากตั้ง policy เป็น authenticated ต้องเข้าสู่ระบบก่อนอัปโหลด</p><div><label htmlFor="pe-admin-email">อีเมล<input id="pe-admin-email" type="email" required autoComplete="username" disabled={Boolean(engineBusy)} value={grabAdminEmail} onChange={event => setGrabAdminEmail(event.target.value)} /></label><label htmlFor="pe-admin-password">รหัสผ่านบัญชี<input id="pe-admin-password" type="password" required autoComplete="current-password" disabled={Boolean(engineBusy)} value={grabAdminPassword} onChange={event => setGrabAdminPassword(event.target.value)} /></label><button className="pc-button" disabled={Boolean(engineBusy)} type="submit">เข้าสู่ระบบ</button></div></form>)}{grabAdminError && <p className="pe-error" role="alert">{grabAdminError}</p>}<p className="pe-security-note">UNLOCK เป็นตัวกันกดพลาดเท่านั้น สิทธิ์เขียนจริงขึ้นอยู่กับบัญชีที่ล็อกอินและ policy ของตาราง grab_files</p>{grabFilesError && <p className="pe-error" role="alert">{grabFilesError}</p>}<div className="pe-table-scroll"><table className="pe-files-table"><thead><tr><th>FILE NAME</th><th>UPLOADED AT (เวลาไทย)</th></tr></thead><tbody>{grabFilesLoading ? <tr><td colSpan={2}>กำลังโหลดรายการ...</td></tr> : grabFiles.length ? grabFiles.map(file => <tr key={file.name}><td><code>{file.name}</code></td><td>{Number.isNaN(Date.parse(file.updated_at)) ? '—' : new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.updated_at))}</td></tr>) : <tr><td colSpan={2}>{grabFilesError ? 'ยังอ่านรายการไม่ได้' : 'ยังไม่มี Template ในระบบ'}</td></tr>}</tbody></table></div></div>}
+          </section>
+
+          <section className="pe-card pe-log-card" aria-labelledby="pe-log-heading"><div className="pe-card-heading"><div><span className="pc-eyebrow">SYSTEM LOG</span><h2 id="pe-log-heading">สถานะการทำงาน</h2></div><button className="pc-button" disabled={Boolean(engineBusy)} onClick={() => { setEngineLog([]); setEngineProgress({ current: 0, total: 0, label: 'รอเริ่มงาน' }) }}>✕ CLEAR</button></div><div className="pe-progress"><label htmlFor="engine-progress" role="status">{engineProgress.label}<span>{engineProgress.current}/{engineProgress.total}</span></label><progress id="engine-progress" value={engineProgress.current} max={engineProgress.total || 1} /></div><div className="pe-log" ref={engineLogRef} role="log" aria-live="polite" aria-relevant="additions"><pre>{engineLog.length ? engineLog.join('\n') : 'พร้อมทำงาน · อัปโหลด R01.102 แล้วกด CHECK'}</pre></div></section>
+        </section>}
+
+        {grabUnlockOpen && <div className="pe-dialog-backdrop"><section className="pe-dialog" role="dialog" aria-modal="true" aria-labelledby="pe-unlock-title"><h2 id="pe-unlock-title">🔑 UNLOCK GRAB CSV MANAGER</h2><p>ใส่รหัสผ่านเพื่อเปิดปุ่มอัปโหลด Template</p><form onSubmit={event => { event.preventDefault(); const PASS = '1234'; if (grabUnlockPassword === PASS) { setGrabManagerUnlocked(true); setGrabUnlockOpen(false); setGrabUnlockPassword(''); logEngine('GRAB CSV MANAGER UNLOCKED') } else { setGrabUnlockError('รหัสผ่านไม่ถูกต้อง'); setGrabUnlockPassword('') } }}><label htmlFor="pe-unlock-password">รหัสผ่าน</label><input id="pe-unlock-password" type="password" autoFocus autoComplete="off" value={grabUnlockPassword} onChange={event => setGrabUnlockPassword(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setGrabUnlockOpen(false) }} />{grabUnlockError && <p className="pe-error" role="alert">{grabUnlockError}</p>}<div className="pe-actions"><button className="pc-button pc-button-primary" type="submit">UNLOCK</button><button className="pc-button" type="button" onClick={() => { setGrabUnlockOpen(false); setGrabUnlockPassword('') }}>ยกเลิก</button></div></form></section></div>}
 
         <div hidden>
           <input type="file" accept=".csv" id="grabInputSrc" onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'src'); e.target.value = '' } }} />
@@ -1662,7 +1946,7 @@ async function confirmUpdatePrices() {
           <input type="file" accept=".xlsx,.xls,.csv" id="masterInput" onChange={e => { if (e.target.files?.[0]) { handleMasterUpload(e.target.files[0]); e.target.value = '' } }} />
         </div>
 
-        {toolsOpen && <section className="pc-workflow-tools" id="workflow-tools" aria-label="เครื่องมือจัดการสินค้า">
+        {!engineOpen && toolsOpen && <section className="pc-workflow-tools" id="workflow-tools" aria-label="เครื่องมือจัดการสินค้า">
           <div className="pc-tools-heading"><div><span className="pc-eyebrow">YOUR WORKFLOW</span><h2>เครื่องมือจัดการสินค้า</h2></div><button className="pc-icon-button" aria-label="ปิดเครื่องมือ" onClick={() => setToolsOpen(false)}><WorkspaceIcon name="close" /></button></div>
           <div className="pc-tool-groups">
             <section><h3><WorkspaceIcon name="upload" />นำเข้าและเตรียมไฟล์</h3><button onClick={openAddProduct}>เพิ่มสินค้ารายการเดียว <WorkspaceIcon name="plus" /></button><button onClick={() => document.getElementById('importInput')?.click()}>นำเข้า Menu Bulk <small>Excel</small></button><button onClick={() => document.getElementById('masterInput')?.click()}>นำเข้า Product Master <small>Excel / CSV</small></button><button onClick={() => document.getElementById('csvConvertInput')?.click()}>แปลง CSV เป็น UTF-8 <small>POS</small></button></section>
@@ -1673,7 +1957,7 @@ async function confirmUpdatePrices() {
           <div className="pc-tools-bottom"><span>เลือกหมวดหมู่เพื่อส่งออกหรือจัดการสินค้าทั้งหมวด</span><button className="pc-danger-link" disabled={selectedSheet === 'all'} onClick={deleteSelectedCategory}>ลบหมวดหมู่ที่เลือกทุกสาขา</button></div>
         </section>}
 
-        <div className="pc-inspection-grid">
+        <div className="pc-inspection-grid" hidden={engineOpen}>
           <section className="pc-list-column" aria-label="รายการสินค้า">
             <div className="pc-search-toolbar"><label className="pc-search"><WorkspaceIcon name="search" /><input ref={searchInputRef} type="search" aria-label="ค้นหาสินค้า" placeholder="ค้นหาชื่อสินค้า หรือรหัส SKU..." value={search} disabled={savingPrice} onChange={event => { setSearch(event.target.value); setPageNumber(1); resetPriceReview() }} /><kbd>⌘ K</kbd></label><button className={`pc-button ${filtersOpen ? 'is-selected' : ''}`} aria-expanded={filtersOpen} aria-controls="product-filters" onClick={() => setFiltersOpen(value => !value)}><WorkspaceIcon name="filter" />ตัวกรอง{(branchFilter !== 'all' || selectedSheet !== 'all') && <span className="pc-count">{Number(branchFilter !== 'all') + Number(selectedSheet !== 'all')}</span>}</button><button className="pc-icon-button pc-refresh" title="รีเฟรชสินค้า" aria-label="รีเฟรชสินค้า" disabled={loading || savingPrice} onClick={() => search.trim().length >= 3 ? searchProducts(search.trim()) : loadProducts(selectedSheet)}><WorkspaceIcon name="refresh" /></button></div>
 
