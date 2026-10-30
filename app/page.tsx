@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { supabase } from '../lib/supabase'
+import { useState, useEffect, useEffectEvent, useRef } from 'react'
+import Link from 'next/link'
+import NextImage from 'next/image'
 
 interface Product {
   [key: string]: any
@@ -17,13 +18,38 @@ interface Stats {
   sheets: SheetStat[]
 }
 
+type BranchKey = 'src' | 'kkl' | 'sss'
+type PriceState = 'mismatch' | 'matched' | 'unpriced' | 'absent'
+
+function WorkspaceIcon({ name, className = '' }: { name: string; className?: string }) {
+  const paths: Record<string, React.ReactNode> = {
+    grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+    box: <><path d="m3 7 9-4 9 4v10l-9 4-9-4Z" /><path d="m3 7 9 4 9-4M12 11v10M7 5l10 5" /></>,
+    tag: <><path d="M3 3h8l10 10-8 8L3 11Z" /><circle cx="7.5" cy="7.5" r="1" /></>,
+    search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 5 5" /></>,
+    branch: <><path d="M6 5v10a4 4 0 0 0 4 4h6M6 8h8a4 4 0 0 0 4-4" /><circle cx="6" cy="4" r="2" /><circle cx="18" cy="3" r="2" /><circle cx="18" cy="19" r="2" /></>,
+    upload: <><path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5" /></>,
+    download: <><path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4" /></>,
+    check: <path d="m5 12 4 4 10-10" />,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></>,
+    arrow: <path d="M4 12h15m-6-6 6 6-6 6" />,
+    chevron: <path d="m9 5 7 7-7 7" />,
+    filter: <path d="M3 5h18l-7 8v6l-4 2v-8Z" />,
+    settings: <><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" /><circle cx="15" cy="17" r="3" /></>,
+    refresh: <><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6 6a8 8 0 0 1 13 3M5 15a8 8 0 0 0 13 3" /></>,
+    plus: <path d="M12 4v16M4 12h16" />,
+    close: <path d="m6 6 12 12M18 6 6 18" />,
+  }
+  return <svg className={`pc-icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] ?? paths.box}</svg>
+}
+
 export default function Home() {
   const [products, setProducts] = useState<Product[]>([])
   const [stats, setStats] = useState<Stats>({ totalProducts: 0, sheets: [] })
   const [search, setSearch] = useState('')
   const [selectedSheet, setSelectedSheet] = useState('all')
   const [status, setStatus] = useState('พร้อมใช้งาน')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [tooltip, setTooltip] = useState<{ x: number; y: number; url: string } | null>(null)
   const [editProduct, setEditProduct] = useState<Product | null>(null)
   const [grabFile, setGrabFile] = useState<File | null>(null)
@@ -89,50 +115,101 @@ export default function Home() {
   const [cleaningImage, setCleaningImage] = useState(false)
   const editCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const searchReqId = useRef(0)
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const inspectorRef = useRef<HTMLElement>(null)
+  const [activeSku, setActiveSku] = useState<string | null>(null)
+  const [inspectionBranch, setInspectionBranch] = useState<BranchKey>('src')
+  const [branchFilter, setBranchFilter] = useState<'all' | BranchKey>('all')
+  const [priceFilter, setPriceFilter] = useState<'all' | PriceState>('all')
+  const [showAllPrices, setShowAllPrices] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [pageNumber, setPageNumber] = useState(1)
+  const [loadError, setLoadError] = useState('')
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({})
+  const [priceReview, setPriceReview] = useState<{ sku: string; price: number; previous: number | null } | null>(null)
+  const [savingPrice, setSavingPrice] = useState(false)
+  const [inspectorError, setInspectorError] = useState('')
+
+  const onSearchCriteriaChange = useEffectEvent(() => {
+    if (search.trim().length >= 3) searchProducts(search.trim())
+    else loadProducts(selectedSheet)
+  })
 
   useEffect(() => {
     loadStats()
-    loadProducts('all')
     loadMasterCount()
   }, [])
 
+  useEffect(() => {
+    // Invalidate an older request immediately, including during the debounce window.
+    searchReqId.current += 1
+    const timeout = setTimeout(() => {
+      onSearchCriteriaChange()
+    }, search.trim().length >= 3 ? 250 : 0)
+    return () => { clearTimeout(timeout); searchReqId.current += 1 }
+  }, [search, selectedSheet])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
+        event.preventDefault()
+        searchInputRef.current?.focus()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
   async function loadMasterCount() {
-    const res = await fetch('/api/master')
-    const data = await res.json()
-    if (data.success && data.count > 0) setMasterSkuCount(data.count)
+    try {
+      const res = await fetch('/api/master')
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.success) setMasterSkuCount(data.count)
+    } catch { /* The product request displays the connection error. */ }
   }
 
   async function loadStats() {
-    const res = await fetch('/api/stats')
-    const data = await res.json()
-    if (data.success) setStats(data)
+    try {
+      const res = await fetch('/api/stats')
+      if (!res.ok) return
+      const data = await res.json()
+      if (data.success) setStats(data)
+    } catch { /* Keep the last successfully loaded summary. */ }
   }
 
   async function loadProducts(sheet = 'all') {
-    setLoading(true)
-    setStatus('กำลังโหลด...')
     const url = sheet === 'all' ? '/api/products' : `/api/products?sheet=${encodeURIComponent(sheet)}`
-    const res = await fetch(url)
-    const data = await res.json()
-    if (data.success) {
-      setProducts(data.products)
-      preloadImages(data.products)
-      setStatus(`พร้อมใช้งาน (${data.products.length} รายการ)`)
-    }
-    setLoading(false)
+    await fetchProductList(url)
   }
 
   async function searchProducts(sku: string) {
-    if (sku.length < 3) return
+    await fetchProductList(`/api/products?q=${encodeURIComponent(sku)}`)
+  }
+
+  async function fetchProductList(url: string) {
     const reqId = ++searchReqId.current
     setLoading(true)
-    const res = await fetch(`/api/products?q=${encodeURIComponent(sku)}`)
-    const data = await res.json()
-    if (reqId === searchReqId.current && data.success) {
+    setLoadError('')
+    setPriceReview(null)
+    setStatus('กำลังโหลดสินค้า...')
+    try {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('โหลดข้อมูลไม่สำเร็จ')
+      const data = await res.json()
+      if (!data.success || !Array.isArray(data.products)) throw new Error('โหลดข้อมูลไม่สำเร็จ')
+      if (reqId !== searchReqId.current) return
       setProducts(data.products)
       preloadImages(data.products)
+      setStatus(`โหลดสินค้าแล้ว ${data.products.length.toLocaleString('th-TH')} รายการ`)
+    } catch {
+      if (reqId !== searchReqId.current) return
+      setLoadError('ไม่สามารถโหลดสินค้าได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง')
+      setStatus('โหลดข้อมูลสินค้าไม่สำเร็จ')
+    } finally {
+      if (reqId === searchReqId.current) setLoading(false)
     }
-    setLoading(false)
   }
 
   async function checkPrices() {
@@ -174,6 +251,10 @@ export default function Home() {
           p['รหัสสินค้า (SKU NUMBER)'] === editProduct['_originalSku'] ? { ...editProduct } : p
         ))
       }
+      const savedSku = String(isAdding ? data.product['รหัสสินค้า (SKU NUMBER)'] : editProduct['รหัสสินค้า (SKU NUMBER)'])
+      setActiveSku(savedSku)
+      setPriceDrafts(previous => { const next = { ...previous }; delete next[savedSku]; delete next[String(editProduct['_originalSku'])]; return next })
+      resetPriceReview()
       setEditProduct(null)
       setIsAdding(false)
       setStatus(isAdding ? 'เพิ่มสินค้าสำเร็จ ✅' : 'บันทึกสำเร็จ ✅')
@@ -1422,378 +1503,226 @@ async function confirmUpdatePrices() {
   setUpdatingPrices(false)
 }
 
+  function hasProductBranch(product: Product, branch: BranchKey) {
+    return !!product[branch] || String(product.branch ?? '').split(',').some(value => value.trim().toLowerCase() === branch)
+  }
+
+  function productPrice(value: unknown) {
+    const price = parsePriceRobust(String(value ?? ''))
+    return price !== null && Number.isFinite(price) ? price : null
+  }
+
+  function formatMoney(value: unknown) {
+    const price = productPrice(value)
+    return price === null ? '—' : new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', minimumFractionDigits: 2 }).format(price)
+  }
+
+  function pricesDiffer(left: unknown, right: unknown) {
+    const first = productPrice(left)
+    const second = productPrice(right)
+    return first !== null && second !== null && Math.round(first * 100) !== Math.round(second * 100)
+  }
+
+  function priceState(product: Product): PriceState {
+    if (!hasProductBranch(product, inspectionBranch)) return 'absent'
+    const dbPrice = productPrice(product['*ราคาสินค้า'])
+    const branchPrice = productPrice(product[`${inspectionBranch}_price`])
+    if (dbPrice === null || branchPrice === null) return 'unpriced'
+    return pricesDiffer(branchPrice, dbPrice) ? 'mismatch' : 'matched'
+  }
+
+  const priceLabels: Record<PriceState, string> = { mismatch: 'ต้องตรวจ', matched: 'ราคาตรง', unpriced: 'ยังไม่มีราคา', absent: 'ไม่มีในสาขา' }
+  const branchNames: Record<BranchKey, string> = { src: 'SRC', kkl: 'KKL', sss: 'SSS' }
+  const branches = Object.keys(branchNames) as BranchKey[]
+  const normalizedSearch = search.trim().toLowerCase()
+  const filteredProducts = products.filter(product =>
+    (selectedSheet === 'all' || product['หมวดหมู่สินค้า (CATEGORIES)'] === selectedSheet) &&
+    (branchFilter === 'all' || hasProductBranch(product, branchFilter)) &&
+    (priceFilter === 'all' || priceState(product) === priceFilter) &&
+    (!normalizedSearch || String(product['รหัสสินค้า (SKU NUMBER)'] ?? '').toLowerCase().includes(normalizedSearch) || String(product['*ชื่อสินค้า (NAME)'] ?? '').toLowerCase().includes(normalizedSearch))
+  )
+  const pageSize = 12
+  const pageCount = Math.max(1, Math.ceil(filteredProducts.length / pageSize))
+  const currentPage = Math.min(pageNumber, pageCount)
+  const pageProducts = filteredProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize)
+  const inspectedProduct = filteredProducts.find(product => product['รหัสสินค้า (SKU NUMBER)'] === activeSku) ?? pageProducts[0] ?? null
+  const inspectedSku = inspectedProduct?.['รหัสสินค้า (SKU NUMBER)'] as string | undefined
+  const originalPrice = productPrice(inspectedProduct?.['*ราคาสินค้า'])
+  const draftPrice = inspectedSku ? (Object.hasOwn(priceDrafts, inspectedSku) ? priceDrafts[inspectedSku] : (originalPrice === null ? '' : originalPrice.toFixed(2))) : ''
+  const proposedPrice = productPrice(draftPrice)
+  const hasPriceChange = draftPrice.trim() !== '' && proposedPrice !== null && proposedPrice !== originalPrice
+  const comparisonPrice = inspectedProduct && hasProductBranch(inspectedProduct, inspectionBranch) ? productPrice(inspectedProduct[`${inspectionBranch}_price`]) : null
+  const priceDifference = comparisonPrice !== null && originalPrice !== null ? comparisonPrice - originalPrice : null
+  const issueCount = products.filter(product => priceState(product) === 'mismatch').length
+  const activeReview = priceReview && priceReview.sku === inspectedSku && priceReview.price === proposedPrice ? priceReview : null
+
+  function resetPriceReview() {
+    setPriceReview(null)
+    setInspectorError('')
+  }
+
+  function selectInspectorProduct(product: Product) {
+    if (savingPrice) return
+    setTooltip(null)
+    setActiveSku(product['รหัสสินค้า (SKU NUMBER)'])
+    resetPriceReview()
+    if (window.matchMedia('(max-width: 820px)').matches) inspectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function reviewInspectorPrice() {
+    if (!inspectedSku) return
+    if (proposedPrice === null || proposedPrice < 0 || Math.abs(proposedPrice * 100 - Math.round(proposedPrice * 100)) > 0.00001) {
+      setInspectorError('กรุณาระบุราคาตั้งแต่ 0 บาท และทศนิยมไม่เกิน 2 ตำแหน่ง')
+      return
+    }
+    setInspectorError('')
+    setPriceReview({ sku: inspectedSku, price: proposedPrice, previous: originalPrice })
+  }
+
+  async function saveInspectorPrice() {
+    if (!activeReview || savingPrice) return
+    const review = activeReview
+    setSavingPrice(true)
+    setInspectorError('')
+    try {
+      const response = await fetch('/api/products', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: review.sku, '*ราคาสินค้า': review.price }),
+      })
+      if (!response.ok) throw new Error('บันทึกไม่สำเร็จ')
+      const data = await response.json()
+      if (!data.success) throw new Error('บันทึกไม่สำเร็จ')
+      setProducts(previous => previous.map(product => product['รหัสสินค้า (SKU NUMBER)'] === review.sku ? { ...product, '*ราคาสินค้า': review.price } : product))
+      setPriceDrafts(previous => { const next = { ...previous }; delete next[review.sku]; return next })
+      setPriceReview(null)
+      setLastPriceUpdate(new Intl.DateTimeFormat('th-TH', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(new Date()))
+      setStatus(`บันทึกราคา ${review.sku} สำเร็จ · ${formatMoney(review.price)}`)
+    } catch {
+      setInspectorError('บันทึกราคาไม่สำเร็จ ข้อมูลที่กรอกยังอยู่ กรุณาลองอีกครั้ง')
+      setStatus('บันทึกราคาไม่สำเร็จ')
+    } finally {
+      setSavingPrice(false)
+    }
+  }
+
+  function openMissingBranches() {
+    setShowMissingBranchModal(true)
+    setMissingBranchResults({ src: [], kkl: [], sss: [] })
+    setMissingBranchLoaded({ src: false, kkl: false, sss: false })
+    setMissingBranchTab('src')
+    setTimeout(() => loadMissingBranch('src'), 0)
+  }
+
+  function openAddProduct() {
+    setIsAdding(true)
+    setEditProduct({ 'ประเภทสินค้า': '', '*ชื่อสินค้า (NAME)': '', '*เลขที่ใบอนุญาตโฆษณา': '', '*ราคาสินค้า': '', 'รหัสสินค้า (SKU NUMBER)': '', '*รูปภาพสินค้า': '', 'หมวดหมู่สินค้า (CATEGORIES)': '' })
+  }
+
   return (
-    <div style={{ fontFamily: 'sans-serif', height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="pc-app">
+      <a className="pc-skip-link" href="#product-workspace">ข้ามไปยังรายการสินค้า</a>
+      <aside className="pc-rail" aria-label="เมนูหลัก">
+        <Link href="/" className="pc-brand" aria-label="Price Checker หน้าหลัก"><WorkspaceIcon name="tag" /></Link>
+        <nav>
+          <button className={!toolsOpen && priceFilter === 'all' ? 'is-active' : ''} title="รายการสินค้า" aria-label="รายการสินค้า" onClick={() => { setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" /></button>
+          <button className={priceFilter === 'mismatch' ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="tag" /></button>
+          <button title="เปรียบเทียบ 3 สาขา" aria-label="เปรียบเทียบ 3 สาขา" onClick={handleMasterBranchCompare}><WorkspaceIcon name="branch" /></button>
+          <button title="นำเข้าสินค้า" aria-label="นำเข้าสินค้า" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" /></button>
+          <button className={toolsOpen ? 'is-active' : ''} title="เครื่องมือทั้งหมด" aria-label="เครื่องมือทั้งหมด" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="grid" /></button>
+        </nav>
+        <div className="pc-rail-bottom"><span className="pc-rail-divider" /><span className="pc-workspace-avatar" title="ANIN Workspace">AN</span></div>
+      </aside>
 
-      {/* Header */}
-      <div style={{ background: '#f5f7fa', padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ fontSize: 18, color: '#000' }}>Grab Master รายการสินค้าทั้งหมด by mailforspiritwish <span style={{ fontSize: 12, color: '#888', fontWeight: 400 }}>v1.11</span></h1>
-        <span style={{ fontSize: 11, color: '#000' }}>อัพเดทราคาล่าสุด: {lastPriceUpdate ?? '-'}</span>
-      </div>
-
-      {/* Toolbar */}
-      <div style={{ background: '#f8f8f8', borderBottom: '1px solid #bbb', padding: '10px 20px', display: 'flex', gap: 12, alignItems: 'center' }}>
-        <input
-          type="text"
-          placeholder="ค้นหารหัสสินค้า / ชื่อสินค้า..."
-          value={search}
-          onChange={e => { setSearch(e.target.value); searchProducts(e.target.value) }}
-          style={{ padding: '6px 10px', border: '1px solid #999', borderRadius: 3, fontSize: 13, width: 220 }}
-        />
-        <input type="file" accept=".csv" id="grabInputSrc" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'src'); e.target.value = '' } }} />
-        <input type="file" accept=".csv" id="grabInputKkl" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'kkl'); e.target.value = '' } }} />
-        <input type="file" accept=".csv" id="grabInputSss" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'sss'); e.target.value = '' } }} />
-        <input
-        type="file" accept=".csv" id="priceCalcInput" style={{ display: 'none' }}
-        onChange={e => { if (e.target.files?.[0]) handlePriceCalcUpload(e.target.files[0]) }}
-        />
-        <input type="file" accept=".csv" id="priceCalcGrabInput" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { handlePriceCalcGrabUpload(e.target.files[0]); e.target.value = '' } }} />
-        <input
-        type="file" accept=".xlsx,.xls" id="importInput" style={{ display: 'none' }}
-        onChange={e => { if (e.target.files?.[0]) { handleImportXlsx(e.target.files[0]); e.target.value = '' } }}
-        />
-        <input
-        type="file" accept=".csv" id="csvConvertInput" style={{ display: 'none' }}
-        onChange={e => { if (e.target.files?.[0]) { handleCsvToUtf8(e.target.files[0]); e.target.value = '' } }}
-        />
-        <button onClick={() => loadProducts(selectedSheet)} style={btnStyle}>🔄 รีเฟรช</button>
-        {selectedSkus.size > 0 && (
-          <button
-            onClick={exportSelectedSkusXlsx}
-            style={{ ...btnStyle, background: '#d4edda', borderColor: '#28a745', color: '#155724' }}
-          >
-            📥 Export ที่เลือก ({selectedSkus.size})
-          </button>
-        )}
-        <button onClick={() => { setIsAdding(true); setEditProduct({ 'ประเภทสินค้า': '', '*ชื่อสินค้า (NAME)': '', '*เลขที่ใบอนุญาตโฆษณา': '', '*ราคาสินค้า': '', 'รหัสสินค้า (SKU NUMBER)': '', '*รูปภาพสินค้า': '', 'หมวดหมู่สินค้า (CATEGORIES)': '' }) }} style={btnStyle}>➕ เพิ่มรายการสินค้า</button>
-        <button onClick={() => document.getElementById('importInput')?.click()} style={btnStyle}>📂 Import Menu Bulk</button>
-        <button onClick={() => document.getElementById('csvConvertInput')?.click()} style={btnStyle} title="แปลงไฟล์ CSV จาก POS (TIS-620) เป็น CSV UTF-8">🔄 แปลง CSV เป็น UTF-8</button>
-        <button onClick={() => document.getElementById('priceCalcInput')?.click()} style={btnStyle} title="ใช้ไฟล์ Price อัพโหลดสำหรับกรณี Promaxx Update ราคา">🧮 ราคาใน DB</button>
-        <input type="file" accept=".csv" id="promaxxCheckInput" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { handlePromaxxVsDbCheck(e.target.files[0]); e.target.value = '' } }} />
-        <button onClick={() => document.getElementById('promaxxCheckInput')?.click()} style={{ ...btnStyle, background: '#f3e8ff', borderColor: '#8b5cf6' }} title="ปุ่มสำหรับตรวจสอบราคาใน GrabMartManager กับ Promaxx(R05.103) ว่าตรงกันหรือไม่ และบันทึกราคา Promaxx ลง DB">💊 ราคาใน Promaxx</button>
-        <button onClick={() => document.getElementById('grabInputSrc')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SRC">🛵 GRAB SRC</button>
-        <button onClick={() => document.getElementById('grabInputKkl')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา KKL">🛵 GRAB KKL</button>
-        <button onClick={() => document.getElementById('grabInputSss')?.click()} style={btnStyle} title="อัพโหลด Grab_menu สาขา SSS">🛵 GRAB SSS</button>
-        <input type="file" accept=".csv" id="mmeCheckGrabInputSrc" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { setMmeCheckGrabFileSrc(e.target.files[0]); e.target.value = '' } }} />
-        <input type="file" accept=".csv" id="mmeCheckGrabInputKkl" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { setMmeCheckGrabFileKkl(e.target.files[0]); e.target.value = '' } }} />
-        <input type="file" accept=".csv" id="mmeCheckGrabInputSss" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { setMmeCheckGrabFileSss(e.target.files[0]); e.target.value = '' } }} />
-        <input type="file" accept=".xlsx,.xls" id="mmeCheckMmeInput" style={{ display: 'none' }}
-          onChange={e => { if (e.target.files?.[0]) { setMmeCheckMmeFile(e.target.files[0]); e.target.value = '' } }} />
-        <button
-          onClick={() => { setShowMmeCheckModal(true); setMmeCheckResults({ src: [], kkl: [], sss: [] }) }}
-          style={{ ...btnStyle, background: '#e8f4ff', borderColor: '#4a8bc4' }}
-          title="ตรวจสอบว่าสินค้าที่ยื่นแก้ไขใน GM MME ถูกอัพเดทราคาใน GRAB แล้วหรือยัง"
-        >📋 ตรวจ GM MME vs GRAB</button>
-        <button
-          onClick={() => {
-            setShowMissingBranchModal(true)
-            setMissingBranchResults({ src: [], kkl: [], sss: [] })
-            setMissingBranchLoaded({ src: false, kkl: false, sss: false })
-            setMissingBranchTab('src')
-            setTimeout(() => loadMissingBranch('src'), 0)
-          }}
-          style={{ ...btnStyle, background: '#fff3e0', borderColor: '#e65100' }}
-          title="ตรวจสอบสินค้าที่ยังไม่มีใน GRAB แต่ละสาขา"
-        >🔍 สินค้าขาด GRAB</button>
-
-      {/* Main Layout */}
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', flex: 1, overflow: 'hidden' }}>
-
-        {/* Left Panel */}
-        <div style={{ background: '#f0f0f0', borderRight: '1px solid #bbb', overflowY: 'auto' }}>
-          <div style={{ padding: '6px 10px', background: '#e0e0e0', borderBottom: '1px solid #ccc', fontWeight: 700, fontSize: 13 }}>📊 สถิติ</div>
-          <div style={{ padding: 15 }}>
-            <div style={statCard}>
-              <div style={{ fontSize: 11, color: '#555', marginBottom: 6 }}>📋 Product Master</div>
-              <input
-                type="file"
-                id="masterInput"
-                accept=".xlsx,.xls,.csv"
-                style={{ display: 'none' }}
-                onChange={e => { if (e.target.files?.[0]) { handleMasterUpload(e.target.files[0]); e.target.value = '' } }}
-              />
-              <button
-                onClick={() => document.getElementById('masterInput')?.click()}
-                style={{ ...btnStyle, width: '100%', fontSize: 11, padding: '5px 8px', borderRadius: 4 }}
-              >
-                📂 {masterFileName ? masterFileName : 'อัพโหลด Product Master'}
-              </button>
-              {masterSkuCount !== null && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
-                    <span style={{ color: '#555' }}>Product Master</span>
-                    <strong style={{ color: '#c74634' }}>{masterSkuCount.toLocaleString()}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                    <span style={{ color: '#555' }}>GrabMart</span>
-                    <strong style={{ color: '#4a8bc4' }}>{stats.totalProducts.toLocaleString()}</strong>
-                  </div>
-                  <div style={{ background: '#eee', borderRadius: 4, height: 6, overflow: 'hidden' }}>
-                    <div style={{
-                      background: stats.totalProducts >= masterSkuCount ? '#28a745' : '#c74634',
-                      height: '100%',
-                      width: `${Math.min(100, Math.round(stats.totalProducts / masterSkuCount * 100))}%`,
-                      transition: 'width 0.3s'
-                    }} />
-                  </div>
-                  <div style={{ fontSize: 10, color: '#555', marginTop: 4, textAlign: 'right' }}>
-                    {stats.totalProducts.toLocaleString()} / {masterSkuCount.toLocaleString()} SKU
-                    ({masterSkuCount > 0 ? Math.round(stats.totalProducts / masterSkuCount * 100) : 0}%)
-                  </div>
-                  <button
-                    onClick={exportMissingSkus}
-                    disabled={exportingMissing}
-                    style={{
-                      ...btnStyle,
-                      width: '100%',
-                      marginTop: 8,
-                      fontSize: 11,
-                      padding: '5px 8px',
-                      borderRadius: 4,
-                      background: '#fff3cd',
-                      borderColor: '#f0ad4e',
-                      color: '#856404',
-                      opacity: exportingMissing ? 0.6 : 1
-                    }}
-                  >
-                    {exportingMissing
-                      ? '⏳ กำลังดึงข้อมูล...'
-                      : masterMissingCount !== null
-                        ? `📥 Export ที่ขาดใน GrabMart (${masterMissingCount.toLocaleString()})`
-                        : '📥 Export ที่ขาดใน GrabMart'}
-                  </button>
-                  <button
-                    onClick={handleMasterBranchCompare}
-                    disabled={masterBranchLoading}
-                    style={{
-                      ...btnStyle,
-                      width: '100%',
-                      marginTop: 6,
-                      fontSize: 11,
-                      padding: '5px 8px',
-                      borderRadius: 4,
-                      background: '#e8f4fd',
-                      borderColor: '#4a8bc4',
-                      color: '#1a5276',
-                      opacity: masterBranchLoading ? 0.6 : 1
-                    }}
-                  >
-                    {masterBranchLoading ? '⏳ กำลังเปรียบเทียบ...' : '🔍 เปรียบเทียบ 3 สาขา'}
-                  </button>
-                </div>
-              )}
-            </div>
-            <div style={statCard}>
-              <div style={{ fontSize: 11, color: '#000' }}>หมวดหมู่</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: '#c74634' }}>{stats.sheets.length}</div>
-            </div>
+      <main className="pc-workspace" id="product-workspace">
+        <header className="pc-page-header">
+          <div><div className="pc-eyebrow">PRICE CHECKER / PRODUCT OPERATIONS</div><h1>ตรวจและปรับราคาสินค้า<span className="pc-heading-dot">.</span></h1><p>ดูผลต่าง ตรวจค่าที่เสนอ แล้วยืนยันก่อนเปลี่ยนราคา</p></div>
+          <div className="pc-header-actions">
+            <span className="pc-workspace-label">ANIN <i /> WORKSPACE</span>
+            <button className="pc-button pc-button-subtle" onClick={openAddProduct}><WorkspaceIcon name="plus" />เพิ่มสินค้า</button>
+            <button className="pc-button" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="settings" />เครื่องมือ</button>
           </div>
+        </header>
 
-          <div style={{ padding: '6px 10px', background: '#e0e0e0', borderBottom: '1px solid #ccc', fontWeight: 700, fontSize: 13 }}>📁 หมวดหมู่</div>
-          <div style={{ padding: '8px 10px', borderBottom: '1px solid #ddd' }}>
-            <button
-              onClick={exportSelectedCategoryXlsx}
-              disabled={selectedSheet === 'all'}
-              style={{
-                ...btnStyle,
-                width: '100%',
-                padding: '7px 10px',
-                borderRadius: 6,
-                fontSize: 11,
-                opacity: selectedSheet === 'all' ? 0.5 : 1
-              }}
-            >
-              📥 Export หมวดหมู่ที่เลือก
-            </button>
-            <button
-              onClick={deleteSelectedCategory}
-              disabled={selectedSheet === 'all'}
-              style={{
-                ...btnStyle,
-                width: '100%',
-                marginTop: 8,
-                padding: '7px 10px',
-                borderRadius: 6,
-                fontSize: 11,
-                background: '#f8d7da',
-                borderColor: '#dc3545',
-                color: '#721c24',
-                opacity: selectedSheet === 'all' ? 0.5 : 1
-              }}
-              title="ลบหมวดหมู่นี้ออกจากทุกสาขา"
-            >
-              🗑️ ลบหมวดหมู่นี้ทุกสาขา
-            </button>
-          </div>
-          {stats.sheets.map(s => (
-            <div
-              key={s.name}
-              onClick={() => { setSelectedSheet(s.name); loadProducts(s.name) }}
-              style={{
-                padding: '8px 12px', borderBottom: '1px solid #ddd', fontSize: 12,
-                cursor: 'pointer', display: 'flex', justifyContent: 'space-between',
-                background: selectedSheet === s.name ? '#cce5ff' : 'transparent'
-              }}
-            >
-              <span>{s.name}</span>
-              <span style={{ background: '#4a8bc4', color: '#fff', padding: '2px 8px', borderRadius: 10, fontSize: 10 }}>{s.count}</span>
-            </div>
-          ))}
+        <div className="pc-context-strip"><span><i className="pc-context-dot" />รายการที่โหลด <b>{products.length.toLocaleString('th-TH')}</b></span><span className="pc-context-issues"><WorkspaceIcon name="clock" />ต้องตรวจ {inspectionBranch.toUpperCase()} <b>{issueCount.toLocaleString('th-TH')}</b></span><span className="pc-last-update">{lastPriceUpdate ? `บันทึกราคาล่าสุด ${lastPriceUpdate}` : 'จัดการข้อมูลสินค้าและราคาของทั้ง 3 สาขา'}</span></div>
+
+        <div hidden>
+          <input type="file" accept=".csv" id="grabInputSrc" onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'src'); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="grabInputKkl" onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'kkl'); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="grabInputSss" onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'sss'); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="priceCalcInput" onChange={e => { if (e.target.files?.[0]) { handlePriceCalcUpload(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="priceCalcGrabInput" onChange={e => { if (e.target.files?.[0]) { handlePriceCalcGrabUpload(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".xlsx,.xls" id="importInput" onChange={e => { if (e.target.files?.[0]) { handleImportXlsx(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="csvConvertInput" onChange={e => { if (e.target.files?.[0]) { handleCsvToUtf8(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="promaxxCheckInput" onChange={e => { if (e.target.files?.[0]) { handlePromaxxVsDbCheck(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="mmeCheckGrabInputSrc" onChange={e => { if (e.target.files?.[0]) { setMmeCheckGrabFileSrc(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="mmeCheckGrabInputKkl" onChange={e => { if (e.target.files?.[0]) { setMmeCheckGrabFileKkl(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="mmeCheckGrabInputSss" onChange={e => { if (e.target.files?.[0]) { setMmeCheckGrabFileSss(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".xlsx,.xls" id="mmeCheckMmeInput" onChange={e => { if (e.target.files?.[0]) { setMmeCheckMmeFile(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".xlsx,.xls,.csv" id="masterInput" onChange={e => { if (e.target.files?.[0]) { handleMasterUpload(e.target.files[0]); e.target.value = '' } }} />
         </div>
 
-        {/* Right Panel */}
-        <div style={{ overflowY: 'auto', background: '#fff' }}>
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#000' }}>กำลังโหลด...</div>
-          ) : products.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 40, color: '#000' }}>เลือกหมวดหมู่หรือค้นหาสินค้า</div>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ background: '#f5f5f5' }}>
-                  <th style={{ ...th, width: 32, textAlign: 'center' }}>
-                    <input
-                      type="checkbox"
-                      title="เลือกทั้งหมด"
-                      checked={products.length > 0 && products.every(p => selectedSkus.has(p['รหัสสินค้า (SKU NUMBER)']))}
-                      onChange={e => {
-                        setSelectedSkus((prev: Set<string>) => {
-                          const next = new Set(prev)
-                          if (e.target.checked) {
-                            products.forEach((p: Product) => next.add(p['รหัสสินค้า (SKU NUMBER)']))
-                          } else {
-                            products.forEach((p: Product) => next.delete(p['รหัสสินค้า (SKU NUMBER)']))
-                          }
-                          return next
-                        })
-                      }}
-                    />
-                  </th>
-                  <th style={th}>#</th>
-                  <th style={th}>หมวดหมู่</th>
-                  <th style={th}>รหัสสินค้า</th>
-                  <th style={th}>ชื่อสินค้า</th>
-                  <th style={th}>ใบอนุญาต</th>
-                  <th style={th}>ราคา DB</th>
-                  <th style={{ ...th, textAlign: 'center', minWidth: 80 }}>ราคา Promaxx</th>
-                  <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>SRC ราคา</th>
-                  <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>KKL ราคา</th>
-                  <th style={{ ...th, textAlign: 'center', minWidth: 70 }}>SSS ราคา</th>
-                  <th style={th}>ดำเนินการ</th>
+        {toolsOpen && <section className="pc-workflow-tools" id="workflow-tools" aria-label="เครื่องมือจัดการสินค้า">
+          <div className="pc-tools-heading"><div><span className="pc-eyebrow">YOUR WORKFLOW</span><h2>เครื่องมือจัดการสินค้า</h2></div><button className="pc-icon-button" aria-label="ปิดเครื่องมือ" onClick={() => setToolsOpen(false)}><WorkspaceIcon name="close" /></button></div>
+          <div className="pc-tool-groups">
+            <section><h3><WorkspaceIcon name="upload" />นำเข้าและเตรียมไฟล์</h3><button onClick={openAddProduct}>เพิ่มสินค้ารายการเดียว <WorkspaceIcon name="plus" /></button><button onClick={() => document.getElementById('importInput')?.click()}>นำเข้า Menu Bulk <small>Excel</small></button><button onClick={() => document.getElementById('masterInput')?.click()}>นำเข้า Product Master <small>Excel / CSV</small></button><button onClick={() => document.getElementById('csvConvertInput')?.click()}>แปลง CSV เป็น UTF-8 <small>POS</small></button></section>
+            <section><h3><WorkspaceIcon name="tag" />ตรวจสอบราคา</h3><button onClick={() => document.getElementById('priceCalcInput')?.click()}>คำนวณและอัปเดตราคา DB <small>R05.105</small></button><button onClick={() => document.getElementById('promaxxCheckInput')?.click()}>เทียบราคา Promaxx <small>R05.103</small></button><button onClick={() => { setShowMmeCheckModal(true); setMmeCheckResults({ src: [], kkl: [], sss: [] }) }}>ตรวจ GM MME กับ GRAB <WorkspaceIcon name="chevron" /></button></section>
+            <section><h3><WorkspaceIcon name="branch" />GRAB และสาขา</h3><div className="pc-grab-imports">{branches.map(branch => <button key={branch} onClick={() => document.getElementById(`grabInput${branch[0].toUpperCase()}${branch.slice(1)}`)?.click()} title={`นำเข้า GRAB CSV ${branch.toUpperCase()}`}>GRAB {branch.toUpperCase()}</button>)}</div><button onClick={openMissingBranches}>ตรวจสินค้าที่ขาดใน GRAB <WorkspaceIcon name="chevron" /></button><button onClick={handleMasterBranchCompare}>เปรียบเทียบ Product Master 3 สาขา <WorkspaceIcon name="chevron" /></button></section>
+            <section><h3><WorkspaceIcon name="download" />ส่งออกและข้อมูลกลาง</h3><button disabled={exportingMissing} onClick={exportMissingSkus}>{exportingMissing ? 'กำลังเตรียมไฟล์...' : 'ส่งออก SKU ที่ขาดจาก Master'}<WorkspaceIcon name="download" /></button><button disabled={selectedSheet === 'all'} onClick={exportSelectedCategoryXlsx}>ส่งออกหมวดหมู่ที่เลือก <WorkspaceIcon name="download" /></button><p className="pc-master-summary">Product Master <b>{masterSkuCount === null ? 'ยังไม่โหลด' : masterSkuCount.toLocaleString('th-TH')}</b>{masterFileName && <small>{masterFileName}</small>}</p><p className="pc-master-summary">SKU ที่ยังขาด <b>{masterMissingCount === null ? 'ยังไม่ตรวจ' : masterMissingCount.toLocaleString('th-TH')}</b></p></section>
+          </div>
+          <div className="pc-tools-bottom"><span>เลือกหมวดหมู่เพื่อส่งออกหรือจัดการสินค้าทั้งหมวด</span><button className="pc-danger-link" disabled={selectedSheet === 'all'} onClick={deleteSelectedCategory}>ลบหมวดหมู่ที่เลือกทุกสาขา</button></div>
+        </section>}
+
+        <div className="pc-inspection-grid">
+          <section className="pc-list-column" aria-label="รายการสินค้า">
+            <div className="pc-search-toolbar"><label className="pc-search"><WorkspaceIcon name="search" /><input ref={searchInputRef} type="search" aria-label="ค้นหาสินค้า" placeholder="ค้นหาชื่อสินค้า หรือรหัส SKU..." value={search} disabled={savingPrice} onChange={event => { setSearch(event.target.value); setPageNumber(1); resetPriceReview() }} /><kbd>⌘ K</kbd></label><button className={`pc-button ${filtersOpen ? 'is-selected' : ''}`} aria-expanded={filtersOpen} aria-controls="product-filters" onClick={() => setFiltersOpen(value => !value)}><WorkspaceIcon name="filter" />ตัวกรอง{(branchFilter !== 'all' || selectedSheet !== 'all') && <span className="pc-count">{Number(branchFilter !== 'all') + Number(selectedSheet !== 'all')}</span>}</button><button className="pc-icon-button pc-refresh" title="รีเฟรชสินค้า" aria-label="รีเฟรชสินค้า" disabled={loading || savingPrice} onClick={() => search.trim().length >= 3 ? searchProducts(search.trim()) : loadProducts(selectedSheet)}><WorkspaceIcon name="refresh" /></button></div>
+
+            {filtersOpen && <div className="pc-filters" id="product-filters"><label>หมวดหมู่<select aria-label="กรองหมวดหมู่" value={selectedSheet} disabled={savingPrice} onChange={event => { setSelectedSheet(event.target.value); setPageNumber(1); resetPriceReview() }}><option value="all">ทุกหมวดหมู่ ({stats.sheets.length})</option>{stats.sheets.map(sheet => <option key={sheet.name} value={sheet.name}>{sheet.name} ({sheet.count})</option>)}</select></label><label>สินค้าที่มีในสาขา<select aria-label="กรองสาขา" value={branchFilter} disabled={savingPrice} onChange={event => { setBranchFilter(event.target.value as 'all' | BranchKey); setPageNumber(1); resetPriceReview() }}><option value="all">ทุกสาขา</option>{branches.map(branch => <option key={branch} value={branch}>{branchNames[branch]}</option>)}</select></label><button className="pc-text-button" onClick={() => { setSelectedSheet('all'); setBranchFilter('all'); setPriceFilter('all'); setSearch(''); setPageNumber(1); resetPriceReview() }}>ล้างตัวกรอง</button></div>}
+
+            <div className="pc-table-card">
+              <div className="pc-table-heading"><div><h2>{selectedSheet === 'all' ? 'สินค้าทั้งหมด' : selectedSheet}<span className="pc-count">{filteredProducts.length.toLocaleString('th-TH')}</span></h2><p>เทียบราคา GRAB <b>{branchNames[inspectionBranch]}</b> กับราคา DB · เลือกสินค้าเพื่อดูรายละเอียด</p></div><div className="pc-price-tabs" aria-label="กรองสถานะราคา"><button className={priceFilter === 'all' ? 'is-active' : ''} aria-pressed={priceFilter === 'all'} onClick={() => { setPriceFilter('all'); setPageNumber(1); resetPriceReview() }}>ทั้งหมด</button><button className={priceFilter === 'mismatch' ? 'is-active' : ''} aria-pressed={priceFilter === 'mismatch'} onClick={() => { setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}>ต้องตรวจ <b>{issueCount}</b></button></div></div>
+              <div className="pc-table-options"><div className="pc-branch-switch" aria-label="เลือกสาขาเปรียบเทียบ">{branches.map(branch => <button key={branch} className={inspectionBranch === branch ? 'is-active' : ''} aria-pressed={inspectionBranch === branch} disabled={savingPrice} onClick={() => { setInspectionBranch(branch); setPageNumber(1); resetPriceReview() }}>{branchNames[branch]}</button>)}</div><button className="pc-text-button" aria-pressed={showAllPrices} onClick={() => setShowAllPrices(value => !value)}><WorkspaceIcon name="grid" />{showAllPrices ? 'มุมมองกระชับ' : 'ดูราคาทุกระบบ'}</button></div>
+
+              {loadError && <div className="pc-load-error" role="alert"><WorkspaceIcon name="clock" /><div><strong>โหลดข้อมูลสินค้าไม่สำเร็จ</strong><p>{loadError}</p></div><button className="pc-button" onClick={() => search.trim().length >= 3 ? searchProducts(search.trim()) : loadProducts(selectedSheet)}>ลองอีกครั้ง</button></div>}
+              {loading ? <div className="pc-loading" role="status" aria-label="กำลังโหลดสินค้า"><span className="pc-loading-label"><i />กำลังโหลดข้อมูลสินค้า...</span>{Array.from({ length: 6 }, (_, index) => <div className="pc-skeleton-row" key={index}><i /><span /><span /><b /></div>)}</div> : !loadError && filteredProducts.length === 0 ? <div className="pc-empty"><WorkspaceIcon name="search" /><h3>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ไม่พบสินค้าที่ตรงกับเงื่อนไข' : 'ยังไม่มีรายการสินค้า'}</h3><p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ลองเปลี่ยนคำค้นหา สาขา หรือสถานะราคา' : 'เริ่มต้นด้วยการนำเข้าไฟล์ Excel หรือเพิ่มสินค้าใหม่'}</p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? <button className="pc-button" onClick={() => { setSearch(''); setPriceFilter('all'); setSelectedSheet('all'); setBranchFilter('all'); setPageNumber(1) }}>แสดงสินค้าทั้งหมด</button> : <button className="pc-button pc-button-primary" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" />นำเข้าสินค้า</button>}</div> : !loadError && <div className="pc-table-scroll"><table className={`pc-products-table ${showAllPrices ? 'pc-expanded-prices' : ''}`}><thead><tr><th className="pc-checkbox-cell"><input type="checkbox" aria-label="เลือกสินค้าทั้งหมดในหน้านี้" checked={pageProducts.length > 0 && pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)']))} ref={input => { if (input) input.indeterminate = pageProducts.some(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) && !pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) }} onChange={event => setSelectedSkus(previous => { const next = new Set(previous); pageProducts.forEach(product => event.target.checked ? next.add(product['รหัสสินค้า (SKU NUMBER)']) : next.delete(product['รหัสสินค้า (SKU NUMBER)'])); return next })} /></th><th className="pc-product-column">สินค้า / SKU</th><th>ราคา DB</th>{showAllPrices ? <><th>Promaxx</th>{branches.map(branch => <th key={branch}>GRAB {branchNames[branch]}</th>)}</> : <th>GRAB {branchNames[inspectionBranch]}</th>}<th>สถานะ</th><th><span className="pc-sr-only">รายละเอียด</span></th></tr></thead><tbody>{pageProducts.map(product => {
+                const sku = String(product['รหัสสินค้า (SKU NUMBER)'])
+                const state = priceState(product)
+                const image = convertDriveLink(product['*รูปภาพสินค้า'] || '')
+                return <tr key={sku} data-sku={sku} className={`${sku === inspectedSku ? 'pc-row-active' : ''} ${selectedSkus.has(sku) ? 'pc-row-checked' : ''}`} onClick={event => { if (!(event.target as HTMLElement).closest('input,button,a')) selectInspectorProduct(product) }} onMouseEnter={event => { if (image && window.matchMedia('(hover: hover) and (pointer: fine) and (min-width: 821px)').matches) setTooltip({ x: event.clientX, y: event.clientY, url: image }) }} onMouseMove={event => setTooltip(previous => previous ? { ...previous, x: event.clientX, y: event.clientY } : null)} onMouseLeave={() => setTooltip(null)}>
+                  <td className="pc-checkbox-cell"><input type="checkbox" aria-label={`เลือก ${product['*ชื่อสินค้า (NAME)'] || sku}`} checked={selectedSkus.has(sku)} onChange={event => setSelectedSkus(previous => { const next = new Set(previous); event.target.checked ? next.add(sku) : next.delete(sku); return next })} /></td>
+                  <td><button className="pc-product-link" aria-label={`ตรวจสินค้า ${product['*ชื่อสินค้า (NAME)'] || sku}`} disabled={savingPrice} onClick={() => selectInspectorProduct(product)}><span className="pc-product-thumb"><WorkspaceIcon name="box" />{image && <NextImage src={image} alt="" fill sizes="33px" unoptimized loading="lazy" onError={event => { event.currentTarget.hidden = true }} />}</span><span><strong>{product['*ชื่อสินค้า (NAME)'] || 'ยังไม่ระบุชื่อสินค้า'}</strong><small>{sku}</small><span className="pc-row-branches">{branches.filter(branch => hasProductBranch(product, branch)).map(branch => <i key={branch}>{branchNames[branch]}</i>)}</span></span></button></td>
+                  <td className="pc-table-price">{formatMoney(product['*ราคาสินค้า'])}</td>
+                  {showAllPrices ? <><td className={pricesDiffer(product.promaxx_price, product['*ราคาสินค้า']) ? 'pc-price-mismatch' : ''}>{formatMoney(product.promaxx_price)}</td>{branches.map(branch => <td key={branch} className={hasProductBranch(product, branch) && pricesDiffer(product[`${branch}_price`], product['*ราคาสินค้า']) ? 'pc-price-mismatch' : ''}>{hasProductBranch(product, branch) ? formatMoney(product[`${branch}_price`]) : '—'}</td>)}</> : <td className={`pc-table-price ${state === 'mismatch' ? 'pc-price-mismatch' : ''}`}>{hasProductBranch(product, inspectionBranch) ? formatMoney(product[`${inspectionBranch}_price`]) : '—'}</td>}
+                  <td><span className={`pc-status pc-status-${state}`}><WorkspaceIcon name={state === 'matched' ? 'check' : state === 'mismatch' ? 'clock' : 'tag'} />{priceLabels[state]}</span></td><td><button className="pc-row-open" aria-label={`ดูรายละเอียด ${product['*ชื่อสินค้า (NAME)'] || sku}`} disabled={savingPrice} onClick={() => selectInspectorProduct(product)}><WorkspaceIcon name="chevron" /></button></td>
                 </tr>
-              </thead>
-              <tbody>
-                {products.map((p, i) => {
-                  const sku = p['รหัสสินค้า (SKU NUMBER)']
-                  const isChecked = selectedSkus.has(sku)
-                  return (
-                  <tr key={i}
-                    style={{ background: isChecked ? '#e8f8e8' : 'transparent' }}
-                    onMouseEnter={e => {
-                      if (!isChecked) e.currentTarget.style.background = '#e8f4fc'
-                      const imgUrl = convertDriveLink(p['*รูปภาพสินค้า'] || '')
-                      if (imgUrl) setTooltip({ x: e.clientX, y: e.clientY, url: imgUrl })
-                    }}
-                    onMouseMove={e => {
-                      setTooltip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.background = isChecked ? '#e8f8e8' : 'transparent'
-                      setTooltip(null)
-                    }}
-                  >
-                    <td style={{ ...td, textAlign: 'center' }}>
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={e => {
-                          setSelectedSkus(prev => {
-                            const next = new Set(prev)
-                            e.target.checked ? next.add(sku) : next.delete(sku)
-                            return next
-                          })
-                        }}
-                      />
-                    </td>
-                    <td style={td}>{i + 1}</td>
-                    <td style={td}>{p['หมวดหมู่สินค้า (CATEGORIES)'] || '-'}</td>
-                    <td style={td}><strong>{p['รหัสสินค้า (SKU NUMBER)'] || '-'}</strong></td>
-                    <td style={td}>{p['*ชื่อสินค้า (NAME)'] || '-'}</td>
-                    <td style={td}>{p['*เลขที่ใบอนุญาตโฆษณา'] || '-'}</td>
-                    <td style={{ ...td, color: '#c74634', fontWeight: 600 }}>{p['*ราคาสินค้า'] || '-'}</td>
-                    {/* ราคา Promaxx */}
-                    {(() => {
-                      const promaxxPrice = p['promaxx_price']
-                      const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
-                      const hasPx = promaxxPrice !== null && promaxxPrice !== undefined
-                      const mismatch = hasPx && dbPrice !== null && Math.abs(Number(promaxxPrice) - dbPrice) >= 0.01
-                      return (
-                        <td style={{ ...td, textAlign: 'center', background: mismatch ? '#fde8e8' : 'transparent', padding: '4px 6px' }}>
-                          {hasPx ? (
-                            <span style={{ fontWeight: 600, color: mismatch ? '#c0392b' : '#555', fontSize: 11 }}>
-                              {Number(promaxxPrice).toLocaleString()}
-                              {mismatch && <span style={{ display: 'block', fontSize: 9, color: '#c0392b' }}>≠ DB</span>}
-                            </span>
-                          ) : (
-                            <span style={{ color: '#ccc', fontSize: 11 }}>-</span>
-                          )}
-                        </td>
-                      )
-                    })()}
-                    {(['src', 'kkl', 'sss'] as const).map(b => {
-                      const branchPrice = p[`${b}_price`]
-                      const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
-                      const hasBranch = !!p[b]
-                      const matched = branchPrice !== null && branchPrice !== undefined && dbPrice !== null && Math.abs(branchPrice - dbPrice) < 0.01
-                      const mismatch = hasBranch && branchPrice !== null && branchPrice !== undefined && !matched
-                      return (
-                        <td key={b} style={{ ...td, textAlign: 'center', background: mismatch ? '#fff3cd' : 'transparent', padding: '4px 6px' }}>
-                          {hasBranch ? (
-                            branchPrice !== null && branchPrice !== undefined ? (
-                              <span style={{ fontWeight: 600, color: mismatch ? '#856404' : '#155724', fontSize: 11 }}>
-                                {Number(branchPrice).toLocaleString()}
-                                {mismatch && <span style={{ display: 'block', fontSize: 9, color: '#856404' }}>≠ DB</span>}
-                              </span>
-                            ) : (
-                              <span style={{ color: '#28a745', fontWeight: 700, fontSize: 12 }}>✓</span>
-                            )
-                          ) : (
-                            <span style={{ color: '#ccc', fontSize: 11 }}>-</span>
-                          )}
-                        </td>
-                      )
-                    })}
-                    <td style={td}>
-                      <button
-                        onClick={() => setEditProduct({ ...p, _originalSku: p['รหัสสินค้า (SKU NUMBER)'] })}
-                        style={{ ...btnStyle, fontSize: 11, padding: '4px 10px' }}
-                      >
-                        ✏️ แก้ไข
-                      </button>
-                    </td>
-                  </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
+              })}</tbody></table></div>}
 
-      {/* Status Bar */}
-      <div style={{ background: '#f0f0f0', borderTop: '1px solid #bbb', padding: '4px 15px', fontSize: 11, color: '#000' }}>
-        {status}
-      </div>
-      
+              <div className="pc-table-footer"><span>{selectedSkus.size ? <button className="pc-selected-export" onClick={exportSelectedSkusXlsx}><WorkspaceIcon name="download" />ส่งออกที่เลือก ({selectedSkus.size.toLocaleString('th-TH')})</button> : `${filteredProducts.length ? (currentPage - 1) * pageSize + 1 : 0}–${Math.min(currentPage * pageSize, filteredProducts.length)} จาก ${filteredProducts.length.toLocaleString('th-TH')} รายการที่โหลด`}</span><div className="pc-pagination"><button aria-label="หน้าก่อนหน้า" disabled={currentPage === 1 || loading} onClick={() => setPageNumber(currentPage - 1)}>‹</button><span><b>{currentPage}</b> / {pageCount}</span><button aria-label="หน้าถัดไป" disabled={currentPage === pageCount || loading} onClick={() => setPageNumber(currentPage + 1)}>›</button></div></div>
+            </div>
+            <div className="pc-list-footnote"><WorkspaceIcon name="tag" /><span>ราคาไม่ตรงจะแสดงทั้งสีและสถานะ เพื่อช่วยตรวจรายการได้ชัดเจน</span><button className="pc-text-button" onClick={openMissingBranches}>ดูสินค้าที่ขาดใน GRAB <WorkspaceIcon name="arrow" /></button></div>
+          </section>
+
+          <aside className="pc-inspector" ref={inspectorRef} aria-label="รายละเอียดและปรับราคาสินค้า" aria-busy={loading}>
+            <div className="pc-inspector-heading"><span className="pc-eyebrow">PRODUCT DETAILS</span><WorkspaceIcon name="tag" /></div>
+            {inspectedProduct && !loadError ? <>
+              <div className="pc-product-image"><span className="pc-image-placeholder"><WorkspaceIcon name="box" /><span>รูปภาพสินค้า</span></span>{convertDriveLink(inspectedProduct['*รูปภาพสินค้า'] || '') && <NextImage key={inspectedSku} src={convertDriveLink(inspectedProduct['*รูปภาพสินค้า'])} alt={inspectedProduct['*ชื่อสินค้า (NAME)'] || 'รูปสินค้า'} fill sizes="(max-width: 820px) 80vw, 350px" unoptimized onError={event => { event.currentTarget.hidden = true }} />}</div>
+              <div className="pc-inspector-product"><span className="pc-product-category">{inspectedProduct['หมวดหมู่สินค้า (CATEGORIES)'] || 'ยังไม่ระบุหมวดหมู่'}</span><h2>{inspectedProduct['*ชื่อสินค้า (NAME)'] || 'ยังไม่ระบุชื่อสินค้า'}</h2><p className="pc-inspector-sku">{inspectedSku}</p><span className={`pc-status pc-status-${priceState(inspectedProduct)}`}><WorkspaceIcon name={priceState(inspectedProduct) === 'matched' ? 'check' : 'clock'} />{priceLabels[priceState(inspectedProduct)]}</span></div>
+              <div className="pc-comparison-prices"><div><small>ราคาใน DB</small><strong>{formatMoney(inspectedProduct['*ราคาสินค้า'])}</strong></div><div><small>ราคา GRAB {branchNames[inspectionBranch]}</small><strong>{formatMoney(comparisonPrice)}</strong></div></div>
+              <div className={`pc-price-difference ${priceDifference !== null && !pricesDiffer(comparisonPrice, originalPrice) ? 'is-matched' : ''}`}><WorkspaceIcon name="tag" /><span>{priceDifference === null ? 'ยังเปรียบเทียบราคาไม่ได้' : 'ผลต่างจากราคา DB'}</span><strong>{priceDifference === null ? '—' : `${priceDifference > 0 ? '+' : priceDifference < 0 ? '−' : ''} ${formatMoney(Math.abs(priceDifference))}`}</strong></div>
+              <div className="pc-inspector-field"><label htmlFor="proposed-price">ราคาที่เสนอ <span>THB</span></label><input id="proposed-price" type="text" inputMode="decimal" autoComplete="off" aria-describedby="price-help inspector-error" value={draftPrice} disabled={savingPrice || loading} onChange={event => { if (!inspectedSku) return; setPriceDrafts(previous => ({ ...previous, [inspectedSku]: event.target.value })); resetPriceReview() }} /><div id="price-help" className="pc-field-help"><span>{hasPriceChange ? 'มีราคาที่ยังไม่ได้บันทึก' : 'ปรับราคา DB แล้วตรวจทานก่อนบันทึก'}</span>{hasPriceChange && <button disabled={savingPrice} onClick={() => { setPriceDrafts(previous => { const next = { ...previous }; if (inspectedSku) delete next[inspectedSku]; return next }); resetPriceReview() }}>คืนค่าเดิม</button>}</div></div>
+              <div className="pc-inspector-branches"><span>สาขาที่จำหน่าย</span><div>{branches.map(branch => <span className={hasProductBranch(inspectedProduct, branch) ? 'is-available' : ''} key={branch}><WorkspaceIcon name={hasProductBranch(inspectedProduct, branch) ? 'check' : 'close'} />{branchNames[branch]}</span>)}</div></div>
+              <div className="pc-reference-price"><span>ราคา Promaxx</span><strong>{productPrice(inspectedProduct.promaxx_price) === null ? 'ยังไม่มีราคา' : formatMoney(inspectedProduct.promaxx_price)}</strong></div>
+              <div className="pc-reference-price"><span>เลขที่ใบอนุญาต</span><strong>{inspectedProduct['*เลขที่ใบอนุญาตโฆษณา'] || 'ยังไม่ระบุ'}</strong></div>
+              {inspectedProduct.correctPrice !== undefined && <div className="pc-reference-price"><span>ราคาอ้างอิง</span><strong>{formatMoney(inspectedProduct.correctPrice)}</strong></div>}
+              {inspectorError && <p id="inspector-error" className="pc-inspector-error" role="alert">{inspectorError}</p>}
+              {activeReview ? <section className="pc-review" aria-label="ตรวจทานราคาก่อนบันทึก"><h3><WorkspaceIcon name="check" />ตรวจทานก่อนบันทึก</h3><p>ปรับราคา DB ของสินค้านี้</p><div><span>{formatMoney(activeReview.previous)}</span><WorkspaceIcon name="arrow" /><strong>{formatMoney(activeReview.price)}</strong></div><button className="pc-button pc-button-primary" disabled={savingPrice} onClick={saveInspectorPrice}>{savingPrice ? 'กำลังบันทึก...' : 'ยืนยันบันทึกราคา'}<WorkspaceIcon name="check" /></button><button className="pc-text-button" disabled={savingPrice} onClick={resetPriceReview}>กลับไปแก้ไข</button></section> : <button className="pc-button pc-button-primary pc-review-button" disabled={!hasPriceChange || savingPrice || loading} onClick={reviewInspectorPrice}>ตรวจทานการปรับราคา<WorkspaceIcon name="arrow" /></button>}
+              <button className="pc-edit-details" disabled={savingPrice} onClick={() => { setIsAdding(false); setEditProduct({ ...inspectedProduct, _originalSku: inspectedSku }) }}>แก้ไขรายละเอียดและรูปสินค้า<WorkspaceIcon name="chevron" /></button>
+            </> : <div className="pc-inspector-empty"><WorkspaceIcon name="box" /><h2>เลือกสินค้าที่ต้องการตรวจ</h2><p>เลือกสินค้าจากตารางเพื่อดูราคา สาขา และปรับข้อมูลในพื้นที่นี้</p><div className="pc-empty-guide"><span><b>01</b>เลือกสินค้าจากรายการ</span><span><b>02</b>ตรวจราคาและผลต่าง</span><span><b>03</b>ตรวจทานก่อนบันทึก</span></div></div>}
+          </aside>
+        </div>
+        <footer className="pc-statusbar"><span role="status" aria-live="polite"><i className={loadError || inspectorError ? 'has-error' : ''} />{status}</span><span>PRICE CHECKER <b>/</b> SPLIT INSPECTOR</span></footer>
+      </main>
+
       {showGrabModal && (() => {
         const closeGrabModal = () => {
           setShowGrabModal(false)
@@ -2183,14 +2112,14 @@ async function confirmUpdatePrices() {
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
           display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
         }}>
-          <div className="edit-modal-anim" style={{
+          <div className="edit-modal-anim" role="dialog" aria-modal="true" aria-label={isAdding ? 'เพิ่มรายการสินค้า' : 'แก้ไขรายละเอียดสินค้า'} style={{
             background: '#fff', borderRadius: 6, width: 560, maxHeight: '92vh', overflowY: 'auto',
             boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
           }}>
             {/* Modal Header */}
             <div style={{ background: isAdding ? '#2d6a2d' : '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <strong>{isAdding ? '➕ เพิ่มรายการสินค้า' : '✏️ แก้ไขสินค้า'}</strong>
-              <button onClick={() => { setEditProduct(null); setIsAdding(false) }}
+              <button aria-label="ปิดการแก้ไขสินค้า" onClick={() => { setEditProduct(null); setIsAdding(false) }}
                 style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
             </div>
 
@@ -2356,7 +2285,7 @@ async function confirmUpdatePrices() {
               <div>
                 <label style={labelStyle}>ราคา</label>
                 <input style={inputStyle} type="number"
-                  value={editProduct['*ราคาสินค้า'] || ''}
+                  value={editProduct['*ราคาสินค้า'] ?? ''}
                   onChange={e => setEditProduct({ ...editProduct, '*ราคาสินค้า': e.target.value })}
                 />
               </div>
@@ -3114,10 +3043,6 @@ async function confirmUpdatePrices() {
 const btnStyle: React.CSSProperties = {
   padding: '7px 16px', border: '1px solid #777', borderRadius: 20,
   fontSize: 12, fontWeight: 600, cursor: 'pointer', background: '#f5f5f5'
-}
-const statCard: React.CSSProperties = {
-  background: '#fff', border: '1px solid #ccc', borderRadius: 4,
-  padding: 15, marginBottom: 10
 }
 const th: React.CSSProperties = {
   padding: '8px 12px', textAlign: 'left', border: '1px solid #ccc',
