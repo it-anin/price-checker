@@ -8,6 +8,8 @@ Stock templates use SKU **D=ITEMCODE**, E=CURRENTSTOCK, F=MAXSTOCK, P=ITEMSTATUS
 
 RUN re-reads `app_settings.value` where `key='pending_skus'` before reading each branch template sequentially. It understands the original JSON array of `{sku,name,branches}` records. Missing branches default to the three active branches; legacy WRD/ONN membership is retained. Missing, invalid or unreadable pending data stops the run rather than assuming no pending SKUs.
 
+The PENDING card supports authenticated ADD/DELETE by branch and read-only price comparison for all visitors. It uses the existing JSON row with `updated_at` concurrency checks and invalidates prior stock outputs after membership edits. Price CSVs use SKU **I**, distinct from stock templates' SKU **D**. See [PENDING SKU UPDATE](pending-sku.md) for price sources, permissions, and persistence behavior.
+
 Pending SKUs take precedence, then matching report quantities, then missing SKUs. Only raw CSV cells E/F/P change; other cells, quoting, multiline content, all headers and original row endings are preserved. Outputs have a UTF-8 BOM and Bangkok date suffix. DOWNLOAD ALL generates a single ZIP containing all successful CSV results; reports and results stay in memory only. CLEAR resets log/progress only.
 
 Upload validation and RUN validation share the same code. A rejected template does not stop other branches/files. A zero-match result displays both an alert and a visible warning before download. PROCESSED and SKIPPED count branches; UPDATED counts rows whose E/F/P values changed.
