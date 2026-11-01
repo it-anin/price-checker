@@ -2119,12 +2119,12 @@ async function confirmUpdatePrices() {
       <aside className="pc-rail" aria-label="เมนูหลัก">
         <Link href="/" className="pc-brand" aria-label="Price Checker หน้าหลัก"><WorkspaceIcon name="tag" /></Link>
         <nav>
-          <button className={!engineOpen && !toolsOpen && priceFilter === 'all' ? 'is-active' : ''} title="รายการสินค้า" aria-label="รายการสินค้า" onClick={() => { setEngineOpen(false); setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" /></button>
-          <button className={!engineOpen && priceFilter === 'mismatch' ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setEngineOpen(false); setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="tag" /></button>
-          <button title="เปรียบเทียบ 3 สาขา" aria-label="เปรียบเทียบ 3 สาขา" onClick={handleMasterBranchCompare}><WorkspaceIcon name="branch" /></button>
-          <button title="นำเข้าสินค้า" aria-label="นำเข้าสินค้า" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" /></button>
-          <button className={engineOpen ? 'is-active' : ''} title="PROCESS ENGINE" aria-label="PROCESS ENGINE" aria-pressed={engineOpen} onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="engine" /></button>
-          <button className={!engineOpen && toolsOpen ? 'is-active' : ''} title="เครื่องมือทั้งหมด" aria-label="เครื่องมือทั้งหมด" aria-expanded={!engineOpen && toolsOpen} aria-controls="workflow-tools" onClick={() => { setEngineOpen(false); setToolsOpen(value => !value) }}><WorkspaceIcon name="grid" /></button>
+          <button className={!engineOpen && !toolsOpen && priceFilter === 'all' ? 'is-active' : ''} title="รายการสินค้า" aria-label="รายการสินค้า" onClick={() => { setEngineOpen(false); setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" /><span className="pc-nav-label">รายการสินค้า</span></button>
+          <button className={!engineOpen && priceFilter === 'mismatch' ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setEngineOpen(false); setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="tag" /><span className="pc-nav-label">ตรวจสอบราคา</span></button>
+          <button title="เปรียบเทียบ 3 สาขา" aria-label="เปรียบเทียบ 3 สาขา" onClick={handleMasterBranchCompare}><WorkspaceIcon name="branch" /><span className="pc-nav-label">เปรียบเทียบ 3 สาขา</span></button>
+          <button title="นำเข้าสินค้า" aria-label="นำเข้าสินค้า" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" /><span className="pc-nav-label">นำเข้าสินค้า</span></button>
+          <button className={engineOpen ? 'is-active' : ''} title="PROCESS ENGINE" aria-label="PROCESS ENGINE" aria-pressed={engineOpen} onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="engine" /><span className="pc-nav-label">PROCESS ENGINE</span></button>
+          <button className={!engineOpen && toolsOpen ? 'is-active' : ''} title="เครื่องมือทั้งหมด" aria-label="เครื่องมือทั้งหมด" aria-expanded={!engineOpen && toolsOpen} aria-controls="workflow-tools" onClick={() => { setEngineOpen(false); setToolsOpen(value => !value) }}><WorkspaceIcon name="grid" /><span className="pc-nav-label">เครื่องมือทั้งหมด</span></button>
         </nav>
         <div className="pc-rail-bottom"><span className="pc-rail-divider" /><span className="pc-workspace-avatar" title="ANIN Workspace">AN</span></div>
       </aside>
