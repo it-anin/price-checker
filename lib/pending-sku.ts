@@ -7,12 +7,22 @@ export interface PendingSkuEntry {
   sku: string
   name: string
   branches: PendingBranch[]
+  manualBranches?: PendingBranch[]
+  autoPriceBranches?: PendingBranch[]
 }
 export interface PendingSnapshot { entries: PendingSkuEntry[]; updatedAt: string }
+export interface PendingPriceCheck {
+  sku: string
+  name: string
+  prices: Partial<Record<EngineBranch, number>>
+  promaxx?: number
+  states: Record<EngineBranch, 'same' | 'diff' | 'na'>
+}
 export type PendingMutation =
   | { kind: 'add'; skus: string[]; branches: EngineBranch[] }
   | { kind: 'removeBranch'; sku: string; branch: EngineBranch }
   | { kind: 'enrichNames'; names: Map<string, string> }
+  | { kind: 'syncPrices'; checks: Map<string, PendingPriceCheck> }
 export type PendingPriceParser = (value: string) => number | null
 export interface PendingPriceFile { name: string; prices: Map<string, number>; names: Map<string, string>; encoding?: string }
 
@@ -38,8 +48,42 @@ export function normalizePendingEntries(value: unknown): PendingSkuEntry[] {
         if (!PENDING_BRANCHES.includes(branch as PendingBranch)) throw new Error(`สาขาของ ${sku} ไม่ถูกต้อง`)
         return branch as PendingBranch
       }) : ['SRC', 'SSS', 'KKL']
-    return { ...item, sku, name: typeof item.name === 'string' ? item.name : '', branches }
+    const entry: PendingSkuEntry = { ...item, sku, name: typeof item.name === 'string' ? item.name : '', branches }
+    if (item.autoPriceBranches !== undefined || item.manualBranches !== undefined) {
+      const readSource = (value: unknown, activeOnly: boolean): PendingBranch[] => {
+        if (!Array.isArray(value) || value.some(branch => !PENDING_BRANCHES.includes(branch) || (activeOnly && !ENGINE_BRANCHES.includes(String(branch).toLowerCase() as EngineBranch)))) throw new Error(`ที่มาของ PENDING ${sku} ไม่ถูกต้อง`)
+        return [...new Set(value)] as PendingBranch[]
+      }
+      entry.autoPriceBranches = readSource(item.autoPriceBranches ?? [], true)
+      entry.manualBranches = readSource(item.manualBranches ?? branches.filter(branch => !entry.autoPriceBranches!.includes(branch)), false)
+      const combined = new Set([...entry.manualBranches, ...entry.autoPriceBranches])
+      if (combined.size !== branches.length || branches.some(branch => !combined.has(branch))) throw new Error(`สาขาและที่มาของ PENDING ${sku} ไม่ตรงกัน`)
+    }
+    return entry
   })
+}
+
+export function pendingManualBranches(entry: PendingSkuEntry): PendingBranch[] {
+  return entry.manualBranches ?? entry.branches
+}
+
+export function buildPendingPriceChecks(products: Record<string, unknown>[], parse: PendingPriceParser): Map<string, PendingPriceCheck> {
+  const checks = new Map<string, PendingPriceCheck>()
+  for (const product of products) {
+    const sku = normalizeStockSku(product['รหัสสินค้า (SKU NUMBER)'])
+    if (!sku) continue
+    const promaxx = finitePrice(String(product.promaxx_price ?? ''), parse) ?? undefined
+    const prices: PendingPriceCheck['prices'] = {}, states = {} as PendingPriceCheck['states']
+    const branches = String(product.branch ?? '').split(',').map(branch => branch.trim().toLowerCase())
+    for (const branch of ENGINE_BRANCHES) {
+      const present = product[branch] === true || branches.includes(branch)
+      const price = finitePrice(String(product[`${branch}_price`] ?? ''), parse)
+      if (present && price !== null) prices[branch] = price
+      states[branch] = comparePendingPrices(prices[branch], promaxx)
+    }
+    checks.set(sku, { sku, name: String(product['*ชื่อสินค้า (NAME)'] ?? '').trim(), prices, promaxx, states })
+  }
+  return checks
 }
 
 export function mutatePendingEntries(entries: PendingSkuEntry[], mutation: PendingMutation) {
@@ -53,19 +97,43 @@ export function mutatePendingEntries(entries: PendingSkuEntry[], mutation: Pendi
       const entry = next.find(item => item.sku === sku)
       const selected = mutation.branches.map(branch => branch.toUpperCase() as PendingBranch)
       if (entry) {
-        const combined = PENDING_BRANCHES.filter(branch => entry.branches.includes(branch) || selected.includes(branch))
-        if (combined.some(branch => !entry.branches.includes(branch))) { entry.branches = combined; changed = true }
+        const manual = pendingManualBranches(entry)
+        const combined = PENDING_BRANCHES.filter(branch => manual.includes(branch) || selected.includes(branch))
+        if (combined.some(branch => !manual.includes(branch))) {
+          if (entry.autoPriceBranches) entry.manualBranches = combined
+          entry.branches = PENDING_BRANCHES.filter(branch => combined.includes(branch) || entry.autoPriceBranches?.includes(branch))
+          changed = true
+        }
       } else { next.push({ sku, name: '', branches: selected }); changed = true }
     }
   } else if (mutation.kind === 'removeBranch') {
     const sku = normalizeStockSku(mutation.sku), branch = mutation.branch.toUpperCase() as PendingBranch
     if (!ENGINE_BRANCHES.includes(mutation.branch)) throw new Error('สาขาสำหรับ DELETE ไม่ถูกต้อง')
     next = next.flatMap(entry => {
-      if (entry.sku !== sku || !entry.branches.includes(branch)) return [entry]
+      if (entry.sku !== sku || !pendingManualBranches(entry).includes(branch)) return [entry]
       changed = true
-      const branches = entry.branches.filter(value => value !== branch)
-      return branches.length ? [{ ...entry, branches }] : []
+      const manual = pendingManualBranches(entry).filter(value => value !== branch)
+      const branches = PENDING_BRANCHES.filter(value => manual.includes(value) || entry.autoPriceBranches?.includes(value))
+      return branches.length ? [{ ...entry, branches, ...(entry.autoPriceBranches ? { manualBranches: manual } : {}) }] : []
     })
+  } else if (mutation.kind === 'syncPrices') {
+    const bySku = new Map(next.map(entry => [entry.sku, entry]))
+    for (const check of mutation.checks.values()) {
+      let entry = bySku.get(check.sku)
+      const before = entry?.autoPriceBranches ?? []
+      const automatic = ENGINE_BRANCHES.filter(branch => check.states[branch] === 'diff' || (check.states[branch] === 'na' && before.includes(branch.toUpperCase() as PendingBranch))).map(branch => branch.toUpperCase() as PendingBranch)
+      if (automatic.length === before.length && automatic.every(branch => before.includes(branch))) continue
+      changed = true
+      if (!entry) {
+        entry = { sku: check.sku, name: check.name, branches: [], manualBranches: [], autoPriceBranches: [] }
+        next.push(entry); bySku.set(check.sku, entry)
+      }
+      entry.manualBranches = [...pendingManualBranches(entry)]
+      entry.autoPriceBranches = automatic
+      entry.branches = PENDING_BRANCHES.filter(branch => entry!.manualBranches!.includes(branch) || automatic.includes(branch))
+      if (!entry.name.trim() && check.name) entry.name = check.name
+    }
+    next = next.filter(entry => entry.branches.length)
   } else {
     next = next.map(entry => {
       const name = mutation.names.get(entry.sku)?.trim()

@@ -6,7 +6,7 @@ import NextImage from 'next/image'
 import { supabase } from '../lib/supabase'
 import { ENGINE_BRANCHES, createResultsZip, decodeCsv, engineDate, normalizeStockSku, pendingSkuSets, processGrabTemplate, readStockReport, templateName, validateGrabTemplate, type EngineBranch, type StockReport } from '../lib/process-engine'
 import { loadPendingSnapshot, savePendingMutation } from '../lib/process-engine-source'
-import { comparePendingPrices, parsePendingInput, readPendingGrabPrices, readPendingPromaxPrices, readTemplateNames, samePendingStockMembership, type PendingMutation, type PendingPriceFile, type PendingSkuEntry, type PendingSnapshot } from '../lib/pending-sku'
+import { buildPendingPriceChecks, comparePendingPrices, mutatePendingEntries, parsePendingInput, pendingManualBranches, readPendingGrabPrices, readPendingPromaxPrices, readTemplateNames, samePendingStockMembership, type PendingMutation, type PendingPriceCheck, type PendingPriceFile, type PendingSkuEntry, type PendingSnapshot } from '../lib/pending-sku'
 
 interface Product {
   [key: string]: any
@@ -180,6 +180,11 @@ export default function Home() {
   const [pendingDbPrices, setPendingDbPrices] = useState({ prices: new Map<string, number>(), loaded: false, loading: false, error: '' })
   const pendingDbRequest = useRef(0)
   const pendingNameCache = useRef(new Map<string, { updatedAt: string; names: Map<string, string> }>())
+  const [pendingPriceRevision, setPendingPriceRevision] = useState(0)
+  const pendingAutoRequest = useRef('')
+  const [pendingAutoTab, setPendingAutoTab] = useState<EngineBranch>('src')
+  const [pendingAutoPrices, setPendingAutoPrices] = useState(new Map<string, PendingPriceCheck>())
+  const [pendingAutoStatus, setPendingAutoStatus] = useState({ loaded: false, saved: false, checkedAt: '', error: '' })
 
   useEffect(() => {
     let mounted = true
@@ -197,8 +202,16 @@ export default function Home() {
   }, [engineLog, engineOpen])
 
   useEffect(() => {
-    if (engineOpen) { void refreshGrabFiles(); void refreshPendingCard() }
+    if (engineOpen) { void refreshGrabFiles(); setPendingPriceRevision(value => value + 1) }
   }, [engineOpen])
+
+  useEffect(() => {
+    if (engineBusy || engineBusyRef.current || !pendingPriceRevision) return
+    const request = `${pendingPriceRevision}:${grabAdminUser ?? 'anonymous'}`
+    if (pendingAutoRequest.current === request) return
+    pendingAutoRequest.current = request
+    void refreshPendingCard()
+  }, [pendingPriceRevision, grabAdminUser, engineBusy])
 
   const onSearchCriteriaChange = useEffectEvent(() => {
     if (search.trim().length >= 3) searchProducts(search.trim())
@@ -259,19 +272,44 @@ export default function Home() {
 
   async function refreshPendingCard() {
     if (engineBusyRef.current) return
+    engineBusyRef.current = true; setEngineBusy('pending-auto')
     const request = ++pendingLoadRequest.current
     pendingReadyRef.current = false
     setPendingLoading(true); setPendingError(''); setPendingSaveError('')
     try {
-      const snapshot = await loadPendingSnapshot()
+      const snapshot = await resolvePendingPrices()
       if (request !== pendingLoadRequest.current) return
-      acceptPendingSnapshot(snapshot)
       void refreshPendingDatabase(snapshot.entries)
     } catch (error) {
       if (request !== pendingLoadRequest.current) return
+      invalidateEngineResults()
       setPendingError(engineMessage(error)); setPendingLoading(false)
+      setPendingAutoStatus(previous => ({ ...previous, error: engineMessage(error) }))
       logEngine(`PENDING LOAD ERROR · ${engineMessage(error)}`)
-    }
+    } finally { engineBusyRef.current = false; setEngineBusy('') }
+  }
+
+  async function resolvePendingPrices() {
+    const [response, stored, session] = await Promise.all([
+      fetch('/api/products?pendingPriceCheck=true', { cache: 'no-store' }),
+      loadPendingSnapshot(),
+      supabase.auth.getSession(),
+    ])
+    if (!response.ok) throw new Error('ตรวจราคา GRAB / Promaxx ไม่สำเร็จ กรุณาโหลดใหม่')
+    const data = await response.json()
+    if (!data.success || !Array.isArray(data.products)) throw new Error('อ่านราคา GRAB / Promaxx ไม่สำเร็จ')
+    if (session.error) throw new Error('ตรวจสอบ session ไม่สำเร็จ กรุณาเข้าสู่ระบบใหม่')
+    const checks = buildPendingPriceChecks(data.products, parsePriceRobust)
+    const mutation: PendingMutation = { kind: 'syncPrices', checks }
+    const preview = mutatePendingEntries(stored.entries, mutation)
+    const snapshot = session.data.session
+      ? await savePendingMutation(mutation)
+      : { ...stored, entries: preview.entries }
+    acceptPendingSnapshot(snapshot)
+    setPendingAutoPrices(checks)
+    setPendingAutoStatus({ loaded: true, saved: Boolean(session.data.session) || !preview.changed, checkedAt: new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' }).format(new Date()), error: '' })
+    if (preview.changed) logEngine(`PENDING AUTO · GRAB ≠ Promaxx · ${session.data.session ? 'บันทึกแล้ว' : 'ใช้ผลตรวจในหน่วยความจำจนกว่าจะเข้าสู่ระบบ'}`)
+    return snapshot
   }
 
   async function refreshPendingDatabase(entries = pendingSnapshotRef.current?.entries ?? []) {
@@ -476,8 +514,7 @@ export default function Home() {
     const nameSuggestions = new Map<string, string>()
     let skipped = 0, updated = 0
     try {
-      const snapshot = await loadPendingSnapshot()
-      acceptPendingSnapshot(snapshot)
+      const snapshot = await resolvePendingPrices()
       void refreshPendingDatabase(snapshot.entries)
       const pending = pendingSkuSets(snapshot.entries)
       logEngine(`PENDING LOADED · ${ENGINE_BRANCHES.map(branch => `${branch.toUpperCase()}=${pending[branch].size}`).join(' / ')}`)
@@ -644,6 +681,7 @@ export default function Home() {
       if (!data.success || !Array.isArray(data.products)) throw new Error('โหลดข้อมูลไม่สำเร็จ')
       if (reqId !== searchReqId.current) return
       setProducts(data.products)
+      setPendingPriceRevision(value => value + 1)
       preloadImages(data.products)
       setStatus(`โหลดสินค้าแล้ว ${data.products.length.toLocaleString('th-TH')} รายการ`)
     } catch {
@@ -2063,8 +2101,11 @@ async function confirmUpdatePrices() {
   }
 
   const pendingCanEdit = Boolean(grabAdminUser && pendingReadyRef.current && !pendingLoading && !engineBusy)
-  const pendingRows = pendingSnapshot?.entries.filter(entry => entry.branches.includes(pendingTab.toUpperCase() as 'SRC' | 'SSS' | 'KKL')) ?? []
-  const pendingCounts = ENGINE_BRANCHES.map(branch => pendingSnapshot?.entries.filter(entry => entry.branches.includes(branch.toUpperCase() as 'SRC' | 'SSS' | 'KKL')).length ?? 0)
+  const pendingManualEntries = pendingSnapshot?.entries.filter(entry => pendingManualBranches(entry).length) ?? []
+  const pendingRows = pendingManualEntries.filter(entry => pendingManualBranches(entry).includes(pendingTab.toUpperCase() as 'SRC' | 'SSS' | 'KKL'))
+  const pendingCounts = ENGINE_BRANCHES.map(branch => pendingManualEntries.filter(entry => pendingManualBranches(entry).includes(branch.toUpperCase() as 'SRC' | 'SSS' | 'KKL')).length)
+  const pendingAutoEntries = pendingSnapshot?.entries.filter(entry => entry.autoPriceBranches?.length) ?? []
+  const pendingAutoRows = pendingAutoEntries.filter(entry => entry.autoPriceBranches?.includes(pendingAutoTab.toUpperCase() as 'SRC' | 'SSS' | 'KKL'))
   const pendingMismatchCounts = pendingRows.reduce((counts, entry) => {
     const grab = pendingGrabPrices[pendingTab]?.prices.get(entry.sku)
     if (comparePendingPrices(grab, pendingDbPrices.loaded ? pendingDbPrices.prices.get(entry.sku) : undefined) === 'diff') counts.database++
@@ -2098,6 +2139,7 @@ async function confirmUpdatePrices() {
         </header>
 
         <div className="pc-context-strip" hidden={engineOpen}><span><i className="pc-context-dot" />รายการที่โหลด <b>{products.length.toLocaleString('th-TH')}</b></span><span className="pc-context-issues"><WorkspaceIcon name="clock" />ต้องตรวจ {inspectionBranch.toUpperCase()} <b>{issueCount.toLocaleString('th-TH')}</b></span><span className="pc-last-update">{lastPriceUpdate ? `บันทึกราคาล่าสุด ${lastPriceUpdate}` : 'จัดการข้อมูลสินค้าและราคาของทั้ง 3 สาขา'}</span></div>
+        {!engineOpen && (engineBusy === 'pending-auto' || pendingAutoEntries.length > 0 || pendingAutoStatus.error) && <div className="pn-auto-banner" role="status"><span>{engineBusy === 'pending-auto' ? 'กำลังตรวจ PENDING อัตโนมัติจาก GRAB / Promaxx...' : pendingAutoStatus.error ? `ตรวจ PENDING อัตโนมัติไม่สำเร็จ: ${pendingAutoStatus.error}` : `PENDING อัตโนมัติ: ราคา GRAB ≠ Promaxx ${pendingAutoEntries.length} SKU${pendingAutoStatus.saved ? '' : ' · เข้าสู่ระบบเพื่อบันทึก'}`}</span><button className="pc-text-button" onClick={() => { setEngineOpen(true); setToolsOpen(false) }}>ดู PENDING</button></div>}
 
         {engineOpen && <section className="pe-workspace" aria-label="PROCESS ENGINE workspace" aria-busy={Boolean(engineBusy)}>
           <div className="pe-notice"><WorkspaceIcon name="clock" /><p>R01.102 และผลลัพธ์เก็บในหน่วยความจำของหน้านี้เท่านั้น <strong>ดาวน์โหลดก่อนรีเฟรชหรือปิดหน้า</strong> · Template เก็บไว้ใน Supabase และใช้ซ้ำได้ทุกวัน</p></div>
@@ -2109,9 +2151,9 @@ async function confirmUpdatePrices() {
             })}</div>
           </section>
 
-          <section className="pe-card pn-card" aria-labelledby="pending-heading" aria-busy={pendingLoading || engineBusy === 'pending'}>
+          <section className="pe-card pn-card" aria-labelledby="pending-heading" aria-busy={pendingLoading || engineBusy === 'pending' || engineBusy === 'pending-auto'}>
             <div className="pe-card-heading">
-              <div><span className="pc-eyebrow">02 / PENDING APPROVAL</span><h2 id="pending-heading">PENDING SKU UPDATE <span className="pc-count">{pendingSnapshot ? pendingSnapshot.entries.length : '—'} SKUs</span></h2><p>ระงับขายระหว่างรอ Grab อนุมัติราคา ชื่อ หรือรูปภาพ รายการจะค้างจนกว่าจะกด DELETE เอง</p></div>
+              <div><span className="pc-eyebrow">02 / PENDING APPROVAL</span><h2 id="pending-heading">PENDING SKU UPDATE <span className="pc-count">{pendingSnapshot ? pendingSnapshot.entries.length : '—'} SKUs</span></h2><p>ระงับขายแยกสาขา ทั้งรายการราคาไม่ตรงที่เพิ่มอัตโนมัติ และรายการที่เพิ่มเองเพื่อรออนุมัติ</p></div>
               <div className="pn-heading-actions"><button className="pc-button" disabled={Boolean(engineBusy) || pendingLoading} onClick={() => void refreshPendingCard()}><WorkspaceIcon name="refresh" />โหลดรายการใหม่</button>{!grabAdminUser && <button className="pc-button" disabled={Boolean(engineBusy)} aria-expanded={pendingAuthOpen} aria-controls="pending-login" onClick={() => { setPendingAuthOpen(value => !value); setGrabAdminError('') }}>เข้าสู่ระบบเพื่อ ADD / DELETE</button>}</div>
             </div>
             {grabAdminUser && <div className="pe-admin-session"><span>เข้าสู่ระบบแล้ว: {grabAdminUser} · เพิ่ม/ลบ PENDING ได้โดยไม่ต้อง UNLOCK</span><button className="pc-text-button" disabled={Boolean(engineBusy)} onClick={() => void signOutGrabManager()}>ออกจากระบบ</button></div>}
@@ -2122,7 +2164,21 @@ async function confirmUpdatePrices() {
             </form>}
             {pendingError && <p className="pe-error" role="alert">{pendingError} · ปิด ADD/DELETE เพื่อป้องกันเขียนทับข้อมูลเดิม กรุณาโหลดรายการใหม่</p>}
             {pendingSaveError && <p className="pe-error" role="alert">{pendingSaveError}</p>}
+            <section className="pn-auto-section" aria-labelledby="pending-auto-heading">
+              <div className="pn-section-heading"><h3 id="pending-auto-heading">เพิ่มอัตโนมัติจากราคา GRAB ≠ Promaxx <span className="pc-count">{pendingAutoEntries.length} SKUs</span></h3><span className="pn-source-status">{engineBusy === 'pending-auto' ? 'กำลังตรวจราคา...' : pendingAutoStatus.loaded ? `ตรวจล่าสุด ${pendingAutoStatus.checkedAt}` : 'ยังไม่ได้ตรวจราคา'}</span></div>
+              <p>ใช้ราคาจากหน้า “ตรวจและปรับราคาสินค้า” ทั้งหมด แยก GRAB SRC / SSS / KKL · นำออกเฉพาะสาขาที่ราคากลับมาตรงกัน · ถ้าราคาไม่ครบจะคงรายการไว้ · ไม่ลบรายการที่เพิ่มเอง</p>
+              {!pendingAutoStatus.saved && pendingAutoStatus.loaded && <p className="pn-mismatch-note" role="status">ผลตรวจนี้ยังไม่บันทึกลงฐานข้อมูล เข้าสู่ระบบเพื่อบันทึกอัตโนมัติ · RUN จะตรวจราคาใหม่และใช้ผลตรวจล่าสุดระงับขายด้วย</p>}
+              <div className="pn-tabs" role="tablist" aria-label="สาขาของ PENDING อัตโนมัติ">{ENGINE_BRANCHES.map((branch, index) => <button key={branch} id={`pending-auto-tab-${branch}`} role="tab" aria-selected={pendingAutoTab === branch} aria-controls="pending-auto-panel" tabIndex={pendingAutoTab === branch ? 0 : -1} className={pendingAutoTab === branch ? 'is-active' : ''} onClick={() => setPendingAutoTab(branch)} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? ENGINE_BRANCHES[0] : event.key === 'End' ? ENGINE_BRANCHES[2] : ENGINE_BRANCHES[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; setPendingAutoTab(next); document.getElementById(`pending-auto-tab-${next}`)?.focus() } }}>{branch.toUpperCase()} <span>({pendingAutoEntries.filter(entry => entry.autoPriceBranches?.includes(branch.toUpperCase() as 'SRC' | 'SSS' | 'KKL')).length})</span></button>)}</div>
+              <div id="pending-auto-panel" role="tabpanel" aria-labelledby={`pending-auto-tab-${pendingAutoTab}`} className="pn-table-scroll"><table className="pn-table"><thead><tr><th>SKU</th><th>ITEM NAME</th><th>GRAB {pendingAutoTab.toUpperCase()}</th><th>PROMAXX</th><th>สถานะ</th></tr></thead><tbody>
+                {pendingAutoRows.map(entry => {
+                  const check = pendingAutoPrices.get(entry.sku), mismatch = check?.states[pendingAutoTab] === 'diff'
+                  return <tr key={entry.sku} data-auto-pending-sku={entry.sku} className={mismatch ? 'pn-row-mismatch' : ''}><td><code>{entry.sku}</code></td><td>{entry.name || check?.name || '—'}</td><td>{pendingPriceText(pendingAutoStatus.loaded, check?.prices[pendingAutoTab])}{mismatch && <span className="pn-difference" aria-label="ราคา GRAB ไม่ตรงกับ Promaxx">≠</span>}</td><td>{pendingPriceText(pendingAutoStatus.loaded, check?.promaxx)}</td><td>{mismatch ? 'รอราคา GRAB ตรงกับ Promaxx' : 'รอข้อมูลราคาครบ'}</td></tr>
+                })}
+                {!pendingAutoRows.length && <tr><td colSpan={5}>{pendingLoading ? 'กำลังตรวจราคา...' : pendingError ? 'ตรวจราคาไม่สำเร็จ กรุณาโหลดใหม่' : `ไม่มี PENDING อัตโนมัติสำหรับ ${pendingAutoTab.toUpperCase()}`}</td></tr>}
+              </tbody></table></div>
+            </section>
             <div className="pn-add-area">
+              <h3>เพิ่ม SKU เอง <span className="pc-count">{pendingManualEntries.length} SKUs</span></h3><p className="pn-source-status">รายการส่วนนี้คงอยู่จนกด DELETE เฉพาะสาขา แม้ราคาจะตรงกันแล้ว</p>
               <fieldset disabled={!pendingCanEdit}><legend>สาขาที่รออนุมัติ</legend><div className="pn-branch-checkboxes">{ENGINE_BRANCHES.map(branch => <label key={branch}><input type="checkbox" aria-label={`เลือกสาขา Pending ${branch.toUpperCase()}`} checked={pendingSelectedBranches[branch]} onChange={event => setPendingSelectedBranches(previous => ({ ...previous, [branch]: event.target.checked }))} />{branch.toUpperCase()}</label>)}</div></fieldset>
               <label className="pn-input-label" htmlFor="pending-sku-input">SKU ที่ต้องการเพิ่ม<span>ขึ้นบรรทัดใหม่ หรือคั่นด้วย , ; | และ Tab · Enter เพิ่ม · Shift+Enter ขึ้นบรรทัดใหม่</span></label>
               <div className="pn-add-input"><textarea id="pending-sku-input" rows={3} disabled={!pendingCanEdit} placeholder={grabAdminUser ? 'กรอกหรือวาง SKU หลายรายการ...' : 'เข้าสู่ระบบเพื่อเพิ่มรายการ PENDING'} value={pendingInput} onChange={event => setPendingInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); addPendingSkus() } }} /><button className="pc-button pc-button-primary" disabled={!pendingCanEdit || !pendingInput.trim()} onClick={addPendingSkus}>{engineBusy === 'pending' ? 'กำลังบันทึก...' : '+ ADD'}</button></div>
@@ -2137,6 +2193,7 @@ async function confirmUpdatePrices() {
             {pendingPriceError && <p className="pe-error pn-multiline" role="alert">{pendingPriceError}</p>}
             <div className="pn-tabs" role="tablist" aria-label="สาขาของ PENDING">{ENGINE_BRANCHES.map((branch, index) => <button key={branch} id={`pending-tab-${branch}`} role="tab" type="button" aria-selected={pendingTab === branch} aria-controls="pending-table-panel" tabIndex={pendingTab === branch ? 0 : -1} className={pendingTab === branch ? 'is-active' : ''} onClick={() => setPendingTab(branch)} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? ENGINE_BRANCHES[0] : event.key === 'End' ? ENGINE_BRANCHES[2] : ENGINE_BRANCHES[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; setPendingTab(next); document.getElementById(`pending-tab-${next}`)?.focus() } }}>{branch.toUpperCase()} <span>({pendingCounts[index]})</span></button>)}</div>
             <div id="pending-table-panel" role="tabpanel" aria-labelledby={`pending-tab-${pendingTab}`}>
+              <h3 className="pn-manual-heading">รายการที่เพิ่มเอง · {pendingTab.toUpperCase()}</h3>
               <p className="pn-legend">· ยังไม่ได้โหลดแหล่งราคา · — โหลดแล้วแต่ไม่พบ SKU · ≠ ราคา GRAB ต่างจากราคาอ้างอิง</p>
               {(pendingMismatchCounts.database > 0 || pendingMismatchCounts.promax > 0) && <p className="pn-mismatch-note" role="status">≠ {pendingTab.toUpperCase()}: ราคา GRAB ไม่ตรงกับ DATABASE {pendingMismatchCounts.database} รายการ / PROMAX {pendingMismatchCounts.promax} รายการ · ตรวจและยื่น FORM แก้ไขกับ Grab</p>}
               <div className="pn-table-scroll"><table className="pn-table"><thead><tr><th>SKU</th><th>ITEM NAME</th><th>GRAB</th><th>DATABASE</th><th>PROMAX</th><th>DELETE</th></tr></thead><tbody>
@@ -2148,7 +2205,7 @@ async function confirmUpdatePrices() {
                 {!pendingRows.length && <tr><td colSpan={6}>{pendingLoading ? 'กำลังโหลด PENDING...' : pendingError ? 'ยังอ่านรายการไม่ได้ กรุณาโหลดใหม่' : `ไม่มีรายการ PENDING สำหรับ ${pendingTab.toUpperCase()}`}</td></tr>}
               </tbody></table></div>
             </div>
-            <p className="pn-footer-note">จำนวนรวมเก็บ SKU ของทุกสาขารวม WRD/ONN เดิมไว้ด้วย SKU เดียวอยู่ได้หลายสาขา DELETE จะลบเฉพาะสาขาที่เปิดอยู่ · RUN อ่าน PENDING ล่าสุดและระงับขายก่อนตรวจสต็อกเสมอ</p>
+            <p className="pn-footer-note">จำนวนรวมนับ SKU ไม่ซ้ำทุกสาขารวม WRD/ONN เดิม SKU เดียวอยู่ได้หลายสาขาและทั้งสองหัวข้อ DELETE ลบเฉพาะรายการที่เพิ่มเองในสาขาที่เปิดอยู่ · RUN ใช้ทั้งสองหัวข้อระงับขายก่อนตรวจสต็อก</p>
           </section>
 
           <section className="pe-card" aria-labelledby="pe-run-heading">

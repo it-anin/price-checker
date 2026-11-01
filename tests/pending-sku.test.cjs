@@ -179,3 +179,85 @@ test('ADD/DELETE changes stock suppression for that branch only', () => {
   output = engine.processGrabTemplate('GRAB_SRC.CSV', template, report, 5, engine.pendingSkuSets(entries).src)
   assert.equal(engine.parseEngineCsv(output.content).rows[1][4], '5')
 })
+
+const product = (sku, values = {}) => ({ 'รหัสสินค้า (SKU NUMBER)': sku, '*ชื่อสินค้า (NAME)': 'สินค้า '+sku, branch: 'src,kkl,sss', promaxx_price: '100', src_price: '100', kkl_price: '100', sss_price: '100', ...values })
+const syncPrices = (entries, products) => pending.mutatePendingEntries(entries, { kind: 'syncPrices', checks: pending.buildPendingPriceChecks(products, parsePrice) })
+
+test('automatic price checks compare all three offered branches to Promaxx, using rounded cents and valid zero prices', () => {
+  const checks = pending.buildPendingPriceChecks([
+    product('001', { src_price: '฿1,000.00', kkl_price: '99.99', sss_price: '100.004', '*ราคาสินค้า': '900' }),
+    product('002', { promaxx_price: '0', src_price: '0', kkl_price: '1', sss_price: '' }),
+    product('003', { branch: 'src', src_price: '', kkl_price: '10', sss_price: 'Infinity' }),
+    product('004', { promaxx_price: null, src_price: '50' }),
+  ], parsePrice)
+  assert.deepEqual(checks.get('001').states, { src: 'diff', sss: 'same', kkl: 'diff' })
+  assert.deepEqual(checks.get('002').states, { src: 'same', sss: 'na', kkl: 'diff' })
+  assert.deepEqual(checks.get('003').states, { src: 'na', sss: 'na', kkl: 'na' })
+  assert.deepEqual(checks.get('004').states, { src: 'na', sss: 'na', kkl: 'na' })
+  assert.equal(checks.get('001').prices.src, 1000)
+  const entries = syncPrices([], [...checks.keys()].map(sku => product(sku, { branch: 'src', src_price: '101' })) ).entries
+  assert.equal(entries.length, 4)
+  assert.ok(entries.every(entry => entry.branches.join(',') === 'SRC' && entry.manualBranches.length === 0))
+})
+
+test('automatic and manual origins coexist for one SKU and resolve independently without losing legacy metadata', () => {
+  const original = normalize([{ sku: '001', name: 'เดิม', branches: ['SRC', 'WRD', 'ONN'], note: { keep: true } }])
+  let entries = syncPrices(original, [product('001', { src_price: '110', sss_price: '120' }), product('002', { kkl_price: '90' })]).entries
+  const mixed = entries.find(entry => entry.sku === '001')
+  assert.deepEqual(mixed.manualBranches, ['SRC', 'WRD', 'ONN']); assert.deepEqual(mixed.autoPriceBranches, ['SRC', 'SSS'])
+  assert.deepEqual(mixed.branches, ['SRC', 'SSS', 'WRD', 'ONN']); assert.equal(mixed.name, 'เดิม'); assert.deepEqual(mixed.note, { keep: true })
+  assert.deepEqual(original[0].branches, ['SRC', 'WRD', 'ONN'])
+  entries = pending.mutatePendingEntries(entries, { kind: 'removeBranch', sku: '001', branch: 'src' }).entries
+  assert.deepEqual(entries[0].manualBranches, ['WRD', 'ONN']); assert.ok(entries[0].branches.includes('SRC'))
+  entries = pending.mutatePendingEntries(entries, { kind: 'add', skus: ['001', '002'], branches: ['sss', 'kkl'] }).entries
+  entries = syncPrices(entries, [product('001'), product('002')]).entries
+  assert.deepEqual(entries[0].autoPriceBranches, []); assert.deepEqual(entries[0].branches, ['SSS', 'KKL', 'WRD', 'ONN'])
+  assert.deepEqual(entries[1].manualBranches, ['SSS', 'KKL']); assert.deepEqual(entries[1].autoPriceBranches, [])
+  assert.deepEqual(normalize(JSON.stringify(entries)), entries)
+})
+
+test('resolved auto-only entries disappear, while missing prices, absent branches and missing products never release pending', () => {
+  let entries = syncPrices([], [product('001', { src_price: 110, sss_price: 120 }), product('002', { kkl_price: 80 })]).entries
+  assert.equal(syncPrices(entries, [product('001', { src_price: 110, sss_price: 120 }), product('002', { kkl_price: 80 })]).changed, false)
+  const missing = syncPrices(entries, [product('001', { branch: 'sss', src_price: null, promaxx_price: '' })])
+  assert.equal(missing.changed, false); assert.deepEqual(missing.entries, entries)
+  entries = syncPrices(entries, [product('001', { src_price: 100, sss_price: 120 }), product('002')]).entries
+  assert.equal(entries.length, 1); assert.deepEqual(entries[0].branches, ['SSS'])
+  assert.deepEqual(syncPrices(entries, [product('001')]).entries, [])
+})
+
+test('auto reconciliation retries a concurrent manual addition without deleting its source or metadata', async () => {
+  const { state, source } = store([{ sku: '001', branches: ['WRD'], legacy: true }])
+  state.onWrite = s => {
+    if (s.writes !== 1) return
+    s.entries = pending.mutatePendingEntries(normalize(s.entries), { kind: 'add', skus: ['001', 'PEER'], branches: ['src'] }).entries
+    s.updatedAt = '2026-10-30T00:00:00.001Z'
+  }
+  const checks = pending.buildPendingPriceChecks([product('001', { src_price: '101' })], parsePrice)
+  let snapshot = await source.savePendingMutation({ kind: 'syncPrices', checks })
+  assert.equal(state.writes, 2); assert.ok(snapshot.entries.some(entry => entry.sku === 'PEER'))
+  assert.deepEqual(snapshot.entries[0].manualBranches, ['SRC', 'WRD']); assert.equal(snapshot.entries[0].legacy, true)
+  snapshot = await source.savePendingMutation({ kind: 'syncPrices', checks: pending.buildPendingPriceChecks([product('001')], parsePrice) })
+  assert.deepEqual(snapshot.entries[0].branches, ['SRC', 'WRD']); assert.deepEqual(snapshot.entries[0].autoPriceBranches, [])
+})
+
+test('invalid source metadata blocks writes instead of treating automatic entries as manual', () => {
+  for (const item of [
+    { sku: '001', branches: ['SRC'], manualBranches: [], autoPriceBranches: 'SRC' },
+    { sku: '001', branches: ['SRC'], manualBranches: [], autoPriceBranches: ['SSS'] },
+    { sku: '001', branches: ['ONN'], manualBranches: [], autoPriceBranches: ['ONN'] },
+  ]) assert.throws(() => normalize([item]), /ที่มา/)
+})
+
+test('automatic pending suppresses only mismatched branches and manual suppression survives an equal price', () => {
+  const template = branch => 'StoreID,ItemID,ITEMNAME,ITEMCODE,CURRENTSTOCK,MAXSTOCK,G,H,I,J,K,L,M,N,O,ITEMSTATUS\n'+engine.ENGINE_STORES[branch]+',id,ยา,001,1,1,,,,,,,,,,in stock'
+  const report = branch => ({ name: branch+'.csv', branch, stock: new Map([['001', 10]]), rowCount: 1, encoding: 'UTF-8' })
+  let entries = syncPrices([], [product('001', { src_price: 101 })]).entries
+  const stock = branch => engine.parseEngineCsv(engine.processGrabTemplate('GRAB_'+branch.toUpperCase()+'.CSV', template(branch), report(branch), 2, engine.pendingSkuSets(entries)[branch]).content).rows[1][4]
+  assert.equal(stock('src'), ''); assert.equal(stock('sss'), '8'); assert.equal(stock('kkl'), '8')
+  entries = pending.mutatePendingEntries(entries, { kind: 'add', skus: ['001'], branches: ['src'] }).entries
+  entries = syncPrices(entries, [product('001')]).entries
+  assert.equal(stock('src'), '')
+  entries = pending.mutatePendingEntries(entries, { kind: 'removeBranch', sku: '001', branch: 'src' }).entries
+  assert.equal(stock('src'), '8')
+})

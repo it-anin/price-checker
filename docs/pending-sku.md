@@ -6,7 +6,17 @@ The PENDING card in PROCESS ENGINE manages products waiting for Grab approval. R
 
 Select SRC, SSS and/or KKL (all selected initially), then paste SKUs separated by newlines, commas, semicolons, tabs or pipes. Enter submits; Shift+Enter adds a line. Existing SKUs gain the selected branches without duplicates. DELETE removes only the active tab's branch and removes the entry only when no branches remain. WRD/ONN memberships and additional stored metadata are preserved; the total badge includes these legacy records.
 
-New entries save before optional name lookup. Names come from approved stock templates, using their actual headers (C=ITEMNAME in current stock exports, SKU D). Lookup stops when all missing names are found and caches each file by name/updated_at. Name lookup never changes the uploaded GRAB price maps.
+New manual entries save before optional name lookup. Names come from approved stock templates, using their actual headers (C=ITEMNAME in current stock exports, SKU D). Lookup stops when all missing names are found and caches each file by name/updated_at. Name lookup never changes the uploaded GRAB price maps.
+
+## Automatic GRAB / Promaxx pending
+
+The separate automatic section compares persisted `src_price`, `sss_price` and `kkl_price` against `promaxx_price`, only for branches where the product is offered. It uses the same parser and rounded cents as the price-checking screen. Zero is valid. Missing or invalid prices do not create a new pending item and do not release an existing automatic pending item. An automatic branch is released only after both valid prices match; missing products or branches also retain existing suppression until prices can be verified.
+
+Loading or refreshing the product screen, completing a price import, opening PROCESS ENGINE and reloading PENDING trigger a full price scan. The existing `GET /api/products?pendingPriceCheck=true` reads all SKUs in ordered pages, independently of the visible search, category and page. A failed page aborts the scan. RUN repeats this scan before calculating stock, and stops if either prices or pending entries cannot be read.
+
+Authenticated scans persist automatic changes with the same RLS and CAS helper as manual edits. Read-only visitors see an explicitly marked in-memory result, which RUN also uses; signing in persists it automatically. Price uploads in the PENDING comparison controls remain independent and never trigger product writes or replace these persisted price sources.
+
+Existing entries without source fields remain manual. Entries managed by automatic checks add `manualBranches` and `autoPriceBranches` metadata, while `branches` remains their union for stock compatibility. One SKU/branch may belong to both sections. DELETE removes only its manual membership; resolving its automatic membership cannot remove manual or legacy WRD/ONN membership. The total badge counts unique SKUs, and each section's tabs count only its own memberships. Automatic names come from the product record without overwriting an existing name.
 
 ## Three price sources
 
@@ -18,7 +28,7 @@ Prices use the existing `parsePriceRobust` and compare rounded cents. `·` means
 
 ## Safe persistence and RUN
 
-The existing `app_settings` row `key='pending_skus'` remains the source of truth. `loadPendingSnapshot()` returns normalized entries plus `updatedAt`. `savePendingMutation()` handles `add`, `removeBranch` and `enrichNames`: it re-reads current data and updates with an `updated_at` equality filter, advancing the timestamp beyond its prior value. On a version conflict it reloads/reapplies the same operation, up to three attempts. Every writer in this UI uses this path; external/manual writers should also advance `updated_at`.
+The existing `app_settings` row `key='pending_skus'` remains the source of truth. `loadPendingSnapshot()` returns normalized entries plus `updatedAt`. `savePendingMutation()` handles `add`, `removeBranch`, `enrichNames` and `syncPrices`: it re-reads current data and updates with an `updated_at` equality filter, advancing the timestamp beyond its prior value. On a version conflict it reloads/reapplies the same operation, up to three attempts. Every writer in this UI uses this path; external/manual writers should also advance `updated_at`.
 
 Failed loads, malformed data and failed saves block subsequent edits until a successful reload. Input is retained when ADD fails. Membership edits invalidate previously generated stock outputs so they must be generated again; this also applies when an explicit reload observes another user's changes. Name/metadata-only updates do not invalidate stock results. Writes are serialized against RUN and template uploads.
 
@@ -27,8 +37,8 @@ RUN always reads current pending data, applies suppression only to the SKU's bra
 ## Verification
 
 ```sh
-node --test tests/process-engine.test.cjs tests/pending-sku.test.cjs
+node --test tests/process-engine.test.cjs tests/pending-sku.test.cjs tests/pending-price-api.test.cjs
 npm run build
 ```
 
-Tests cover branch merging/removal, legacy metadata, CAS retries/failures, invalid sources, timestamp monotonicity, column-I price parsing, actual stock-template names, TIS-620, cent comparisons, and stock suppression after ADD/DELETE. Browser QA exercises the UI with mocked API responses and performs no production writes.
+Tests cover manual/automatic branch merging and resolution, legacy metadata, CAS retries/failures, invalid sources, timestamp monotonicity, column-I price parsing, actual stock-template names, TIS-620, cent comparisons, full price-scan pagination/failures and branch-specific stock suppression. Browser QA exercises the UI with mocked API responses and performs no production writes.

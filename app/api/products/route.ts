@@ -59,6 +59,19 @@ export async function GET(req: NextRequest) {
   const skus = searchParams.get('skus')
   const missingBranch = searchParams.get('missingBranch')
 
+  // Scan every SKU independently of the current screen's search, category or page.
+  if (searchParams.get('pendingPriceCheck') === 'true') {
+    const columns = ['"รหัสสินค้า (SKU NUMBER)"', '"*ชื่อสินค้า (NAME)"', 'branch', 'src_price', 'kkl_price', 'sss_price', 'promaxx_price'].join(',')
+    const all: any[] = []
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase.from('products').select(columns).order('"รหัสสินค้า (SKU NUMBER)"').range(from, from + 999)
+      if (error) return NextResponse.json({ success: false, error: error.message }, { status: 503 })
+      all.push(...(data || []))
+      if (!data || data.length < 1000) break
+    }
+    return NextResponse.json({ success: true, products: aggregateProducts(all) }, { headers: { 'Cache-Control': 'no-store' } })
+  }
+
   // สินค้าที่ขาดจากสาขา — fetch ทั้งหมด aggregate แล้ว filter
   if (missingBranch) {
     const nb = normalizeBranchName(missingBranch)
