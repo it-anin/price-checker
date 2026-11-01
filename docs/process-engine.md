@@ -1,6 +1,6 @@
 # PROCESS ENGINE
 
-Main navigation opens the stock workspace without discarding in-memory reports when returning to the product view. The collapsed GRAB CSV MANAGER is available above the product table in the รายการสินค้า menu and stores approved templates in the existing Supabase project using the shared client in `lib/supabase.js`.
+Main navigation opens the stock workspace without discarding in-memory reports when returning to the product view. The collapsed GRAB CSV MANAGER is available in the เครื่องมือทั้งหมด menu and stores approved templates in the existing Supabase project using the shared client in `lib/supabase.js`.
 
 R01.102 inputs are named `src.csv`, `sss.csv`, and `kkl.csv` (case-insensitive). UTF-8 is decoded strictly, with TIS-620/Windows-874 fallback. SKU E and numeric quantity G build a per-SKU stock map; duplicate SKU quantities are summed and the branch reserve is subtracted once. Defaults are SRC=5, SSS=2, KKL=2. Nonpositive results become empty stock.
 
