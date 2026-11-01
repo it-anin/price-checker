@@ -468,6 +468,7 @@ body {
 .pe-output-list li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 0; color: #457154; font-size: 12px; }
 .pe-output-list li>span { margin-left: auto; color: #747e69; font-size: 11px; }
 .pe-manager { padding: 0; }
+.pc-product-manager { margin-bottom: 20px; }
 .pe-manager-heading { display: flex; align-items: center; gap: 10px; padding: 18px 22px; }
 .pe-manager-toggle { display: flex; align-items: center; gap: 12px; text-align: left; flex: 1; min-width: 0; }
 .pe-manager-toggle>span { font: 700 13px Arial,sans-serif; }
