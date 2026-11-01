@@ -216,8 +216,7 @@ function validateGrabUploadColumns(document: CsvDocument, selectedHeader?: numbe
   return headerIndex
 }
 
-export function validateGrabTemplateUpload(sourceName: string, text: string) {
-  if (!/\.csv$/i.test(sourceName)) throw new Error('อัปโหลดได้เฉพาะไฟล์ .CSV')
+export function validateGrabTemplateUpload(text: string) {
   const document = parseEngineCsv(text)
   const uploadHeaderIndex = validateGrabUploadColumns(document)
   const dataStart = grabDataStart(document)

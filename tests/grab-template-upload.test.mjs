@@ -28,17 +28,15 @@ function stockRows(branch = 'src') {
   ]
 }
 
-test('upload determines all three canonical filenames from StoreID, regardless of source filename', () => {
+test('upload determines all three canonical filenames from StoreID in the CSV content', () => {
   for (const branch of Object.keys(stores)) {
     const text = '\uFEFF' + csv(stockRows(branch))
-    for (const source of ['Grab stock export (1).CSV', 'export.csv', 'GRAB_SRC.CSV', 'GRAB_SSS.CSV', 'GRAB_KKL.CSV']) {
-      const result = validateGrabTemplateUpload(source, text)
-      assert.equal(result.branch, branch)
-      assert.equal(result.name, `GRAB_${branch.toUpperCase()}.CSV`)
-      assert.equal(result.headerIndex, 2)
-      assert.deepEqual(result.dataIndices, [3, 4])
-      assert.deepEqual(result.document.rows, parseEngineCsv(text).rows)
-    }
+    const result = validateGrabTemplateUpload(text)
+    assert.equal(result.branch, branch)
+    assert.equal(result.name, `GRAB_${branch.toUpperCase()}.CSV`)
+    assert.equal(result.headerIndex, 2)
+    assert.deepEqual(result.dataIndices, [3, 4])
+    assert.deepEqual(result.document.rows, parseEngineCsv(text).rows)
   }
 })
 
@@ -47,15 +45,15 @@ test('every machine header column is required verbatim in its approved position'
     for (const wrong of ['BAD', headers[column].toLowerCase(), ` ${headers[column]} `, '']) {
       const rows = stockRows()
       rows[2][column] = wrong
-      assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)), /หัว|โครงสร้าง|คอลัมน์/, `column ${column}: ${JSON.stringify(wrong)}`)
+      assert.throws(() => validateGrabTemplateUpload(csv(rows)), /หัว|โครงสร้าง|คอลัมน์/, `column ${column}: ${JSON.stringify(wrong)}`)
     }
   }
   const swapped = stockRows()
   ;[swapped[2][8], swapped[2][9]] = [swapped[2][9], swapped[2][8]]
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(swapped)), /คอลัมน์ I/)
+  assert.throws(() => validateGrabTemplateUpload(csv(swapped)), /คอลัมน์ I/)
   const duplicate = stockRows()
   duplicate[2][14] = duplicate[2][13]
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(duplicate)), /คอลัมน์ O/)
+  assert.throws(() => validateGrabTemplateUpload(csv(duplicate)), /คอลัมน์ O/)
 })
 
 test('missing and extra columns in either the header or any data row block uploads', () => {
@@ -63,12 +61,12 @@ test('missing and extra columns in either the header or any data row block uploa
     for (const column of [0, 6, 15]) {
       const rows = stockRows()
       rows[rowIndex].splice(column, 1)
-      assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)))
+      assert.throws(() => validateGrabTemplateUpload(csv(rows)))
     }
     for (const extra of ['', 'EXTRA']) {
       const rows = stockRows()
       rows[rowIndex].push(extra)
-      assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)), /16 คอลัมน์/)
+      assert.throws(() => validateGrabTemplateUpload(csv(rows)), /16 คอลัมน์/)
     }
   }
 })
@@ -80,7 +78,7 @@ test('column warnings list every change with the expected and actual name, even 
   rows[2][4] = 'AVAILABLE'
   rows[2][5] = 'LIMIT'
   rows[2][7] = 'SCHEDULE'
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)), error => {
+  assert.throws(() => validateGrabTemplateUpload(csv(rows)), error => {
     assert.match(error.message, /ตรวจพบคอลัมน์เปลี่ยน.*แถว 3/)
     for (const [letter, expected, actual] of [['A', 'STOREID', 'STORE_ID'], ['D', 'ITEMCODE', 'SKU'], ['E', 'CURRENTSTOCK', 'AVAILABLE'], ['F', 'MAXSTOCK', 'LIMIT'], ['H', 'RESTOCKFREQ', 'SCHEDULE']]) {
       assert.ok(error.message.includes(`คอลัมน์ ${letter} เปลี่ยน: เดิม "${expected}" → พบ "${actual}"`))
@@ -91,25 +89,25 @@ test('column warnings list every change with the expected and actual name, even 
 
 test('column warnings identify added, missing, swapped headers and changed data-row widths', () => {
   const extra = stockRows(); extra[2].push('NEW_COLUMN')
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(extra)), /คอลัมน์ Q เพิ่มมา: พบ "NEW_COLUMN"/)
+  assert.throws(() => validateGrabTemplateUpload(csv(extra)), /คอลัมน์ Q เพิ่มมา: พบ "NEW_COLUMN"/)
   const missing = stockRows(); missing[2].pop()
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(missing)), /คอลัมน์ P ขาด: เดิม "ITEMSTATUS"/)
+  assert.throws(() => validateGrabTemplateUpload(csv(missing)), /คอลัมน์ P ขาด: เดิม "ITEMSTATUS"/)
   const reordered = stockRows()
   ;[reordered[2][3], reordered[2][4]] = [reordered[2][4], reordered[2][3]]
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(reordered)), error => {
+  assert.throws(() => validateGrabTemplateUpload(csv(reordered)), error => {
     assert.match(error.message, /คอลัมน์ D เปลี่ยน: เดิม "ITEMCODE" → พบ "CURRENTSTOCK"/)
     assert.match(error.message, /คอลัมน์ E เปลี่ยน: เดิม "CURRENTSTOCK" → พบ "ITEMCODE"/)
     return true
   })
   const shortRow = stockRows(); shortRow[4].pop()
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(shortRow)), /แถว 5: จำนวนคอลัมน์เปลี่ยน.*พบ 15 คอลัมน์/)
+  assert.throws(() => validateGrabTemplateUpload(csv(shortRow)), /แถว 5: จำนวนคอลัมน์เปลี่ยน.*พบ 15 คอลัมน์/)
 })
 
 test('an earlier unchanged header cannot hide changes to the final machine header', () => {
   const rows = stockRows()
   rows[0] = [...headers]
   rows[2][7] = 'NEW_SCHEDULE'
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)), error => {
+  assert.throws(() => validateGrabTemplateUpload(csv(rows)), error => {
     assert.match(error.message, /หัวตารางแถว 3/)
     assert.match(error.message, /คอลัมน์ H เปลี่ยน: เดิม "RESTOCKFREQ" → พบ "NEW_SCHEDULE"/)
     return true
@@ -121,29 +119,27 @@ test('unknown, empty, and mixed StoreIDs are blocked in the first or later recor
     for (const storeId of ['', '3-UNKNOWN', 'UNKNOWN', stores.sss, stores.kkl]) {
       const rows = stockRows()
       rows[rowIndex][0] = storeId
-      assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)), /StoreID/)
+      assert.throws(() => validateGrabTemplateUpload(csv(rows)), /StoreID/)
     }
   }
   for (const field of [2, 3]) {
     const rows = stockRows()
     rows[3][field] = ''
-    assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)), /ก่อนแถวเริ่มต้น|ไม่ถูกต้อง/)
+    assert.throws(() => validateGrabTemplateUpload(csv(rows)), /ก่อนแถวเริ่มต้น|ไม่ถูกต้อง/)
   }
   const hiddenRecord = stockRows()
   hiddenRecord.splice(3, 0, ['UNKNOWN', ...Array(15).fill('')])
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(hiddenRecord)), /StoreID/)
+  assert.throws(() => validateGrabTemplateUpload(csv(hiddenRecord)), /StoreID/)
 })
 
-test('non-CSV, empty, malformed, price-menu, and legacy price-bearing exports cannot replace approved stock templates', () => {
-  const valid = csv(stockRows())
-  assert.throws(() => validateGrabTemplateUpload('export.xlsx', valid), /\.CSV/)
-  for (const text of ['', csv(stockRows().slice(0, 3)), '"unclosed', 'StoreID,NAME,PRICE,D,E,F,G,H,SKU\n' + stores.src + ',ยา,10,,,,,,001']) {
-    assert.throws(() => validateGrabTemplateUpload('export.csv', text))
+test('non-CSV content, empty, malformed, price-menu, and legacy price-bearing exports cannot replace approved stock templates', () => {
+  for (const text of ['', 'PK\u0003\u0004\u0000binary workbook', csv(stockRows().slice(0, 3)), '"unclosed', 'StoreID,NAME,PRICE,D,E,F,G,H,SKU\n' + stores.src + ',ยา,10,,,,,,001']) {
+    assert.throws(() => validateGrabTemplateUpload(text))
   }
   const priceBearing = stockRows()
   priceBearing[2][2] = 'PRICE'
   priceBearing[3][2] = '45.00'; priceBearing[4][2] = '50.00'
-  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(priceBearing)), /ITEMNAME/)
+  assert.throws(() => validateGrabTemplateUpload(csv(priceBearing)), /ITEMNAME/)
 })
 
 test('BOM, UTF-8/TIS-620, multiline instructions, blank lines and delimiters remain usable by PROCESS ENGINE', () => {
@@ -152,7 +148,7 @@ test('BOM, UTF-8/TIS-620, multiline instructions, blank lines and delimiters rem
     rows.push([''])
     for (const delimiter of [',', ';', '\t']) {
       const text = '\uFEFF' + csv(rows, delimiter)
-      const template = validateGrabTemplateUpload('export.csv', text)
+      const template = validateGrabTemplateUpload(text)
       const report = { branch, stock: new Map([['00001', 12]]), name: `${branch}.csv`, rowCount: 1, encoding: 'UTF-8' }
       const output = processGrabTemplate(template.name, text, report, 2, new Set())
       assert.equal(output.total, 2)
@@ -169,7 +165,7 @@ test('BOM, UTF-8/TIS-620, multiline instructions, blank lines and delimiters rem
   const bytes = Uint8Array.from([...csv(thaiRows)].map(char => char === 'ย' ? 0xc2 : char === 'า' ? 0xd2 : char.charCodeAt(0)))
   const decoded = decodeCsv(bytes.buffer)
   assert.equal(decoded.encoding, 'TIS-620')
-  const template = validateGrabTemplateUpload('export.csv', decoded.text)
+  const template = validateGrabTemplateUpload(decoded.text)
   assert.equal(template.document.rows[1][2], 'ยา')
 })
 
@@ -233,6 +229,15 @@ test('the manager writes only validated files under canonical names and keeps re
   await handler([file('fixed.csv', original)])
   assert.deepEqual(warnings.slice(4), [[], []])
   assert.equal(writes.length, 3)
+  for (const branch of Object.keys(stores)) {
+    for (const name of ['รายงานสินค้า สาขา (ล่าสุด).CSV', 'menu.CsV', 'สินค้า', 'export.txt', 'export.xlsx', 'GRAB_SRC.CSV', 'GRAB_SSS.CSV', 'GRAB_KKL.CSV']) {
+      const content = csv(stockRows(branch))
+      await handler([file(name, content)])
+      assert.equal(writes.at(-1).row.name, `GRAB_${branch.toUpperCase()}.CSV`)
+      assert.equal(writes.at(-1).row.content, content)
+      assert.deepEqual(warnings.at(-1), [])
+    }
+  }
 })
 
 test('the manager renders all file warnings with accessible alert text and escaped CSV content', () => {

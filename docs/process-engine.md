@@ -12,7 +12,7 @@ The PENDING card supports authenticated ADD/DELETE by branch and read-only price
 
 Pending SKUs take precedence, then matching report quantities, then missing SKUs. Only raw CSV cells E/F/P change; other cells, quoting, multiline content, all headers and original row endings are preserved. Outputs have a UTF-8 BOM and Bangkok date suffix. DOWNLOAD ALL generates a single ZIP containing all successful CSV results; reports and results stay in memory only. CLEAR resets log/progress only.
 
-GRAB CSV MANAGER accepts any source filename ending in `.csv` (case-insensitive). It determines the branch from column A of the data and saves under the canonical name below, regardless of the source filename. Every nonblank data row must use that same StoreID; unknown, empty, or mixed StoreIDs are rejected before writing.
+GRAB CSV MANAGER accepts any source filename, including Thai names, spaces, arbitrary extensions, and files without an extension. The file picker does not filter names or extensions, and upload validation uses only the CSV contents. Non-CSV contents still fail the strict stock-column checks. It determines the branch from column A of the data and saves under the canonical name below, regardless of the source filename. Every nonblank data row must use that same StoreID; unknown, empty, or mixed StoreIDs are rejected before writing.
 
 | StoreID (column A) | Saved / displayed filename |
 |---|---|
