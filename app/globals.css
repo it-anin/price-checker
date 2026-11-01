@@ -75,7 +75,7 @@ body {
 .pc-rail nav { display: flex; flex-direction: column; gap: 12px; width: 100%; }
 .pc-rail nav button { height: 49px; width: 100%; border: 0; border-radius: 10px; display: flex; align-items: center; justify-content: flex-start; gap: 11px; padding: 0 12px; text-align: left; transition: background .15s, color .15s; }
 .pc-nav-label { font-size: 12px; font-weight: 600; white-space: nowrap; }
-.pc-rail nav .pc-icon { width: 22px; height: 22px; }
+.pc-rail nav .pc-icon { width: 30px; height: 30px; stroke-width: 1.45; color: #f6ead8; }
 .pc-rail nav button:hover { background: #ffffff10; color: white; }
 .pc-rail nav button.is-active { background: var(--pc-accent); color: white; }
 .pc-rail-bottom { margin-top: auto; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 22px; }
@@ -308,7 +308,7 @@ body {
   .pc-rail { width: 196px; padding: 20px 9px; }
   .pc-brand { height: 38px; width: 38px; border-radius: 11px; margin-bottom: 32px; }
   .pc-rail nav button { height: 43px; }
-  .pc-rail nav .pc-icon { height: 20px; width: 20px; }
+  .pc-rail nav .pc-icon { height: 28px; width: 28px; }
   .pc-inspection-grid { grid-template-columns: minmax(0,1fr); gap: 22px; }
   .pc-inspector { position: static; padding: 25px; }
   .pc-inspector .pc-product-image { height: 175px; }

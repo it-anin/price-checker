@@ -29,6 +29,12 @@ type GrabFileInfo = { name: string; updated_at: string }
 
 function WorkspaceIcon({ name, className = '' }: { name: string; className?: string }) {
   const paths: Record<string, React.ReactNode> = {
+    'nav-products': <><path d="m3 7 9-4 9 4-9 4-9-4Zm0 0v10l9 4 9-4V7M12 11v10" /><path d="M8 7c2-3 6-3 8 0" /></>,
+    'nav-price-check': <><path d="m9 19-7-7V3h9l6 6" /><circle cx="6.5" cy="7" r="1" /><circle cx="15" cy="15" r="4.5" /><path d="m18.3 18.3 3.7 3.7m-9-7 1.4 1.4 2.4-2.8" /></>,
+    'nav-branches': <><path d="M12 10v2M5 14v-2h14v2" />{['translate(8 1)', 'translate(1 14)', 'translate(15 14)'].map(transform => <g key={transform} transform={transform}><path d="m0 3 1-3h6l1 3H0Zm1 0v6h6V3M3 9V6h2v3M3 3v1m2-1v1" /></g>)}</>,
+    'nav-import': <><path d="M12 2v12m-4-4 4 4 4-4M7 9H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-2" /></>,
+    'nav-engine': <><path d="M9.5 2h5l.5 2.5 2 1.2 2.5-.8L22 9.1l-2 1.7v2.4l2 1.7-2.5 4.2-2.5-.8-2 1.2-.5 2.5h-5L9 19.5l-2-1.2-2.5.8L2 14.9l2-1.7v-2.4L2 9.1l2.5-4.2 2.5.8L9 4.5Z" /><path d="m13 7-4 6h3l-1 4 4-6h-3l1-4Z" /></>,
+    'nav-tools': <><g transform="translate(24 0) scale(-1 1)"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94L14.7 6.3Z" /></g><path d="m14 8 5-6 3 3-6 5-2-2Zm0 2-2 2M9 14l-7 6 2 2 7-6" /></>,
     grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
     box: <><path d="m3 7 9-4 9 4v10l-9 4-9-4Z" /><path d="m3 7 9 4 9-4M12 11v10M7 5l10 5" /></>,
     tag: <><path d="M3 3h8l10 10-8 8L3 11Z" /><circle cx="7.5" cy="7.5" r="1" /></>,
@@ -2119,12 +2125,12 @@ async function confirmUpdatePrices() {
       <aside className="pc-rail" aria-label="เมนูหลัก">
         <Link href="/" className="pc-brand" aria-label="Price Checker หน้าหลัก"><WorkspaceIcon name="tag" /></Link>
         <nav>
-          <button className={!engineOpen && !toolsOpen && priceFilter === 'all' ? 'is-active' : ''} title="รายการสินค้า" aria-label="รายการสินค้า" onClick={() => { setEngineOpen(false); setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" /><span className="pc-nav-label">รายการสินค้า</span></button>
-          <button className={!engineOpen && priceFilter === 'mismatch' ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setEngineOpen(false); setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="tag" /><span className="pc-nav-label">ตรวจสอบราคา</span></button>
-          <button title="เปรียบเทียบ 3 สาขา" aria-label="เปรียบเทียบ 3 สาขา" onClick={handleMasterBranchCompare}><WorkspaceIcon name="branch" /><span className="pc-nav-label">เปรียบเทียบ 3 สาขา</span></button>
-          <button title="นำเข้าสินค้า" aria-label="นำเข้าสินค้า" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" /><span className="pc-nav-label">นำเข้าสินค้า</span></button>
-          <button className={engineOpen ? 'is-active' : ''} title="PROCESS ENGINE" aria-label="PROCESS ENGINE" aria-pressed={engineOpen} onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="engine" /><span className="pc-nav-label">PROCESS ENGINE</span></button>
-          <button className={!engineOpen && toolsOpen ? 'is-active' : ''} title="เครื่องมือทั้งหมด" aria-label="เครื่องมือทั้งหมด" aria-expanded={!engineOpen && toolsOpen} aria-controls="workflow-tools" onClick={() => { setEngineOpen(false); setToolsOpen(value => !value) }}><WorkspaceIcon name="grid" /><span className="pc-nav-label">เครื่องมือทั้งหมด</span></button>
+          <button className={!engineOpen && !toolsOpen && priceFilter === 'all' ? 'is-active' : ''} title="รายการสินค้า" aria-label="รายการสินค้า" onClick={() => { setEngineOpen(false); setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="nav-products" /><span className="pc-nav-label">รายการสินค้า</span></button>
+          <button className={!engineOpen && priceFilter === 'mismatch' ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setEngineOpen(false); setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="nav-price-check" /><span className="pc-nav-label">ตรวจสอบราคา</span></button>
+          <button title="เปรียบเทียบ 3 สาขา" aria-label="เปรียบเทียบ 3 สาขา" onClick={handleMasterBranchCompare}><WorkspaceIcon name="nav-branches" /><span className="pc-nav-label">เปรียบเทียบ 3 สาขา</span></button>
+          <button title="นำเข้าสินค้า" aria-label="นำเข้าสินค้า" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="nav-import" /><span className="pc-nav-label">นำเข้าสินค้า</span></button>
+          <button className={engineOpen ? 'is-active' : ''} title="PROCESS ENGINE" aria-label="PROCESS ENGINE" aria-pressed={engineOpen} onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="nav-engine" /><span className="pc-nav-label">PROCESS ENGINE</span></button>
+          <button className={!engineOpen && toolsOpen ? 'is-active' : ''} title="เครื่องมือทั้งหมด" aria-label="เครื่องมือทั้งหมด" aria-expanded={!engineOpen && toolsOpen} aria-controls="workflow-tools" onClick={() => { setEngineOpen(false); setToolsOpen(value => !value) }}><WorkspaceIcon name="nav-tools" /><span className="pc-nav-label">เครื่องมือทั้งหมด</span></button>
         </nav>
         <div className="pc-rail-bottom"><span className="pc-rail-divider" /><span className="pc-workspace-avatar" title="ANIN Workspace">AN</span></div>
       </aside>
