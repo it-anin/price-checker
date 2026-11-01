@@ -4,6 +4,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 
 const directory = path.dirname(fileURLToPath(import.meta.url))
 const compilerOptions = { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }
@@ -69,6 +71,49 @@ test('missing and extra columns in either the header or any data row block uploa
       assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)), /16 คอลัมน์/)
     }
   }
+})
+
+test('column warnings list every change with the expected and actual name, even when D/E/F change', () => {
+  const rows = stockRows()
+  rows[2][0] = 'STORE_ID'
+  rows[2][3] = 'SKU'
+  rows[2][4] = 'AVAILABLE'
+  rows[2][5] = 'LIMIT'
+  rows[2][7] = 'SCHEDULE'
+  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)), error => {
+    assert.match(error.message, /ตรวจพบคอลัมน์เปลี่ยน.*แถว 3/)
+    for (const [letter, expected, actual] of [['A', 'STOREID', 'STORE_ID'], ['D', 'ITEMCODE', 'SKU'], ['E', 'CURRENTSTOCK', 'AVAILABLE'], ['F', 'MAXSTOCK', 'LIMIT'], ['H', 'RESTOCKFREQ', 'SCHEDULE']]) {
+      assert.ok(error.message.includes(`คอลัมน์ ${letter} เปลี่ยน: เดิม "${expected}" → พบ "${actual}"`))
+    }
+    return true
+  })
+})
+
+test('column warnings identify added, missing, swapped headers and changed data-row widths', () => {
+  const extra = stockRows(); extra[2].push('NEW_COLUMN')
+  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(extra)), /คอลัมน์ Q เพิ่มมา: พบ "NEW_COLUMN"/)
+  const missing = stockRows(); missing[2].pop()
+  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(missing)), /คอลัมน์ P ขาด: เดิม "ITEMSTATUS"/)
+  const reordered = stockRows()
+  ;[reordered[2][3], reordered[2][4]] = [reordered[2][4], reordered[2][3]]
+  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(reordered)), error => {
+    assert.match(error.message, /คอลัมน์ D เปลี่ยน: เดิม "ITEMCODE" → พบ "CURRENTSTOCK"/)
+    assert.match(error.message, /คอลัมน์ E เปลี่ยน: เดิม "CURRENTSTOCK" → พบ "ITEMCODE"/)
+    return true
+  })
+  const shortRow = stockRows(); shortRow[4].pop()
+  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(shortRow)), /แถว 5: จำนวนคอลัมน์เปลี่ยน.*พบ 15 คอลัมน์/)
+})
+
+test('an earlier unchanged header cannot hide changes to the final machine header', () => {
+  const rows = stockRows()
+  rows[0] = [...headers]
+  rows[2][7] = 'NEW_SCHEDULE'
+  assert.throws(() => validateGrabTemplateUpload('export.csv', csv(rows)), error => {
+    assert.match(error.message, /หัวตารางแถว 3/)
+    assert.match(error.message, /คอลัมน์ H เปลี่ยน: เดิม "RESTOCKFREQ" → พบ "NEW_SCHEDULE"/)
+    return true
+  })
 })
 
 test('unknown, empty, and mixed StoreIDs are blocked in the first or later record', () => {
@@ -147,13 +192,14 @@ test('the manager writes only validated files under canonical names and keeps re
   const original = csv(stockRows())
   const rows = stockRows(); rows[2][7] = 'WRONG'
   const invalid = csv(rows)
-  const writes = [], logs = [], alerts = [], busy = []
+  const writes = [], logs = [], alerts = [], busy = [], warnings = []
   const cache = new Map(Object.keys(stores).map(branch => [`GRAB_${branch.toUpperCase()}.CSV`, 'cached names']))
   let invalidations = 0, refreshes = 0
   const engineBusyRef = { current: false }
   const handler = uploadHandler({
     grabManagerUnlocked: true, engineBusyRef, decodeCsv, validateGrabTemplateUpload,
     setEngineBusy: value => busy.push(value),
+    setGrabUploadProblems: problems => warnings.push([...problems]),
     supabase: { from(table) {
       assert.equal(table, 'grab_files')
       return { async upsert(row, options) { writes.push({ row, options }); return { error: null } } }
@@ -171,10 +217,40 @@ test('the manager writes only validated files under canonical names and keeps re
   assert.deepEqual([...cache.keys()], ['GRAB_SSS.CSV'])
   assert.ok(logs.some(message => message.includes('GRAB_SSS.CSV → GRAB_SRC.CSV')))
   assert.equal(alerts.length, 1); assert.match(alerts[0], /BLOCKED 1/)
+  assert.deepEqual(warnings[0], [])
+  assert.equal(warnings[1].length, 1)
+  assert.match(warnings[1][0], /bad.csv: ตรวจพบคอลัมน์เปลี่ยน/)
+  assert.match(warnings[1][0], /คอลัมน์ H เปลี่ยน: เดิม "RESTOCKFREQ" → พบ "WRONG"/)
+  assert.ok(alerts[0].includes(warnings[1][0]))
   assert.equal(invalidations, 1); assert.equal(refreshes, 1)
   assert.deepEqual(busy, ['templates', '']); assert.equal(engineBusyRef.current, false)
 
   await handler([file('all rejected.csv', invalid)])
   assert.equal(writes.length, 2)
   assert.equal(invalidations, 1)
+  assert.deepEqual(warnings[2], [])
+  assert.match(warnings[3][0], /all rejected.csv/)
+  await handler([file('fixed.csv', original)])
+  assert.deepEqual(warnings.slice(4), [[], []])
+  assert.equal(writes.length, 3)
+})
+
+test('the manager renders all file warnings with accessible alert text and escaped CSV content', () => {
+  const source = ts.createSourceFile('page.tsx', fs.readFileSync(path.join(directory, '../app/page.tsx'), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  let warning
+  const visit = node => {
+    if (ts.isJsxElement(node) && node.openingElement.attributes.properties.some(attribute => ts.isJsxAttribute(attribute) && attribute.name.text === 'className' && attribute.initializer?.text === 'pe-error pe-upload-warning')) warning = node
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  assert.ok(warning)
+  const code = ts.transpileModule(`function render(grabUploadProblems: string[]) { return (${warning.getText(source)}) }`, { compilerOptions: { ...compilerOptions, jsx: ts.JsxEmit.React }, fileName: 'warning.tsx' }).outputText
+  const render = new Function('React', code + '\nreturn render;')(React)
+  const html = renderToStaticMarkup(render(['one.csv: คอลัมน์ H เปลี่ยน\nเดิม RESTOCKFREQ → พบ SCHEDULE', 'two.csv: คอลัมน์ Q เพิ่มมา: <script>changed</script>']))
+  assert.match(html, /role="alert"/)
+  assert.match(html, /one.csv/); assert.match(html, /two.csv/)
+  assert.match(html, /คอลัมน์ H เปลี่ยน\nเดิม RESTOCKFREQ/)
+  assert.match(html, /ไฟล์ที่ไม่ผ่านจะไม่ถูกบันทึก/)
+  assert.match(html, /&lt;script&gt;changed&lt;\/script&gt;/)
+  assert.doesNotMatch(html, /<script>/)
 })

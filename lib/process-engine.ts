@@ -181,9 +181,45 @@ export function validateGrabTemplate(name: string, text: string) {
   return validateGrabDocument(templateBranch(name), parseEngineCsv(text))
 }
 
+function csvColumnName(index: number): string {
+  let name = ''
+  for (let number = index + 1; number > 0; number = Math.floor((number - 1) / 26)) name = String.fromCharCode(65 + (number - 1) % 26) + name
+  return name
+}
+
+function validateGrabUploadColumns(document: CsvDocument, selectedHeader?: number) {
+  // Find the machine header independently of D/E/F and the data columns,
+  // so renamed or moved columns can be reported before record validation.
+  const known = new Set<string>(grabStockColumns)
+  let headerIndex = selectedHeader ?? -1
+  if (selectedHeader === undefined) document.rows.forEach((row, index) => {
+    const score = new Set(row.map(headerKey).filter(cell => known.has(cell))).size
+    if (score >= 3 || headerKey(row[0] ?? '') === 'STOREID') headerIndex = index
+  })
+  if (headerIndex < 0) throw new Error('ไม่พบหัวคอลัมน์ Template สต็อก A–P กรุณาใช้ไฟล์ CSV ที่ Export จาก Grab')
+  const header = document.rows[headerIndex], changes: string[] = []
+  if (header.length !== grabStockColumns.length) changes.push(`หัวตารางต้องมี 16 คอลัมน์ A–P เท่านั้น (พบ ${header.length} คอลัมน์)`)
+  for (let column = 0; column < Math.max(header.length, grabStockColumns.length); column++) {
+    const expected = grabStockColumns[column], actual = header[column]
+    if (actual === expected) continue
+    const label = csvColumnName(column)
+    if (expected === undefined) changes.push(`คอลัมน์ ${label} เพิ่มมา: พบ ${JSON.stringify(actual)}`)
+    else if (actual === undefined) changes.push(`คอลัมน์ ${label} ขาด: เดิม ${JSON.stringify(expected)} → ไม่พบคอลัมน์`)
+    else changes.push(`คอลัมน์ ${label} เปลี่ยน: เดิม ${JSON.stringify(expected)} → พบ ${JSON.stringify(actual)}`)
+  }
+  if (changes.length) throw new Error(`ตรวจพบคอลัมน์เปลี่ยนที่หัวตารางแถว ${headerIndex + 1} — ไม่บันทึกไฟล์\n${changes.join('\n')}`)
+  for (let index = headerIndex + 1; index < document.rows.length; index++) {
+    const row = document.rows[index]
+    if (row.every(cell => !cell.trim())) continue
+    if (row.length !== grabStockColumns.length) throw new Error(`แถว ${index + 1}: จำนวนคอลัมน์เปลี่ยน ต้องมี 16 คอลัมน์ A–P เท่านั้น (พบ ${row.length} คอลัมน์)`)
+  }
+  return headerIndex
+}
+
 export function validateGrabTemplateUpload(sourceName: string, text: string) {
   if (!/\.csv$/i.test(sourceName)) throw new Error('อัปโหลดได้เฉพาะไฟล์ .CSV')
   const document = parseEngineCsv(text)
+  const uploadHeaderIndex = validateGrabUploadColumns(document)
   const dataStart = grabDataStart(document)
   if (dataStart < 0) throw new Error('ไม่พบแถวข้อมูล GRAB ที่มี SKU ในคอลัมน์ D')
   const storeId = document.rows[dataStart][0]?.trim()
@@ -191,17 +227,11 @@ export function validateGrabTemplateUpload(sourceName: string, text: string) {
   if (!branch) throw new Error(`แถว ${dataStart + 1}: ไม่รู้จัก StoreID ในคอลัมน์ A (${storeId || 'ว่าง'}) ต้องเป็น ${Object.values(ENGINE_STORES).join(', ')}`)
 
   const template = validateGrabDocument(branch, document)
-  // New uploads must match the approved stock export exactly. RUN retains
-  // support for legacy templates already stored under their canonical names.
-  const header = document.rows[template.headerIndex]
-  if (header.length !== grabStockColumns.length) throw new Error(`หัวตารางต้องมี 16 คอลัมน์ A–P เท่านั้น (พบ ${header.length} คอลัมน์)`)
-  grabStockColumns.forEach((expected, column) => {
-    if (header[column] !== expected) throw new Error(`หัวคอลัมน์ ${String.fromCharCode(65 + column)} ต้องเป็น ${expected} แบบตรงตัว (พบ ${header[column] || 'ว่าง'})`)
-  })
+  if (template.headerIndex !== uploadHeaderIndex) validateGrabUploadColumns(document, template.headerIndex)
+  // Check malformed leading records too; RUN retains legacy compatibility.
   for (let index = template.headerIndex + 1; index < document.rows.length; index++) {
     const row = document.rows[index]
     if (row.every(cell => !cell.trim())) continue
-    if (row.length !== grabStockColumns.length) throw new Error(`แถว ${index + 1}: ต้องมี 16 คอลัมน์ A–P เท่านั้น (พบ ${row.length} คอลัมน์)`)
     if (row[0].trim() !== ENGINE_STORES[branch]) throw new Error(`แถว ${index + 1}: StoreID ไม่ตรงกับ ${branch.toUpperCase()} (${ENGINE_STORES[branch]})`)
   }
   return { ...template, name: templateName(branch) }
