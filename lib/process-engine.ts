@@ -131,15 +131,24 @@ export function readStockReport(name: string, text: string, encoding: string): S
 
 const headerKey = (value: string) => value.trim().toUpperCase().replace(/[\s_()\-.*]/g, '')
 
-export function validateGrabTemplate(name: string, text: string) {
-  const branch = templateBranch(name)
-  const document = parseEngineCsv(text)
+const grabStockColumns = [
+  'STOREID', 'ITEMID', 'ITEMNAME', 'ITEMCODE', 'CURRENTSTOCK', 'MAXSTOCK',
+  'RESTOCKLOCALTIME', 'RESTOCKFREQ', 'ISMONDAYRESTOCK', 'ISTUESDAYRESTOCK',
+  'ISWEDNESDAYRESTOCK', 'ISTHURSDAYRESTOCK', 'ISFRIDAYRESTOCK',
+  'ISSATURDAYRESTOCK', 'ISSUNDAYRESTOCK', 'ITEMSTATUS',
+] as const
+
+function grabDataStart(document: CsvDocument) {
+  return document.rows.findIndex(row => isStockSku(normalizeStockSku(row[3])) && Boolean(row[2]?.trim()))
+}
+
+function validateGrabDocument(branch: EngineBranch, document: CsvDocument) {
   // The real stock exports have C=ITEMNAME (no price column), with a human
   // header, instructions, and a machine header. Price-bearing exports are
   // supported too. Locate data by the item code, then use the final header
   // before those records, without mistaking the instruction row for data.
   const skuColumn = 3
-  const dataStart = document.rows.findIndex(row => isStockSku(normalizeStockSku(row[skuColumn])) && Boolean(row[2]?.trim()))
+  const dataStart = grabDataStart(document)
   let headerIndex = -1
   for (let index = 0; index < (dataStart < 0 ? document.rows.length : dataStart); index++) {
     const row = document.rows[index]
@@ -166,6 +175,36 @@ export function validateGrabTemplate(name: string, text: string) {
     if (row[0]?.trim().startsWith('3-') || isStockSku(normalizeStockSku(row[skuColumn]))) throw new Error(`แถว ${index + 1}: ข้อมูลสินค้าก่อนแถวเริ่มต้นไม่ถูกต้อง`)
   }
   return { branch, document, headerIndex, dataStart, dataIndices, skuColumn }
+}
+
+export function validateGrabTemplate(name: string, text: string) {
+  return validateGrabDocument(templateBranch(name), parseEngineCsv(text))
+}
+
+export function validateGrabTemplateUpload(sourceName: string, text: string) {
+  if (!/\.csv$/i.test(sourceName)) throw new Error('อัปโหลดได้เฉพาะไฟล์ .CSV')
+  const document = parseEngineCsv(text)
+  const dataStart = grabDataStart(document)
+  if (dataStart < 0) throw new Error('ไม่พบแถวข้อมูล GRAB ที่มี SKU ในคอลัมน์ D')
+  const storeId = document.rows[dataStart][0]?.trim()
+  const branch = ENGINE_BRANCHES.find(branch => ENGINE_STORES[branch] === storeId)
+  if (!branch) throw new Error(`แถว ${dataStart + 1}: ไม่รู้จัก StoreID ในคอลัมน์ A (${storeId || 'ว่าง'}) ต้องเป็น ${Object.values(ENGINE_STORES).join(', ')}`)
+
+  const template = validateGrabDocument(branch, document)
+  // New uploads must match the approved stock export exactly. RUN retains
+  // support for legacy templates already stored under their canonical names.
+  const header = document.rows[template.headerIndex]
+  if (header.length !== grabStockColumns.length) throw new Error(`หัวตารางต้องมี 16 คอลัมน์ A–P เท่านั้น (พบ ${header.length} คอลัมน์)`)
+  grabStockColumns.forEach((expected, column) => {
+    if (header[column] !== expected) throw new Error(`หัวคอลัมน์ ${String.fromCharCode(65 + column)} ต้องเป็น ${expected} แบบตรงตัว (พบ ${header[column] || 'ว่าง'})`)
+  })
+  for (let index = template.headerIndex + 1; index < document.rows.length; index++) {
+    const row = document.rows[index]
+    if (row.every(cell => !cell.trim())) continue
+    if (row.length !== grabStockColumns.length) throw new Error(`แถว ${index + 1}: ต้องมี 16 คอลัมน์ A–P เท่านั้น (พบ ${row.length} คอลัมน์)`)
+    if (row[0].trim() !== ENGINE_STORES[branch]) throw new Error(`แถว ${index + 1}: StoreID ไม่ตรงกับ ${branch.toUpperCase()} (${ENGINE_STORES[branch]})`)
+  }
+  return { ...template, name: templateName(branch) }
 }
 
 export function processGrabTemplate(name: string, text: string, report: StockReport, subtract: number, pending: Set<string>) {

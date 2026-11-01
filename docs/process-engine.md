@@ -12,7 +12,21 @@ The PENDING card supports authenticated ADD/DELETE by branch and read-only price
 
 Pending SKUs take precedence, then matching report quantities, then missing SKUs. Only raw CSV cells E/F/P change; other cells, quoting, multiline content, all headers and original row endings are preserved. Outputs have a UTF-8 BOM and Bangkok date suffix. DOWNLOAD ALL generates a single ZIP containing all successful CSV results; reports and results stay in memory only. CLEAR resets log/progress only.
 
-Upload validation and RUN validation share the same code. A rejected template does not stop other branches/files. A zero-match result displays both an alert and a visible warning before download. PROCESSED and SKIPPED count branches; UPDATED counts rows whose E/F/P values changed.
+GRAB CSV MANAGER accepts any source filename ending in `.csv` (case-insensitive). It determines the branch from column A of the data and saves under the canonical name below, regardless of the source filename. Every nonblank data row must use that same StoreID; unknown, empty, or mixed StoreIDs are rejected before writing.
+
+| StoreID (column A) | Saved / displayed filename |
+|---|---|
+| `3-C7MKLKLYL8LYAJ` | `GRAB_SSS.CSV` |
+| `3-C3JVCCKYNU23TA` | `GRAB_SRC.CSV` |
+| `3-C7AAJUMCGAE3RE` | `GRAB_KKL.CSV` |
+
+New uploads must match the approved stock template's machine header **exactly**, including case, spelling, and column order:
+
+```text
+STOREID,ITEMID,ITEMNAME,ITEMCODE,CURRENTSTOCK,MAXSTOCK,RESTOCKLOCALTIME,RESTOCKFREQ,ISMONDAYRESTOCK,ISTUESDAYRESTOCK,ISWEDNESDAYRESTOCK,ISTHURSDAYRESTOCK,ISFRIDAYRESTOCK,ISSATURDAYRESTOCK,ISSUNDAYRESTOCK,ITEMSTATUS
+```
+
+The machine header and every nonblank data row must have exactly 16 columns (A–P). Human-readable headers and instruction rows before the machine header are preserved, as are all CSV contents. A rejected file leaves its stored template unchanged and does not stop other files. Upload and RUN share row/StoreID validation; RUN additionally retains compatibility with legacy stock/price-bearing templates already stored under canonical names. A zero-match result displays both an alert and a visible warning before download. PROCESSED and SKIPPED count branches; UPDATED counts rows whose E/F/P values changed.
 
 The unlock password `1234` is a UI guard. Supabase Auth sign-in in the manager supports actual authenticated-only table writes. The schema migration enables RLS; it does not grant anonymous write access or create auth users.
 
@@ -21,7 +35,7 @@ Database schema: `supabase/migrations/202610300001_process_engine.sql`. For Supa
 Validation:
 
 ```sh
-node --test tests/process-engine.test.cjs
+node --test tests/*.test.*
 npm run build
 ```
 
