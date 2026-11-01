@@ -247,6 +247,7 @@ Call `preloadImages()` after every product load to warm the image cache.
 
 ## Agent Instructions
 
+- After completing and verifying each change, commit and push to `origin/main` so Vercel can deploy it. Integrate upstream changes before pushing; do not force-push.
 - **Do not create new API route files** unless explicitly asked — all routes live under `app/api/`.
 - **Do not touch `.js` files** in `app/api/` — they are dead code.
 - **`page.tsx` is intentionally large** (~2,100 lines) — prefer editing in place over splitting unless asked.

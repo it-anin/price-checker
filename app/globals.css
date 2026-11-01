@@ -134,6 +134,8 @@ body {
 .pc-price-tabs button.is-active { color: var(--pc-accent); border-bottom-color: var(--pc-accent); }
 .pc-price-tabs b { font: 8px Arial, sans-serif; margin-left: 3px; color: var(--pc-accent); }
 .pc-table-options { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #f0f1ea; padding: 11px 20px; gap: 12px; }
+.pc-price-view { display: inline-flex; align-items: center; gap: 6px; color: #7b826e; font-size: 10px; white-space: nowrap; }
+.pc-price-view .pc-icon { width: 12px; height: 12px; }
 .pc-branch-switch { display: inline-flex; gap: 3px; background: #f5f5ef; padding: 3px; border-radius: 6px; }
 .pc-branch-switch button { font: 10px Arial, sans-serif; padding: 6px 12px; border-radius: 4px; color: #8b947d; min-height: 28px; }
 .pc-branch-switch button.is-active { background: white; color: var(--pc-accent); font-weight: 700; box-shadow: 0 1px 4px #665a3a0c; }
@@ -366,8 +368,8 @@ body {
   .pc-price-tabs button { font-size: 11px; padding: 7px 0; min-height: 36px; }
   .pc-table-options { padding: 10px 13px; gap: 8px; }
   .pc-branch-switch button { min-height: 34px; padding: 7px 11px; font-size: 10px; }
-  .pc-table-options>.pc-text-button { font-size: 8px !important; }
-  .pc-table-options>.pc-text-button>.pc-icon { display: none; }
+  .pc-table-options>.pc-price-view { font-size: 8px; }
+  .pc-table-options>.pc-price-view>.pc-icon { display: none; }
   .pc-table-scroll { max-height: 455px; min-height: 0; }
   .pc-products-table { min-width: 570px; }
   .pc-products-table td { padding-top: 12px; padding-bottom: 12px; }
