@@ -1,0 +1,142 @@
+[
+  {
+    "id": 1,
+    "name": "Studio Cards",
+    "thai": "การ์ดแยกหมวด",
+    "description": "สแกนเครื่องมือ 4 หมวดพร้อมกัน เหมาะกับงานประจำ",
+    "kind": "grid"
+  },
+  {
+    "id": 2,
+    "name": "Command Palette",
+    "thai": "ค้นหาแล้วสั่งงาน",
+    "description": "โฟกัสช่องค้นหาและคำสั่ง เหมาะกับผู้ใช้ที่รู้ว่าต้องการทำอะไร",
+    "kind": "search"
+  },
+  {
+    "id": 3,
+    "name": "Bento Workspace",
+    "thai": "บล็อกต่างขนาด",
+    "description": "เน้นงานสำคัญด้วยการ์ดขนาดใหญ่ สลับบล็อกงานรอง",
+    "kind": "grid"
+  },
+  {
+    "id": 4,
+    "name": "Workflow Steps",
+    "thai": "นำเข้าถึงส่งออก",
+    "description": "จัดเครื่องมือตามลำดับการทำงาน 3 ขั้น",
+    "kind": "flow"
+  },
+  {
+    "id": 5,
+    "name": "Category Tabs",
+    "thai": "เลือกหมวดก่อนทำงาน",
+    "description": "แถบหมวดด้านบนลดจำนวนปุ่มที่เห็นพร้อมกัน",
+    "kind": "tabs"
+  },
+  {
+    "id": 6,
+    "name": "Operations Dashboard",
+    "thai": "ภาพรวมงานและทางลัด",
+    "description": "ตัวเลขตัวอย่างและงานที่ใช้บ่อยอยู่เหนือหมวดเครื่องมือ",
+    "kind": "dashboard"
+  },
+  {
+    "id": 7,
+    "name": "Workflow Board",
+    "thai": "บอร์ดแบ่งขั้นตอน",
+    "description": "คอลัมน์แนวตั้งสำหรับเตรียมไฟล์ ตรวจราคา และส่งมอบ",
+    "kind": "flow"
+  },
+  {
+    "id": 8,
+    "name": "Compact Directory",
+    "thai": "สารบัญเครื่องมือ",
+    "description": "รายการแถวกระชับ มีรหัสไฟล์และหมวดกำกับ",
+    "kind": "list"
+  },
+  {
+    "id": 9,
+    "name": "Night Console",
+    "thai": "คอนโซลโทนมืด",
+    "description": "พื้นที่ทำงานสีเข้มพร้อมคำสั่งและทางลัดแป้นพิมพ์",
+    "kind": "dark"
+  },
+  {
+    "id": 10,
+    "name": "Split Workspace",
+    "thai": "เครื่องมือคู่ Template",
+    "description": "วางเครื่องมือด้านซ้าย และจัดการ Template ด้านขวา",
+    "kind": "split"
+  },
+  {
+    "id": 11,
+    "name": "Branch Hub",
+    "thai": "เริ่มจากเลือกสาขา",
+    "description": "ใช้แท็บ SRC / KKL / SSS ก่อนเลือกเครื่องมือของสาขานั้น",
+    "kind": "tabs"
+  },
+  {
+    "id": 12,
+    "name": "Icon Launchpad",
+    "thai": "เมนูไอคอนขนาดใหญ่",
+    "description": "ตารางปุ่มไอคอน Outline พร้อมชื่อที่อ่านง่าย",
+    "kind": "grid"
+  },
+  {
+    "id": 13,
+    "name": "Editorial Index",
+    "thai": "หัวข้อใหญ่และเลขหมวด",
+    "description": "ตัวอักษรเด่นพร้อมหมวดแบบดัชนี เน้นพื้นที่ว่าง",
+    "kind": "editorial"
+  },
+  {
+    "id": 14,
+    "name": "Guided Timeline",
+    "thai": "ไทม์ไลน์ช่วยนำทาง",
+    "description": "อธิบายเป้าหมายแต่ละขั้นก่อนแสดงเครื่องมือ",
+    "kind": "flow"
+  },
+  {
+    "id": 15,
+    "name": "Tool Inspector",
+    "thai": "รายการพร้อมคำแนะนำ",
+    "description": "เลือกเครื่องมือด้านซ้าย อ่านรายละเอียดและเริ่มงานด้านขวา",
+    "kind": "split"
+  },
+  {
+    "id": 16,
+    "name": "File Workbench",
+    "thai": "โต๊ะเตรียมไฟล์",
+    "description": "ริบบอนคำสั่งด้านบนและพื้นที่อัปโหลดกลางหน้า",
+    "kind": "workspace"
+  },
+  {
+    "id": 17,
+    "name": "Workspace Notebook",
+    "thai": "สมุดงานแยกแท็บ",
+    "description": "งานนำเข้า ราคา และส่งออกอยู่คนละหน้าสมุด",
+    "kind": "tabs"
+  },
+  {
+    "id": 18,
+    "name": "Touch Cards",
+    "thai": "การ์ดสำหรับหน้าจอสัมผัส",
+    "description": "ปุ่มใหญ่ พับหมวดได้ เหมาะกับแท็บเล็ตและมือถือ",
+    "kind": "mobile"
+  },
+  {
+    "id": 19,
+    "name": "Focused Start",
+    "thai": "เริ่มจากงานหลัก",
+    "description": "มีจุดเริ่มงานเดียวชัดเจน แล้วค่อยเลือกงานอื่น",
+    "kind": "focus"
+  },
+  {
+    "id": 20,
+    "name": "Control Center",
+    "thai": "ศูนย์ควบคุมโมดูล",
+    "description": "นำทางด้วยแผงโมดูล พร้อมพื้นที่จัดการและสถานะไฟล์",
+    "kind": "dashboard"
+  }
+]
