@@ -263,7 +263,8 @@ body {
 .pc-statusbar>span:last-child { font: 7px Arial, sans-serif; letter-spacing: 1.2px; color: #b1b49f; }
 .pc-statusbar b { font-weight: 400; margin: 0 5px; color: #cbcbb8; }
 .pc-workflow-tools { border: 1px solid #e0dfd0; background: #fffcf7; border-radius: 12px; padding: 20px; margin-bottom: 25px; }
-.pc-tools-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.pc-tools-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.pc-tools-heading-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pc-tools-heading h2 { font-size: 17px; font-weight: 400; margin-top: 8px; }
 .pc-tools-heading .pc-icon-button { background: transparent; border: 0; }
 .pc-tool-groups { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 22px; }
