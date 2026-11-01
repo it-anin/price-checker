@@ -30,7 +30,7 @@ The machine header and every nonblank data row must have exactly 16 columns (Aâ€
 
 Changed headers trigger a popup and a persistent warning inside GRAB CSV MANAGER. For each rejected file, the warning lists every changed column's letter, expected name, and actual name, including added/missing columns. Reordered columns appear at each affected position. Data rows with missing/extra columns report the row and actual count. Warnings remain after refreshing the file list and reset on the next upload attempt; rejected files never overwrite approved templates.
 
-The unlock password `1234` is a UI guard. Supabase Auth sign-in in the manager supports actual authenticated-only table writes. The schema migration enables RLS; it does not grant anonymous write access or create auth users.
+GRAB CSV MANAGER has no LOCK/UNLOCK switch or separate unlock password. The upload button and account sign-in form are available directly when the manager is expanded. Supabase Auth sign-in still controls authenticated-only table writes. The schema migration enables RLS; it does not grant anonymous write access or create auth users.
 
 Database schema: `supabase/migrations/202610300001_process_engine.sql`. For Supabase SQL Editor, use `/workspace/price-checker-sql-editor.zip` and execute its five numbered SQL files separately. Each file is under 400 KB. Templates import with per-file transactions and checksums; the final step publishes pending data only after all three templates pass verification. The original combined SQL exceeds the Studio query limit. The bundle has not been applied to production by this task.
 

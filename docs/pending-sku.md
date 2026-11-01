@@ -1,6 +1,6 @@
 # PENDING SKU UPDATE
 
-The PENDING card in PROCESS ENGINE manages products waiting for Grab approval. Read-only visitors can inspect entries and compare prices. ADD/DELETE use the same Supabase Auth session as GRAB CSV MANAGER and do not require its UNLOCK switch.
+The PENDING card in PROCESS ENGINE manages products waiting for Grab approval. Read-only visitors can inspect entries and compare prices. ADD/DELETE use the same Supabase Auth session as GRAB CSV MANAGER.
 
 ## Managing pending entries
 

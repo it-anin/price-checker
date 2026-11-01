@@ -193,7 +193,7 @@ test('the manager writes only validated files under canonical names and keeps re
   let invalidations = 0, refreshes = 0
   const engineBusyRef = { current: false }
   const handler = uploadHandler({
-    grabManagerUnlocked: true, engineBusyRef, decodeCsv, validateGrabTemplateUpload,
+    engineBusyRef, decodeCsv, validateGrabTemplateUpload,
     setEngineBusy: value => busy.push(value),
     setGrabUploadProblems: problems => warnings.push([...problems]),
     supabase: { from(table) {
