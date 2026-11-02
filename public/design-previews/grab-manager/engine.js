@@ -145,6 +145,10 @@ export function readStockReport(name, text, encoding) {
     const stock = new Map();
     let rowCount = 0;
     rows.forEach((row, index) => {
+        // R01.102's field-name header can look like a valid SKU in column E.
+        // Recognize it before data starts; never hide invalid quantities in data.
+        if (rowCount === 0 && row[6]?.trim().toUpperCase() === 'CF_QUANTITY')
+            return;
         const sku = normalizeStockSku(row[4]);
         if (!isStockSku(sku))
             return;

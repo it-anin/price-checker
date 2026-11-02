@@ -64,6 +64,40 @@ test('R01.102 reads row 1893 with an inch-mark name in ordinary TIS-620 and UTF-
   }
 })
 
+test('R01.102 skips the CF_QUANTITY header and retains zero, negative and duplicate quantities', () => {
+  for (const branch of ['src', 'sss', 'kkl']) {
+    for (const delimiter of [',', ';', '\t']) {
+      const rows = [
+        ['', '', '', '', 'IC_CODE', 'UNIT', 'CF_QUANTITY'],
+        ['', '', 'UM Finger Cot Splint E01 (M/2-3") NEW 08-26', '', '00001', '', '2'],
+        ['', '', 'ยา', '', '00002', '', '0'],
+        ['', '', 'ยา', '', '00003', '', '-3'],
+        ['', '', 'ยา', '', '00001', '', '4'],
+      ]
+      const text = rows.map(row => row.join(delimiter)).join('\r\n') + '\r\n'
+      const tis620 = Uint8Array.from([...text], ch => ch.charCodeAt(0) > 127 ? ch.charCodeAt(0) - 0xd60 : ch.charCodeAt(0))
+      for (const bytes of [new TextEncoder().encode(text), tis620]) {
+        const decoded = decodeCsv(bytes.buffer)
+        const result = readStockReport(`${branch}.CSV`, decoded.text, decoded.encoding)
+        assert.equal(result.rowCount, 4)
+        assert.deepEqual([...result.stock], [['00001', 6], ['00002', 0], ['00003', -3]])
+        assert.equal(result.stock.has('IC_CODE'), false)
+      }
+    }
+  }
+})
+
+test('R01.102 header handling never skips the first data row or masks invalid data quantities', () => {
+  const header = 'A,B,C,D,IC_CODE,F,CF_QUANTITY'
+  assert.equal(readStockReport('src.csv', ',,,,00001,,2', 'UTF-8').stock.get('00001'), 2)
+  assert.throws(() => readStockReport('src.csv', header, 'UTF-8'), /ไม่พบข้อมูล R01.102/)
+  for (const invalid of ['', 'bad', 'CF_QUANTITY', 'NaN']) {
+    assert.throws(() => readStockReport('src.csv', header + '\n,,,,00001,,2\n,,,,00002,,' + invalid, 'UTF-8'), /แถว 3: จำนวนคอลัมน์ G ไม่ใช่ตัวเลข/)
+  }
+  assert.throws(() => readStockReport('src.csv', header + '\n,,,,00001,,bad', 'UTF-8'), /แถว 2: จำนวนคอลัมน์ G ไม่ใช่ตัวเลข/)
+  assert.throws(() => readStockReport('src.csv', ',,,,00001,,bad', 'UTF-8'), /แถว 1: จำนวนคอลัมน์ G ไม่ใช่ตัวเลข/)
+})
+
 test('pending has priority; subtract once; zero, negative and missing stock are empty', () => {
   const input = template('src', [{ sku: '001' }, { sku: '002' }, { sku: '003' }, { sku: '004' }, { sku: '005' }])
   const stock = report('src', [['001', 12], ['002', 20], ['003', 5], ['004', -2]])
