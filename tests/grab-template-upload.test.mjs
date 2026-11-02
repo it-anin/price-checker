@@ -188,7 +188,7 @@ test('the manager writes only validated files under canonical names and keeps re
   const original = csv(stockRows())
   const rows = stockRows(); rows[2][7] = 'WRONG'
   const invalid = csv(rows)
-  const writes = [], logs = [], alerts = [], busy = [], warnings = []
+  const writes = [], logs = [], alerts = [], busy = [], warnings = [], results = []
   const cache = new Map(Object.keys(stores).map(branch => [`GRAB_${branch.toUpperCase()}.CSV`, 'cached names']))
   let invalidations = 0, refreshes = 0
   const engineBusyRef = { current: false }
@@ -196,10 +196,13 @@ test('the manager writes only validated files under canonical names and keeps re
     engineBusyRef, decodeCsv, validateGrabTemplateUpload,
     setEngineBusy: value => busy.push(value),
     setGrabUploadProblems: problems => warnings.push([...problems]),
-    supabase: { from(table) {
-      assert.equal(table, 'grab_files')
-      return { async upsert(row, options) { writes.push({ row, options }); return { error: null } } }
-    } },
+    saveGrabTemplate: async (sourceName, content) => {
+      const template = validateGrabTemplateUpload(content)
+      const row = { name: template.name, content, updated_at: new Date().toISOString() }
+      writes.push({ row })
+      return { name: template.name, branch: template.branch, sourceName, candidate: content, updatedAt: row.updated_at, total: template.dataIndices.length, rows: [], isNew: true, changed: false, counts: { updated: 0, added: template.dataIndices.length, removed: 0, unchanged: 0 } }
+    },
+    setGrabUploadNotice: () => {}, setGrabUploadResults: value => results.push(value), setGrabChangeOpen: () => {}, setGrabExportError: () => {}, openGrabChangeNotice: () => {},
     pendingNameCache: { current: cache }, logEngine: message => logs.push(message),
     invalidateEngineResults: () => invalidations++, setEngineChecks: () => {},
     refreshGrabFiles: async () => { refreshes++ }, engineMessage: error => error.message,
@@ -209,7 +212,7 @@ test('the manager writes only validated files under canonical names and keeps re
   await handler([file('GRAB_SSS.CSV', original), file('bad.csv', invalid), file('another export.csv', csv(stockRows('kkl')))])
   assert.deepEqual(writes.map(write => write.row.name), ['GRAB_SRC.CSV', 'GRAB_KKL.CSV'])
   assert.equal(writes[0].row.content, original)
-  assert.ok(writes.every(write => write.options.onConflict === 'name' && Number.isFinite(Date.parse(write.row.updated_at))))
+  assert.ok(writes.every(write => Number.isFinite(Date.parse(write.row.updated_at))))
   assert.deepEqual([...cache.keys()], ['GRAB_SSS.CSV'])
   assert.ok(logs.some(message => message.includes('GRAB_SSS.CSV → GRAB_SRC.CSV')))
   assert.equal(alerts.length, 1); assert.match(alerts[0], /BLOCKED 1/)
@@ -219,11 +222,13 @@ test('the manager writes only validated files under canonical names and keeps re
   assert.match(warnings[1][0], /คอลัมน์ H เปลี่ยน: เดิม "RESTOCKFREQ" → พบ "WRONG"/)
   assert.ok(alerts[0].includes(warnings[1][0]))
   assert.equal(invalidations, 1); assert.equal(refreshes, 1)
+  assert.equal(results.at(-1).length, 2)
   assert.deepEqual(busy, ['templates', '']); assert.equal(engineBusyRef.current, false)
 
   await handler([file('all rejected.csv', invalid)])
   assert.equal(writes.length, 2)
   assert.equal(invalidations, 1)
+  assert.deepEqual(results.at(-1), [])
   assert.deepEqual(warnings[2], [])
   assert.match(warnings[3][0], /all rejected.csv/)
   await handler([file('fixed.csv', original)])

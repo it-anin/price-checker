@@ -1,6 +1,6 @@
 # Post-upload change popup designs
 
-The current GRAB CSV MANAGER preview link opens `/design-previews/grab-popups/index.html`. These are ten **popup designs that appear after an upload when file data changed**, each over the same manager background. The previous full-workspace concepts remain at `/design-previews/grab-manager/index.html`.
+The live manager uses **04 / Side Notice**. Its preview link opens `/design-previews/grab-popups/index.html`. These are ten **popup designs that appear after an upload when file data changed**, each over the same manager background. The previous full-workspace concepts remain at `/design-previews/grab-manager/index.html`.
 
 | No. | Popup | Structure |
 |---|---|---|
@@ -15,7 +15,7 @@ The current GRAB CSV MANAGER preview link opens `/design-previews/grab-popups/in
 | 09 | Branch Tabs | One batch-upload popup with per-branch result tabs |
 | 10 | Searchable Review | Searchable changed-row list and selected-row details |
 
-Open a concept with `?demo=1` to show the popup immediately in the simulated post-upload state. Without that query, the popup starts closed. “ลองอัปไฟล์ที่มีข้อมูลเปลี่ยน” simulates one changed upload; “ลองอัป 3 ไฟล์พร้อมกัน” simulates a batch. A changed upload opens the popup automatically. An unchanged upload shows a non-modal status and no change popup; invalid CSVs show an inline error and no change popup. Actual uploads are compared locally against fictional branch baselines. No production data is fetched or written, and the live manager upload flow is not replaced by a selected concept yet.
+Open a concept with `?demo=1` to show the popup immediately in the simulated post-upload state. Without that query, the popup starts closed. “ลองอัปไฟล์ที่มีข้อมูลเปลี่ยน” simulates one changed upload; “ลองอัป 3 ไฟล์พร้อมกัน” simulates a batch. A changed upload opens the popup automatically. An unchanged upload shows a non-modal status and no change popup; invalid CSVs show an inline error and no change popup. Preview uploads are compared locally against fictional branch baselines and never fetch or write production data. The live Side Notice implementation compares and saves real files using the existing Supabase client; see [PROCESS ENGINE](process-engine.md).
 
 All variants use native `dialog.showModal()` with a dimmed backdrop, accessible heading/description, focus containment, Escape dismissal and restored opener focus. Each has close/acknowledge controls plus working CSV and change-report exports. Batch tabs in 09 also show unchanged branches; the other variants show changed branches only.
 

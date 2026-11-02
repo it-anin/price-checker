@@ -6,6 +6,8 @@ import NextImage from 'next/image'
 import { supabase } from '../lib/supabase'
 import { ENGINE_BRANCHES, createResultsZip, decodeCsv, engineDate, normalizeStockSku, pendingSkuSets, processGrabTemplate, readStockReport, templateName, validateGrabTemplateUpload, type EngineBranch, type StockReport } from '../lib/process-engine'
 import { loadPendingSnapshot, savePendingMutation } from '../lib/process-engine-source'
+import { saveGrabTemplate } from '../lib/grab-template-source'
+import { GRAB_CHANGE_LABELS, grabChangesCsv, grabCsvWithBom, type SavedGrabReview } from '../lib/grab-template-review'
 import { buildPendingPriceChecks, comparePendingPrices, mutatePendingEntries, parsePendingInput, pendingManualBranches, readPendingGrabPrices, readPendingPromaxPrices, readTemplateNames, samePendingStockMembership, type PendingMutation, type PendingPriceCheck, type PendingPriceFile, type PendingSkuEntry, type PendingSnapshot } from '../lib/pending-sku'
 
 interface Product {
@@ -44,6 +46,8 @@ function WorkspaceIcon({ name, className = '' }: { name: string; className?: str
     upload: <><path d="M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5" /></>,
     download: <><path d="M12 3v13m-5-5 5 5 5-5M4 17v4h16v-4" /></>,
     check: <path d="m5 12 4 4 10-10" />,
+    alert: <><path d="m12 3 10 18H2L12 3Z" /><path d="M12 9v5m0 3v.1" /></>,
+    file: <><path d="M14 2H4v20h16V8l-6-6Zm0 0v6h6M8 13h8M8 17h6" /></>,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v6l4 2" /></>,
     arrow: <path d="M4 12h15m-6-6 6 6-6 6" />,
     chevron: <path d="m9 5 7 7-7 7" />,
@@ -160,6 +164,18 @@ export default function Home() {
   const [grabFilesLoading, setGrabFilesLoading] = useState(false)
   const [grabFilesError, setGrabFilesError] = useState('')
   const [grabUploadProblems, setGrabUploadProblems] = useState<string[]>([])
+  const [grabUploadNotice, setGrabUploadNotice] = useState('')
+  const [grabUploadResults, setGrabUploadResults] = useState<SavedGrabReview[]>([])
+  const [grabChangeOpen, setGrabChangeOpen] = useState(false)
+  const [grabChangeBranch, setGrabChangeBranch] = useState<EngineBranch>('src')
+  const [grabExpandedRow, setGrabExpandedRow] = useState<string | null>(null)
+  const [grabChangeLimit, setGrabChangeLimit] = useState(50)
+  const [grabExportError, setGrabExportError] = useState('')
+  const grabChangeDialogRef = useRef<HTMLDialogElement>(null)
+  const grabChangeOpenerRef = useRef<HTMLElement | null>(null)
+  const grabChangedFiles = grabUploadResults.filter(review => review.changed)
+  const grabActiveReview = grabChangedFiles.find(review => review.branch === grabChangeBranch) ?? grabChangedFiles[0]
+  const grabChangedRows = grabActiveReview?.rows.filter(row => row.type !== 'unchanged') ?? []
   const [grabManagerOpen, setGrabManagerOpen] = useState(false)
   const [grabAdminUser, setGrabAdminUser] = useState<string | null>(null)
   const [grabAdminEmail, setGrabAdminEmail] = useState('')
@@ -205,6 +221,16 @@ export default function Home() {
   useEffect(() => {
     if (engineLogRef.current) engineLogRef.current.scrollTop = engineLogRef.current.scrollHeight
   }, [engineLog, engineOpen])
+
+  useEffect(() => {
+    const dialog = grabChangeDialogRef.current
+    if (!dialog) return
+    if (!grabChangeOpen) { if (dialog.open) dialog.close(); return }
+    if (!dialog.open) dialog.showModal()
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = previousOverflow }
+  }, [grabChangeOpen])
 
   useEffect(() => {
     void refreshGrabFiles()
@@ -589,29 +615,68 @@ export default function Home() {
     if (!files.length || engineBusyRef.current) return
     engineBusyRef.current = true; setEngineBusy('templates')
     setGrabUploadProblems([])
+    setGrabUploadNotice(''); setGrabExportError(''); setGrabChangeOpen(false)
     const problems: string[] = []
-    let saved = 0
+    const reviews: SavedGrabReview[] = []
     try {
       for (const file of files) {
         try {
           const { text, encoding } = decodeCsv(await file.arrayBuffer())
           const template = validateGrabTemplateUpload(text)
-          const { error } = await supabase.from('grab_files').upsert({ name: template.name, content: text, updated_at: new Date().toISOString() }, { onConflict: 'name' })
-          if (error) throw new Error(`บันทึกไม่สำเร็จ: ${error.message}`)
-          saved++
-          pendingNameCache.current.delete(template.name)
-          logEngine(`SAVED ${file.name} → ${template.name} · ${template.dataIndices.length} แถว · ${encoding}`)
+          if (reviews.some(item => item.name === template.name)) throw new Error(`มีไฟล์สาขา ${template.branch.toUpperCase()} ในชุดนี้แล้ว กรุณาเลือกหนึ่งไฟล์ต่อสาขา`)
+          const review = await saveGrabTemplate(file.name, text)
+          reviews.push(review)
+          pendingNameCache.current.delete(review.name)
+          logEngine(`SAVED ${file.name} → ${review.name} · ${review.total} แถว · ${encoding} · แก้ไข ${review.counts.updated} / เพิ่ม ${review.counts.added} / นำออก ${review.counts.removed}`)
         } catch (error) {
           const problem = `${file.name}: ${engineMessage(error)}`
           problems.push(problem); logEngine(`BLOCKED ${problem}`)
         }
       }
       setGrabUploadProblems(problems)
-      if (saved) { invalidateEngineResults(); setEngineChecks(null) }
+      if (reviews.length) {
+        invalidateEngineResults(); setEngineChecks(null)
+        setGrabUploadResults(reviews)
+        const changed = reviews.filter(review => review.changed).length
+        const added = reviews.filter(review => review.isNew).length
+        const unchanged = reviews.length - changed - added
+        setGrabUploadNotice(`บันทึกสำเร็จ ${reviews.length} ไฟล์ · ข้อมูลเปลี่ยน ${changed} ไฟล์ · ข้อมูลไม่เปลี่ยน ${unchanged} ไฟล์${added ? ` · เพิ่มไฟล์ใหม่ ${added} ไฟล์` : ''}`)
+      } else setGrabUploadResults([])
       await refreshGrabFiles()
-      logEngine(`UPLOAD TEMPLATE · SAVED ${saved} / BLOCKED ${problems.length}`)
-      if (problems.length) window.alert(`บันทึกสำเร็จ ${saved} ไฟล์ / BLOCKED ${problems.length} ไฟล์\n\n${problems.join('\n\n')}`)
+      logEngine(`UPLOAD TEMPLATE · SAVED ${reviews.length} / BLOCKED ${problems.length}`)
+      if (reviews.some(review => review.changed)) openGrabChangeNotice(reviews)
+      else if (problems.length) window.alert(`บันทึกสำเร็จ ${reviews.length} ไฟล์ / BLOCKED ${problems.length} ไฟล์\n\n${problems.join('\n\n')}`)
     } finally { engineBusyRef.current = false; setEngineBusy('') }
+  }
+
+  function openGrabChangeNotice(reviews = grabUploadResults) {
+    const review = reviews.find(item => item.changed)
+    if (!review) return
+    setGrabChangeBranch(review.branch)
+    setGrabExpandedRow(review.rows.find(row => row.type !== 'unchanged')?.key ?? null)
+    setGrabChangeLimit(50)
+    setGrabChangeOpen(true)
+  }
+
+  function downloadGrabCsv(name: string, text: string) {
+    const url = URL.createObjectURL(new Blob([grabCsvWithBom(text)], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url; link.download = name
+    document.body.appendChild(link); link.click(); link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  async function exportStoredGrabTemplate(name: string) {
+    if (engineBusyRef.current) return
+    engineBusyRef.current = true; setEngineBusy('template-export'); setGrabExportError('')
+    try {
+      const { data, error } = await supabase.from('grab_files').select('content').eq('name', name).maybeSingle()
+      if (error) throw new Error(error.message)
+      if (!data || typeof data.content !== 'string') throw new Error('ไม่พบเนื้อหา CSV ของไฟล์นี้')
+      downloadGrabCsv(name, data.content)
+      logEngine(`EXPORT ${name}`)
+    } catch (error) { setGrabExportError(`Export ${name} ไม่สำเร็จ: ${engineMessage(error)}`) }
+    finally { engineBusyRef.current = false; setEngineBusy('') }
   }
 
   function downloadEngineOutputs() {
@@ -2263,6 +2328,35 @@ async function confirmUpdatePrices() {
         </section>}
 
 
+        <dialog className="gc-drawer" ref={grabChangeDialogRef} aria-labelledby="grab-change-title" aria-describedby="grab-change-description" onClose={() => { setGrabChangeOpen(false); grabChangeOpenerRef.current?.focus() }} onCancel={() => setGrabChangeOpen(false)}>
+          {grabActiveReview && <div className="gc-shell">
+            <header className="gc-header">
+              <span className="gc-alert-icon"><WorkspaceIcon name="alert" /></span>
+              <div><span className="gc-eyebrow">UPLOAD COMPLETE / DATA CHANGED</span><h2 id="grab-change-title">แจ้งการเปลี่ยนแปลง</h2><p id="grab-change-description">{grabChangedFiles.length} ไฟล์มีข้อมูลต่างจากไฟล์เดิมที่เก็บไว้</p></div>
+              <button className="gc-close" aria-label="ปิดแจ้งการเปลี่ยนแปลง" onClick={() => setGrabChangeOpen(false)}><WorkspaceIcon name="close" /></button>
+            </header>
+            <div className="gc-success"><WorkspaceIcon name="check" />บันทึกไฟล์ที่ผ่านการตรวจสอบเรียบร้อยแล้ว</div>
+            <div className="gc-body">
+              {grabUploadProblems.length > 0 && <details className="gc-upload-errors"><summary>มี {grabUploadProblems.length} ไฟล์บันทึกไม่สำเร็จ</summary><ul>{grabUploadProblems.map((problem, index) => <li key={index}><pre>{problem}</pre></li>)}</ul></details>}
+              {grabChangedFiles.length > 1 && <div className="gc-file-tabs" role="group" aria-label="เลือกไฟล์ที่ข้อมูลเปลี่ยน">{grabChangedFiles.map(review => <button key={review.name} aria-pressed={review.name === grabActiveReview.name} onClick={() => { setGrabChangeBranch(review.branch); setGrabExpandedRow(review.rows.find(row => row.type !== 'unchanged')?.key ?? null); setGrabChangeLimit(50) }}><strong>{review.branch.toUpperCase()}</strong><small>{review.counts.updated + review.counts.added + review.counts.removed} แถวเปลี่ยน</small></button>)}</div>}
+              <div className="gc-file-tag"><WorkspaceIcon name="file" /><strong>{grabActiveReview.name}</strong><span>{grabActiveReview.total.toLocaleString('th-TH')} แถว</span></div>
+              <p className="gc-source">จาก {grabActiveReview.sourceName}<br />{new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(grabActiveReview.updatedAt))}</p>
+              <div className="gc-total"><strong>{grabChangedRows.length.toLocaleString('th-TH')}</strong><span>แถวมีข้อมูลเปลี่ยนแปลง</span></div>
+              <div className="gc-stats">{(['updated', 'added', 'removed'] as const).map(type => <div key={type} className={type}><strong>{grabActiveReview.counts[type].toLocaleString('th-TH')}</strong><span>{GRAB_CHANGE_LABELS[type]}</span></div>)}</div>
+              <div className="gc-list-heading"><h3>รายการที่เปลี่ยน</h3><span>ค่าเดิม → ค่าใหม่</span></div>
+              <div className="gc-rows">{grabChangedRows.slice(0, grabChangeLimit).map((row, index) => <article key={row.key} className="gc-row">
+                <button className="gc-row-toggle" aria-expanded={grabExpandedRow === row.key} aria-controls={`grab-change-row-${grabActiveReview.branch}-${index}`} onClick={() => setGrabExpandedRow(current => current === row.key ? null : row.key)}>
+                  <span className={`gc-type ${row.type}`}>{GRAB_CHANGE_LABELS[row.type]}</span><span className="gc-product"><strong>SKU {row.sku}</strong><small>{row.name}</small></span><span className="gc-cell-count">{row.changes.length} คอลัมน์</span><WorkspaceIcon name="chevron" className={grabExpandedRow === row.key ? 'is-expanded' : ''} />
+                </button>
+                {grabExpandedRow === row.key && <div className="gc-row-content" id={`grab-change-row-${grabActiveReview.branch}-${index}`}><p className="gc-row-reference">แถวเดิม {row.before?.row ?? '—'} → แถวใหม่ {row.after?.row ?? '—'}</p><div className="gc-cells">{row.changes.map(change => <div key={change.column}><label>{String.fromCharCode(65 + change.column)} / {change.name}</label><p><span className="gc-before" title="ค่าเดิม">{change.before === undefined ? 'ไม่มีแถวนี้' : change.before === '' ? '(ว่าง)' : change.before}</span><WorkspaceIcon name="arrow" /><strong className="gc-after" title="ค่าใหม่">{change.after === undefined ? 'ไม่มีแถวนี้' : change.after === '' ? '(ว่าง)' : change.after}</strong></p></div>)}</div></div>}
+              </article>)}</div>
+              {grabChangedRows.length > grabChangeLimit && <button className="gc-more" onClick={() => setGrabChangeLimit(value => value + 50)}>แสดงเพิ่มอีก {Math.min(50, grabChangedRows.length - grabChangeLimit)} แถว · แสดงแล้ว {grabChangeLimit.toLocaleString('th-TH')}/{grabChangedRows.length.toLocaleString('th-TH')}</button>}
+              <p className="gc-unchanged">อีก {grabActiveReview.counts.unchanged.toLocaleString('th-TH')} แถวข้อมูลตรงกับไฟล์เดิม · Export รายงานได้ครบทุกแถวที่เปลี่ยน</p>
+            </div>
+            <footer className="gc-footer"><div><button className="gc-button" onClick={() => downloadGrabCsv(grabActiveReview.name, grabActiveReview.candidate)}><WorkspaceIcon name="download" />Export CSV</button><button className="gc-button" onClick={() => downloadGrabCsv(grabActiveReview.name.replace(/\.CSV$/, '_CHANGES.csv'), grabChangesCsv(grabActiveReview))}><WorkspaceIcon name="file" />Export รายงาน</button></div><button className="gc-button gc-primary" autoFocus onClick={() => setGrabChangeOpen(false)}>รับทราบ</button></footer>
+          </div>}
+        </dialog>
+
         <div hidden>
           <input type="file" accept=".csv" id="grabInputSrc" onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'src'); e.target.value = '' } }} />
           <input type="file" accept=".csv" id="grabInputKkl" onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'kkl'); e.target.value = '' } }} />
@@ -2295,7 +2389,7 @@ async function confirmUpdatePrices() {
           {matchingToolCount === 0 && <div className="pc-tools-empty" role="status"><WorkspaceIcon name="search" /><h3>ไม่พบเครื่องมือที่ตรงกับคำค้นหา</h3><p>ลองค้นหาด้วยชื่อเครื่องมือ รหัสรายงาน หรือสาขา</p><button className="pc-button" onClick={() => setToolSearch('')}>แสดงเครื่องมือทั้งหมด</button></div>}
         <section className="pe-card pe-manager pc-tools-manager" aria-label="GRAB CSV MANAGER" hidden={!showGrabManager}>
           <div className="pe-manager-heading"><button className="pe-manager-toggle" aria-expanded={grabManagerOpen} aria-controls="pe-manager-content" onClick={() => setGrabManagerOpen(value => !value)}><WorkspaceIcon name="chevron" className={grabManagerOpen ? 'is-expanded' : ''} /><span>GRAB CSV MANAGER<small>Template ที่ Grab อนุมัติแล้ว · {grabFiles.length} ไฟล์</small></span></button><a className="pc-text-button pe-manager-designs" href="/design-previews/grab-popups/index.html" target="_blank" rel="noopener noreferrer">ดูตัวอย่าง Popup แจ้งเตือน 10 แบบ<WorkspaceIcon name="arrow" /></a></div>
-          {grabManagerOpen && <div id="pe-manager-content" className="pe-manager-content"><p>อัปโหลดเฉพาะเมื่อ Grab อนุมัติการเปลี่ยนรายการสินค้า เลือกไฟล์ CSV ชื่อใดก็ได้ ไม่จำกัดชื่อหรือนามสกุล ระบบตรวจเนื้อหาไฟล์และแยกสาขาจาก StoreID ในคอลัมน์ A และบันทึกเป็น GRAB_SRC.CSV, GRAB_SSS.CSV หรือ GRAB_KKL.CSV</p><p>รองรับ UTF-8 / TIS-620 · ชื่อและลำดับคอลัมน์ A–P ต้องตรง Template สต็อกทุกคอลัมน์ · ทุกแถวต้องมี 16 คอลัมน์และ StoreID ของสาขาเดียวกัน</p><div className="pe-actions"><button className="pc-button pc-button-primary" disabled={Boolean(engineBusy)} onClick={() => document.getElementById('engineTemplateInput')?.click()}><WorkspaceIcon name="upload" />UPLOAD CSV</button><button className="pc-button" disabled={Boolean(engineBusy) || grabFilesLoading} onClick={() => void refreshGrabFiles()}><WorkspaceIcon name="refresh" />รีเฟรชรายการ</button><input hidden id="engineTemplateInput" type="file" multiple disabled={Boolean(engineBusy)} onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void uploadGrabTemplates(files) }} /></div>{grabUploadProblems.length > 0 && <div className="pe-error pe-upload-warning" role="alert"><strong>ตรวจพบปัญหาในไฟล์ CSV {grabUploadProblems.length} ไฟล์</strong><p>ไฟล์ที่ไม่ผ่านจะไม่ถูกบันทึก กรุณาตรวจคอลัมน์ตามรายละเอียดด้านล่างแล้วอัปโหลดใหม่</p><ul>{grabUploadProblems.map((problem, index) => <li key={index}><pre>{problem}</pre></li>)}</ul></div>}{grabAdminUser ? <div className="pe-admin-session"><span>เข้าสู่ระบบแล้ว: {grabAdminUser}</span><button className="pc-text-button" disabled={Boolean(engineBusy)} onClick={() => void signOutGrabManager()}>ออกจากระบบ</button></div> : <form className="pe-admin-login" onSubmit={signInGrabManager}><h3>เข้าสู่ระบบเพื่อบันทึก Template</h3><p>ใช้บัญชีที่มีสิทธิ์เขียนข้อมูล หากตั้ง policy เป็น authenticated ต้องเข้าสู่ระบบก่อนอัปโหลด</p><div><label htmlFor="pe-admin-email">อีเมล<input id="pe-admin-email" type="email" required autoComplete="username" disabled={Boolean(engineBusy)} value={grabAdminEmail} onChange={event => setGrabAdminEmail(event.target.value)} /></label><label htmlFor="pe-admin-password">รหัสผ่านบัญชี<input id="pe-admin-password" type="password" required autoComplete="current-password" disabled={Boolean(engineBusy)} value={grabAdminPassword} onChange={event => setGrabAdminPassword(event.target.value)} /></label><button className="pc-button" disabled={Boolean(engineBusy)} type="submit">เข้าสู่ระบบ</button></div></form>}{grabAdminError && <p className="pe-error" role="alert">{grabAdminError}</p>}{grabFilesError && <p className="pe-error" role="alert">{grabFilesError}</p>}<div className="pe-table-scroll"><table className="pe-files-table"><thead><tr><th>FILE NAME</th><th>UPLOADED AT (เวลาไทย)</th></tr></thead><tbody>{grabFilesLoading ? <tr><td colSpan={2}>กำลังโหลดรายการ...</td></tr> : grabFiles.length ? grabFiles.map(file => <tr key={file.name}><td><code>{file.name}</code></td><td>{Number.isNaN(Date.parse(file.updated_at)) ? '—' : new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.updated_at))}</td></tr>) : <tr><td colSpan={2}>{grabFilesError ? 'ยังอ่านรายการไม่ได้' : 'ยังไม่มี Template ในระบบ'}</td></tr>}</tbody></table></div></div>}
+          {grabManagerOpen && <div id="pe-manager-content" className="pe-manager-content"><p>อัปโหลดเฉพาะเมื่อ Grab อนุมัติการเปลี่ยนรายการสินค้า เลือกไฟล์ CSV ชื่อใดก็ได้ ไม่จำกัดชื่อหรือนามสกุล ระบบตรวจเนื้อหาไฟล์และแยกสาขาจาก StoreID ในคอลัมน์ A และบันทึกเป็น GRAB_SRC.CSV, GRAB_SSS.CSV หรือ GRAB_KKL.CSV</p><p>รองรับ UTF-8 / TIS-620 · ชื่อและลำดับคอลัมน์ A–P ต้องตรง Template สต็อกทุกคอลัมน์ · ทุกแถวต้องมี 16 คอลัมน์และ StoreID ของสาขาเดียวกัน</p><div className="pe-actions"><button className="pc-button pc-button-primary" disabled={Boolean(engineBusy)} onClick={event => { grabChangeOpenerRef.current = event.currentTarget; document.getElementById('engineTemplateInput')?.click() }}><WorkspaceIcon name="upload" />UPLOAD CSV</button><button className="pc-button" disabled={Boolean(engineBusy) || grabFilesLoading} onClick={() => void refreshGrabFiles()}><WorkspaceIcon name="refresh" />รีเฟรชรายการ</button><button className="pc-button" disabled={Boolean(engineBusy) || !grabChangedFiles.length} onClick={event => { grabChangeOpenerRef.current = event.currentTarget; openGrabChangeNotice() }}><WorkspaceIcon name="clock" />ดูผลอัปโหลดล่าสุด</button><input hidden id="engineTemplateInput" type="file" multiple disabled={Boolean(engineBusy)} onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void uploadGrabTemplates(files) }} /></div>{grabUploadNotice && <p className="gc-upload-notice" role="status">{grabUploadNotice}</p>}{grabExportError && <p className="pe-error" role="alert">{grabExportError}</p>}{grabUploadProblems.length > 0 && <div className="pe-error pe-upload-warning" role="alert"><strong>ตรวจพบปัญหาในไฟล์ CSV {grabUploadProblems.length} ไฟล์</strong><p>ไฟล์ที่ไม่ผ่านจะไม่ถูกบันทึก กรุณาตรวจคอลัมน์ตามรายละเอียดด้านล่างแล้วอัปโหลดใหม่</p><ul>{grabUploadProblems.map((problem, index) => <li key={index}><pre>{problem}</pre></li>)}</ul></div>}{grabAdminUser ? <div className="pe-admin-session"><span>เข้าสู่ระบบแล้ว: {grabAdminUser}</span><button className="pc-text-button" disabled={Boolean(engineBusy)} onClick={() => void signOutGrabManager()}>ออกจากระบบ</button></div> : <form className="pe-admin-login" onSubmit={signInGrabManager}><h3>เข้าสู่ระบบเพื่อบันทึก Template</h3><p>ใช้บัญชีที่มีสิทธิ์เขียนข้อมูล หากตั้ง policy เป็น authenticated ต้องเข้าสู่ระบบก่อนอัปโหลด</p><div><label htmlFor="pe-admin-email">อีเมล<input id="pe-admin-email" type="email" required autoComplete="username" disabled={Boolean(engineBusy)} value={grabAdminEmail} onChange={event => setGrabAdminEmail(event.target.value)} /></label><label htmlFor="pe-admin-password">รหัสผ่านบัญชี<input id="pe-admin-password" type="password" required autoComplete="current-password" disabled={Boolean(engineBusy)} value={grabAdminPassword} onChange={event => setGrabAdminPassword(event.target.value)} /></label><button className="pc-button" disabled={Boolean(engineBusy)} type="submit">เข้าสู่ระบบ</button></div></form>}{grabAdminError && <p className="pe-error" role="alert">{grabAdminError}</p>}{grabFilesError && <p className="pe-error" role="alert">{grabFilesError}</p>}<div className="pe-table-scroll"><table className="pe-files-table"><thead><tr><th>FILE NAME</th><th>UPLOADED AT (เวลาไทย)</th><th>EXPORT</th></tr></thead><tbody>{grabFilesLoading ? <tr><td colSpan={3}>กำลังโหลดรายการ...</td></tr> : grabFiles.length ? grabFiles.map(file => <tr key={file.name}><td><code>{file.name}</code></td><td>{Number.isNaN(Date.parse(file.updated_at)) ? '—' : new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(file.updated_at))}</td><td><button className="pc-button" disabled={Boolean(engineBusy)} aria-label={`Export ${file.name}`} onClick={() => void exportStoredGrabTemplate(file.name)}><WorkspaceIcon name="download" />Export CSV</button></td></tr>) : <tr><td colSpan={3}>{grabFilesError ? 'ยังอ่านรายการไม่ได้' : 'ยังไม่มี Template ในระบบ'}</td></tr>}</tbody></table></div></div>}
         </section>
           <div className="pc-tools-bottom"><div className="pc-tools-category"><label htmlFor="tools-category">หมวดหมู่สำหรับส่งออกหรือจัดการ</label><select id="tools-category" value={selectedSheet} disabled={loading || savingPrice} onChange={event => { setSelectedSheet(event.target.value); setPageNumber(1) }}><option value="all">เลือกหมวดหมู่</option>{stats.sheets.map(sheet => <option key={sheet.name} value={sheet.name}>{sheet.name} ({sheet.count})</option>)}</select></div><button className="pc-danger-link" disabled={selectedSheet === 'all'} onClick={deleteSelectedCategory}>ลบหมวดหมู่ที่เลือกทุกสาขา</button></div>
         </section>}

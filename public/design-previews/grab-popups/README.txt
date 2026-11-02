@@ -11,7 +11,7 @@ Invalid content shows an inline error. Close/acknowledge and Escape work.
 CSV and change-report Export buttons download real files.
 
 All data is fictional. Upload comparisons stay in your browser and do not
-fetch or write production data. The live manager has not adopted a design.
+fetch or write production data. The live manager uses design 04 / Side Notice.
 
 Concepts opened with ?demo=1 immediately show the post-upload popup state.
 Noto Sans Thai is distributed under fonts/LICENSE.txt.
