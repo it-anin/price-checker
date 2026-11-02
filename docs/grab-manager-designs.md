@@ -1,6 +1,6 @@
 # GRAB CSV MANAGER / row review and export concepts
 
-Open `/design-previews/grab-manager/index.html` for the earlier full-workspace concepts. The current link beside GRAB CSV MANAGER opens the corrected post-upload popup concepts at `/design-previews/grab-popups/index.html` (see [popup designs](grab-popup-designs.md)). The gallery contains ten distinct layouts; it does not replace the live manager. Preview uploads and comparisons run locally in the browser against fictional baselines and never write to Supabase.
+Open `/design-previews/grab-manager/index.html` for the earlier full-workspace concepts. The corrected post-upload popup concepts are archived outside the production public directory (see [popup designs](grab-popup-designs.md)); the live manager uses Side Notice and has no preview link. This full-workspace gallery contains ten distinct layouts; it does not replace the live manager. Preview uploads and comparisons run locally in the browser against fictional baselines and never write to Supabase.
 
 | No. | Design | Structure |
 |---|---|---|

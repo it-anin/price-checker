@@ -6,4 +6,4 @@ Search filters tool names, category names, file formats, report codes and branch
 
 The footer category selector shares the existing product category state. Category export and deletion remain disabled until a category is selected. Existing file inputs, modal handlers, Excel exports, authentication and Template validation are reused.
 
-Desktop uses four columns, tablet two, and mobile one. The design gallery remains available through a relative link and identifies Studio Cards as the current live design.
+Desktop uses four columns, tablet two, and mobile one. The design gallery is archived in `design-previews/tools/`, outside `public`, with no link in the live view. Its former production URLs are no longer served. To view it locally, run `python -m http.server 8080 --directory design-previews/tools`.

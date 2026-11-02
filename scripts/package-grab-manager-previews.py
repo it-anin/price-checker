@@ -10,7 +10,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--collection', choices=['grab-manager', 'grab-popups'], default='grab-manager')
 collection = parser.parse_args().collection
 popup = collection == 'grab-popups'
-base = Path(__file__).resolve().parents[1] / 'public/design-previews' / collection
+preview_root = 'design-previews' if popup else 'public/design-previews'
+base = Path(__file__).resolve().parents[1] / preview_root / collection
 designs = json.loads((base / 'concepts.json').read_text())
 latin = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
 latin_bold = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'

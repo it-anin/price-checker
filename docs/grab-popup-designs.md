@@ -1,6 +1,6 @@
 # Post-upload change popup designs
 
-The live manager uses **04 / Side Notice**. Its preview link opens `/design-previews/grab-popups/index.html`. These are ten **popup designs that appear after an upload when file data changed**, each over the same manager background. The previous full-workspace concepts remain at `/design-previews/grab-manager/index.html`.
+The live manager uses **04 / Side Notice**. The ten popup concepts are archived in `design-previews/grab-popups/`, outside `public`, and have no link in the live manager. Their former production URLs are no longer served. Each concept shows a popup after an upload when file data changed, over the same manager background. The previous full-workspace concepts remain at `/design-previews/grab-manager/index.html`.
 
 | No. | Popup | Structure |
 |---|---|---|
@@ -19,4 +19,4 @@ Open a concept with `?demo=1` to show the popup immediately in the simulated pos
 
 All variants use native `dialog.showModal()` with a dimmed backdrop, accessible heading/description, focus containment, Escape dismissal and restored opener focus. Each has close/acknowledge controls plus working CSV and change-report exports. Batch tabs in 09 also show unchanged branches; the other variants show changed branches only.
 
-Run `node scripts/build-grab-popup-previews.mjs` to generate entrypoints, the gallery and shared CSV modules. Save 1280×850 screenshots as `images/01.jpg` through `images/10.jpg`, then run `python scripts/package-grab-manager-previews.py --collection grab-popups` for the overview, PDF and ZIP.
+Run `python -m http.server 8080 --directory design-previews/grab-popups` to view the archived gallery locally. Run `node scripts/build-grab-popup-previews.mjs` to generate entrypoints, the gallery and shared CSV modules in that archive. Save 1280×850 screenshots as `images/01.jpg` through `images/10.jpg`, then run `python scripts/package-grab-manager-previews.py --collection grab-popups` for the overview, PDF and ZIP. These commands keep popup previews outside the production public directory.

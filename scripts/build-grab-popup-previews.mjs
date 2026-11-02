@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 
 const project = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const base = path.join(project, 'public/design-previews/grab-popups')
+const base = path.join(project, 'design-previews/grab-popups')
 const designs = JSON.parse(await fs.readFile(path.join(base, 'concepts.json'), 'utf8'))
 const engine = ts.transpileModule(await fs.readFile(path.join(project, 'lib/process-engine.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2020 } }).outputText
 await fs.writeFile(path.join(base, 'engine.js'), '// Generated from lib/process-engine.ts by scripts/build-grab-popup-previews.mjs.\n' + engine)
