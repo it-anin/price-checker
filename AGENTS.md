@@ -1,257 +1,87 @@
 # AGENTS.md — Price Checker
 
-> **Project context file** for AI coding agents (Cursor, Copilot, Windsurf, Cline, Aider, etc.)  
-> Keep this file at the project root so agents pick it up automatically.
+Repository: `it-anin/price-checker`, branch `main`. Next.js 16, React 19, TypeScript, Tailwind CSS, SheetJS and Supabase.
 
----
+## Required workflow
 
-## Project Stack
+- Read this file before editing. Use scoped `rg` searches and read only the relevant code/docs below.
+- **For every feature addition/change or change to an implementation approach, update `AGENTS.md` in the same commit.** Include current behavior, entry points, constraints and checks; update the detailed feature doc as needed.
+- Replace stale information and link to details. Avoid duplicated docs, command logs and commit history.
+- Verify code with relevant tests, `npm run build` and lint against its baseline. For docs-only changes, validate links/factual references and `git diff --check`.
+- **Commit and push every verified change to `origin/main`** so Vercel deploys it. Integrate upstream first; never force-push. Report checks and commit/deployment status accurately.
 
-| Layer | Technology |
+## Constraints
+
+- Views live in [app/page.tsx](app/page.tsx), intentionally large; edit in place unless asked to split it. Theme: [app/globals.css](app/globals.css).
+- Do not create API routes unless explicitly asked. Existing routes are `app/api/*/route.ts`; never use or modify legacy `.js` files inside `app/api/`.
+- Import the shared Supabase client from `lib/supabase.js`; do not create another client or embed credentials.
+- `products.branch` is a comma-separated string (`src,kkl,sss`). PENDING JSON entries use uppercase branch arrays; these are different formats.
+- Use `parsePriceRobust()` for UI price parsing/comparisons and rounded cents for pending price comparisons. Preserve valid zero prices and leading-zero SKUs.
+- Strip BOM before CSV parsing. Reuse `toExportRows()` for standard product/GM MME exports; master/price exports have separate layouts. Call `preloadImages()` after product loads.
+- New bulk operations use 300-item chunks with bounded `Promise.all`; retain existing limits where different.
+- Mock API/storage responses for browser QA; do not modify production data to test UI.
+
+## Read only the relevant feature
+
+| Work area | Entry points / detailed guide |
 |---|---|
-| Framework | Next.js 16 (App Router) |
-| UI | React 19 |
-| Database | Supabase (PostgreSQL) |
-| Spreadsheet parsing | SheetJS |
-| Language | TypeScript (`.tsx` / `.ts`) |
+| Tools, Studio Cards, navigation | `toolGroups` in `app/page.tsx`; [tools guide](docs/tools-studio-cards.md) |
+| Popups, product/image editor | `StudioModal`, `notifyPopup` in `app/page.tsx`; [popup guide](docs/popup-theme.md) |
+| Stock engine and CSV validation | `lib/process-engine.ts`; [engine guide](docs/process-engine.md) |
+| GRAB template saves and change review | `lib/grab-template-source.ts`, `lib/grab-template-review.ts`; engine guide |
+| Pending membership, automatic price checks, product Pending column | `lib/pending-sku.ts`, `lib/process-engine-source.ts`; [pending guide](docs/pending-sku.md) |
+| Archived design studies | [archive instructions](design-previews/README.md) |
 
----
+## Current UI and persistence
 
-## Dev Commands
+- Split Inspector shows DB, Promaxx and three GRAB prices. Tools use Studio Cards, with GRAB CSV MANAGER (`pc-tool-card`) below the four groups. Navigation uses outline icons and labels.
+- Reuse `StudioModal` and theme tokens. Await `notifyPopup()` for notices/confirmations. Escape/close cancels deletion; preserve focus and scroll handling.
+- Product **Pending** column: check = all SRC/KKL/SSS, cross = incomplete, neutral = loading/error. `pendingBranchCoverage()` reads manual + automatic membership, ignoring WRD/ONN. Clicking shows missing branches without writes. Label unsaved automatic results.
 
-```bash
-npm run dev      # Start dev server → http://localhost:3000
-npm run build    # Production build
-npm run lint     # ESLint
-```
-
----
-
-## Project Structure
-
-```
-app/
-├── page.tsx              # Main UI — all views (~2,100 lines)
-├── layout.tsx
-├── globals.css
-└── api/
-    ├── products/route.ts # CRUD products + branch sync
-    ├── stats/route.ts    # Product/category counts
-    ├── prices/route.ts   # Price mismatch check + bulk update
-    ├── master/route.ts   # Master SKU list management
-    └── upload-drive/     # Google Drive upload (OAuth refresh token)
-lib/
-└── supabase.js           # Supabase client singleton
-.env.local                # See Environment Variables section
-```
-
-> ⚠️ Any `.js` files inside `app/api/` are **legacy — do not use or modify them**.
-
----
-
-## Environment Variables (`.env.local`)
-
-```
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-GOOGLE_DRIVE_FOLDER_ID=
-GOOGLE_OAUTH_CLIENT_ID=
-GOOGLE_OAUTH_CLIENT_SECRET=
-GOOGLE_OAUTH_REFRESH_TOKEN=           # scope: drive (full), from OAuth consent flow
-```
-
----
-
-## Database Schema (Supabase)
-
-### `products`
-| Column | Type | Notes |
-|---|---|---|
-| `รหัสสินค้า (SKU NUMBER)` | text | **unique**, primary identifier |
-| `*ราคาสินค้า` | numeric | selling price |
-| `branch` | text | comma-separated e.g. `"src,kkl,sss"` |
-| `หมวดหมู่สินค้า (CATEGORIES)` | text | category / sheet grouping |
-
-### `sku_reference`
-| Column | Notes |
+| Action | Persistence |
 |---|---|
-| `sku` | reference SKU |
-| `ref_price` | expected price for mismatch detection |
+| Import GRAB SRC/KKL/SSS | Immediately syncs membership and `src_price` / `kkl_price` / `sss_price`. Use full menus: absent SKUs lose that branch. |
+| Compare Promaxx | Immediately saves `promaxx_price`, not the base price. |
+| Calculate/update DB price | Preview first; explicit Update writes the base price. Formula: `ceil(level0 × 0.95 × 1.20 × 1.07)`. |
+| GM MME vs GRAB comparison | Browser-only comparison and exports. |
+| PENDING price-file uploads | Browser-only; independent of automatic checks; lost on refresh. |
+| GRAB CSV MANAGER upload | Saves validated CSV content to `grab_files` under its canonical branch name. |
 
-### `product_master`
-| Column | Notes |
+`products` uses SKU `รหัสสินค้า (SKU NUMBER)`, name `*ชื่อสินค้า (NAME)`, base price `*ราคาสินค้า`, and category `หมวดหมู่สินค้า (CATEGORIES)`. `product_master` stores master SKUs; `sku_reference` provides the legacy reference-price comparison.
+
+## CSV contracts: stock files and price menus differ
+
+| Input | Current reader contract |
 |---|---|
-| `sku` | master SKU list |
+| GRAB Menu prices | C=price, I=SKU, data from record 3. |
+| Approved GRAB stock template | A=StoreID, C=ITEMNAME, D=ITEMCODE/SKU, E=CURRENTSTOCK, F=MAXSTOCK, P=ITEMSTATUS. No selling price. |
+| R01.102 stock report | E=SKU, G=quantity; skip leading G=`CF_QUANTITY` header. Names `src.csv` / `sss.csv` / `kkl.csv`, case-insensitive. |
+| R05.103 Promaxx prices | B=SKU, E=`5` filter, G=price. |
+| R05.105 calculation upload | **A=SKU, E=level0, from record 2** in `handlePriceCalcUpload`; older B/G notes are stale. |
+| GM MME Excel | A=type, B=name, C=license, D=price, E=SKU, F=image, G=category. |
 
-### `branches`
-| Column | Notes |
-|---|---|
-| `id`, `name` | branch metadata — **not used in main flow** |
+- Engine/PENDING readers strip BOM and support UTF-8/TIS-620. Legacy menu/calculation importers have separate readers; verify the path being fixed.
+- `parseEngineCsv()` preserves raw cells/endings and literal inch marks inside unquoted names; invalid quoted fields still fail. Do not remove name quotes.
+- Manager accepts **any filename/extension** but requires the exact 16-column A–P header (case/order/spelling), data-row widths and one known StoreID. Route to canonical `GRAB_SRC.CSV` / `GRAB_SSS.CSV` / `GRAB_KKL.CSV` using the engine guide's StoreID mapping. Reject before writing; retain column warnings.
 
-> **Branch encoding:** The `branch` field stores presence as a comma-separated string (`"src,kkl,sss"`), not separate boolean columns.
+## Engine and PENDING invariants
 
----
+- Manager has no LOCK/UNLOCK; Auth/RLS controls writes. `saveGrabTemplate()` compares before saving with `updated_at` concurrency checks. Side Notice opens only after changed content saves; unchanged/new files use inline status. Export canonical names with one UTF-8 BOM.
+- `app_settings`, key `pending_skus`, is the PENDING source. Use `loadPendingSnapshot()` / `savePendingMutation()` for normalized reads and versioned retries. Preserve manual/automatic origins, metadata and WRD/ONN membership; `branches` is the union of `manualBranches` and `autoPriceBranches` when those fields exist.
+- Automatic PENDING compares branch prices with `promaxx_price` for offered branches: add differences, release verified matches, retain missing-price/product entries. Authenticated scans persist; anonymous scans show an unsaved preview. Full `pendingPriceCheck=true` scans ignore table filters/pagination.
+- RUN refreshes prices and PENDING, then reads templates. Invalid/unreadable sources stop processing. PENDING suppresses only its branch; membership changes invalidate previous outputs.
+- R01.102 duplicate quantities sum; reserve defaults: SRC=5, SSS=2, KKL=2. Nonpositive/missing stock is empty. Change only raw E/F/P, preserving all other cells, headers and line endings. Export uses UTF-8 BOM and Bangkok date; DOWNLOAD ALL produces one ZIP.
+- Keep retired `tools` and `grab-popups` previews outside `public` with no live links. Parser changes require regenerating preview modules with `node scripts/build-grab-manager-previews.mjs` and `node scripts/build-grab-popup-previews.mjs`; these must not republish retired galleries.
 
-## API Reference
+## Commands and environment
 
-### `GET/POST/PUT/PATCH/DELETE /api/products`
-
-| Method | Params / Body | Behaviour |
-|---|---|---|
-| GET | `?sheet=X` | Fetch products by category (or all), aggregate branch per SKU |
-| GET | `?sku=X` | Fuzzy search by SKU (`ilike`) |
-| POST | `{ skus }` | Batch fetch by SKU array — chunked at 300/request |
-| POST | `{ availabilityBranch, skus }` | Sync branch availability from GRAB CSV upload |
-| PUT | bulk array | Bulk upsert products (Excel import) |
-| PATCH | single product | Edit one product record |
-| DELETE | `{ sheet, branch }` | Delete by category; `branch='all'` deletes all branches |
-
-### `GET /api/stats`
-Returns total product count + per-category breakdown.
-
-### `GET/POST /api/prices`
-
-| Method | Params / Body | Behaviour |
-|---|---|---|
-| GET | — | Compare `products` vs `sku_reference`, return mismatch list |
-| POST | `{ items: [{sku, correctPrice}] }` | Bulk update prices |
-
-### `GET/POST /api/master`
-
-| Method | Params | Behaviour |
-|---|---|---|
-| GET | — | Total master SKU count |
-| GET | `?compare=true` | Compare master SKUs vs products table |
-| GET | `?compareBranch=true` | Per-SKU branch presence `{sku, src, kkl, sss}` |
-| POST | — | Replace entire master SKU list |
-
-### `POST /api/upload-drive`
-- Accepts `multipart/form-data` with fields `file` + `filename`
-- Uploads to configured Google Drive folder via OAuth refresh token (user-owned files)
-- Sets `anyone with the link` permission
-- Returns `{ success, link, id }`
-
----
-
-## Key Business Logic
-
-### Grab Price Formula
-```
-A = level0 × 0.95
-B = A × 1.20
-D = Math.ceil(B × 1.07)   ← final Grab selling price
-```
-`level0` = price from R05.105 CSV (col G), filtered where col D = 1 and col F = 0.
-
-### Input File Formats
-
-| File | Format | Key Columns |
-|---|---|---|
-| `Grab_menu` | CSV | Col C (index 2) = price, Col I (index 8) = SKU; data starts row 3 |
-| `GM MME` | Excel (.xlsx) | A=type, B=name, C=license, D=price, E=SKU, F=image, G=category |
-| `R05.105` | CSV | B=SKU, D=1 (sale unit filter), F=0 (level filter), G=level-0 price |
-| Import Excel | Excel (multi-sheet) | Auto-detect header in first 10 rows |
-| Product Master | Excel / CSV | Col A = SKU, Col B = product name (optional) |
-
-### Export Format (GM MME Submission)
-
-| Col | Header |
-|---|---|
-| A | `*ประเภทสินค้า` |
-| B | `*ชื่อสินค้า` |
-| C | `*เลขที่ใบอนุญาตโฆษณา` |
-| D | `*ราคาสินค้า` |
-| E | `รหัสสินค้า` |
-| F | `*รูปภาพสินค้า` (with hyperlink) |
-| G | `หมวดหมู่รายการสินค้า` |
-
-All exports use `toExportRows()` except master/price exports.
-
----
-
-## Important Functions (`page.tsx`)
-
-### Data & Sync
-| Function | Purpose |
-|---|---|
-| `handleGrabCheck(file, branch)` | Read GRAB CSV → sync branch → compare prices vs DB → show modal |
-| `handlePriceCalcUpload(file)` | Read R05.105 CSV → calculate Grab price using formula above |
-| `handlePriceCalcGrabUpload(file)` | Read GRAB CSV for price comparison inside price-calc modal |
-| `handleMmeVsGrabCheck()` | Compare MME Excel vs GRAB CSV across all 3 branches |
-| `handleImportXlsx(file)` | Read multi-sheet Excel, auto-detect headers |
-| `confirmImport()` | Bulk upsert via `PUT /api/products` |
-| `confirmUpdatePrices()` | Bulk update prices via `POST /api/prices` |
-| `handleMasterUpload(file)` | Read col A=SKU, col B=name → populate `masterNameMap` → POST master |
-| `handleMasterBranchCompare()` | Fetch branch presence per SKU → merge with `masterNameMap` → show modal |
-| `handleCsvToUtf8(file)` | Convert TIS-620 CSV → UTF-8 BOM |
-| `toExportRows(list)` | Format products as XLSX export rows (GM MME format) |
-
-### Utilities
-| Function | Purpose |
-|---|---|
-| `parseCSVRows(text)` | Parse CSV, auto-detect delimiter (`,` or `;`) |
-| `parsePriceRobust(str)` | Parse price strings including Thai number format (`,` decimal) |
-| `convertDriveLink(url)` | Convert Google Drive share URL → thumbnail URL |
-| `renderBranchFlag(value)` | Render branch badge(s) for `src` / `kkl` / `sss` |
-
----
-
-## Coding Patterns
-
-### Chunked API Calls
-Batch requests are chunked at **200–300 items** using `Promise.all`:
-```ts
-const chunks = chunkArray(skus, 300);
-const results = await Promise.all(chunks.map(chunk => fetchBatch(chunk)));
+```sh
+npm run dev
+node --test tests/*.test.*
+npm run build
+npm run lint
 ```
 
-### Modal Pattern
-Modals are controlled by `show*Modal` boolean state. Complex modal content uses IIFEs:
-```ts
-const content = (() => {
-  // build modal JSX
-})();
-```
+The repository has existing lint violations; compare changed-file findings rather than claiming lint passed or fixing unrelated code.
 
-### CSV Handling
-Always strip BOM before parsing:
-```ts
-text.replace(/^\uFEFF/, '')
-```
-
-### Branch Sync Flow
-1. User uploads GRAB CSV
-2. `POST /api/products` with `{ availabilityBranch, skus }`
-3. API updates `branch` field (comma-separated) in Supabase
-
-### Image Preloading
-Call `preloadImages()` after every product load to warm the image cache.
-
----
-
-## State Groups (`page.tsx`)
-
-| Group | Key State |
-|---|---|
-| Core | `products`, `stats`, `search`, `selectedSheet`, `status`, `loading` |
-| GRAB check | `grabResults`, `showGrabModal`, `grabMismatchProducts` |
-| Price calc | `priceCalcResults`, `priceCalcGrabMap`, `showPriceCalcModal` |
-| Import | `showImportModal`, `importSheets`, `importLog` |
-| Edit product | `editProduct` — `null` = modal closed |
-| Master SKU | `masterSkuCount`, `masterMissingCount`, `masterNameMap` (sku → name) |
-| Master vs Branch | `showMasterBranchModal`, `masterBranchResults`, `masterBranchLoading`, `masterBranchTab`, `masterBranchSearch` |
-| MME vs GRAB | `mmeCheckResults` (`{src, kkl, sss}`), `mmeActiveTab`, `mmeChecking` |
-| Selection | `selectedSkus` — `Set<string>` |
-
----
-
-## Agent Instructions
-
-- After completing and verifying each change, commit and push to `origin/main` so Vercel can deploy it. Integrate upstream changes before pushing; do not force-push.
-- **Do not create new API route files** unless explicitly asked — all routes live under `app/api/`.
-- **Do not touch `.js` files** in `app/api/` — they are dead code.
-- **`page.tsx` is intentionally large** (~2,100 lines) — prefer editing in place over splitting unless asked.
-- **Branch values** are always comma-separated strings, never booleans or arrays in the DB.
-- **Supabase client** must be imported from `lib/supabase.js` — do not create additional clients.
-- When adding new bulk operations, follow the **chunk pattern** (300 items/chunk, `Promise.all`).
-- All price comparisons must use `parsePriceRobust()` — raw string comparisons will fail on Thai-format numbers.
+`.env.local` provides `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `GOOGLE_DRIVE_FOLDER_ID`, `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN`. Never copy their values into docs or output. Database setup is in [the migration](supabase/migrations/202610300001_process_engine.sql); consult the engine guide before touching it.
