@@ -1,11 +1,16 @@
 """Package the ten browser screenshots after desktop/mobile interaction checks."""
 from pathlib import Path
+import argparse
 import json
 import re
 import zipfile
 from PIL import Image, ImageDraw, ImageFont
 
-base = Path(__file__).resolve().parents[1] / 'public/design-previews/grab-manager'
+parser = argparse.ArgumentParser()
+parser.add_argument('--collection', choices=['grab-manager', 'grab-popups'], default='grab-manager')
+collection = parser.parse_args().collection
+popup = collection == 'grab-popups'
+base = Path(__file__).resolve().parents[1] / 'public/design-previews' / collection
 designs = json.loads((base / 'concepts.json').read_text())
 latin = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
 latin_bold = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
@@ -17,8 +22,8 @@ thai = ImageFont.truetype(str(base / 'fonts/NotoSansThai-Regular.ttf'), 21)
 width, thumb_width, thumb_height, row_height, top = 1600, 752, 499, 590, 160
 sheet = Image.new('RGB', (width, top + row_height * 5 + 60), '#f8f6f0')
 draw = ImageDraw.Draw(sheet)
-draw.text((38, 30), 'GRAB CSV MANAGER / 10 DESIGN CONCEPTS', font=heading, fill='#353029')
-draw.text((40, 95), 'ROW CHANGES / BEFORE & AFTER / CSV EXPORT / 10 UNIQUE LAYOUTS', font=subtitle, fill='#947d62')
+draw.text((38, 30), 'GRAB CSV MANAGER / 10 POPUP DESIGNS' if popup else 'GRAB CSV MANAGER / 10 DESIGN CONCEPTS', font=heading, fill='#353029')
+draw.text((40, 95), 'UPLOAD / COMPARE / POPUP / 10 POST-UPLOAD CHANGE NOTIFICATIONS' if popup else 'ROW CHANGES / BEFORE & AFTER / CSV EXPORT / 10 UNIQUE LAYOUTS', font=subtitle, fill='#947d62')
 pages = []
 for index, design in enumerate(designs):
     number = f'{design["id"]:02d}'
@@ -36,11 +41,11 @@ for index, design in enumerate(designs):
         draw.text((caption_x, y + thumb_height + 48), run, font=font, fill='#8b7e6b')
         caption_x += draw.textlength(run, font=font)
 sheet.save(base / 'overview.jpg', quality=90, optimize=True)
-pdf = base / 'grab-manager-10-designs.pdf'
+pdf = base / ('grab-popup-10-designs.pdf' if popup else 'grab-manager-10-designs.pdf')
 pages[0].save(pdf, save_all=True, append_images=pages[1:], resolution=144,
-              title='GRAB CSV MANAGER - 10 Design Concepts', author='Price Checker')
+              title='GRAB CSV MANAGER - 10 Popup Designs' if popup else 'GRAB CSV MANAGER - 10 Design Concepts', author='Price Checker')
 assert len(re.findall(rb'/Type /Page\b', pdf.read_bytes())) == 10
-archive = base / 'grab-manager-designs.zip'
+archive = base / ('grab-popup-designs.zip' if popup else 'grab-manager-designs.zip')
 with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as bundle:
     for file in sorted(base.rglob('*')):
         if file.is_file() and file != archive:

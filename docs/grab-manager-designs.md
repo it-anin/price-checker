@@ -1,6 +1,6 @@
 # GRAB CSV MANAGER / row review and export concepts
 
-Open `/design-previews/grab-manager/index.html`, or use the new link beside GRAB CSV MANAGER in เครื่องมือทั้งหมด. The gallery contains ten distinct layouts; it does not replace the live manager. Preview uploads and comparisons run locally in the browser against fictional baselines and never write to Supabase.
+Open `/design-previews/grab-manager/index.html` for the earlier full-workspace concepts. The current link beside GRAB CSV MANAGER opens the corrected post-upload popup concepts at `/design-previews/grab-popups/index.html` (see [popup designs](grab-popup-designs.md)). The gallery contains ten distinct layouts; it does not replace the live manager. Preview uploads and comparisons run locally in the browser against fictional baselines and never write to Supabase.
 
 | No. | Design | Structure |
 |---|---|---|
