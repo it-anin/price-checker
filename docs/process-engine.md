@@ -50,3 +50,7 @@ npm run build
 ```
 
 The migration snapshot contains 320 pending SKUs (SRC=54, SSS=187, KKL=60) and three approved templates, validated locally before packaging. No legacy database configuration or credentials are embedded in the app or migration bundle.
+
+## Stock from MSSQL
+
+PROCESS ENGINE can load R01.102 stock without a CSV: the **ดึงจาก MSSQL** button reads `stock_onhand` / `stock_sync_status` from Supabase, filled by `tools/stock-sync` (runs in the office, reads `CF_QUANTITY` from MSSQL). The result is the same `StockReport` as a CSV upload, so subtract, PENDING and GRAB output are unchanged. Data older than 60 minutes, or a failed last sync, triggers a warning. CSV upload remains available as a fallback.

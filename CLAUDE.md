@@ -46,6 +46,8 @@ lib/
 | `sku_reference` | ราคาอ้างอิงสำหรับตรวจสอบ | `sku`, `ref_price` |
 | `product_master` | Master SKU list | `sku` |
 | `branches` | ข้อมูลสาขา (ไม่ได้ใช้ใน main flow) | `id`, `name` |
+| `stock_onhand` | สต็อก R01.102 (CF_QUANTITY) ที่ sync จาก MSSQL | `branch`, `sku`, `qty`, `synced_at` |
+| `stock_sync_status` | สถานะ sync ล่าสุดต่อสาขา | `branch`, `synced_at`, `ok`, `message` |
 
 **Branch field:** ใช้ค่า comma-separated เช่น `"src,kkl,sss"` แทน boolean per branch
 
@@ -170,3 +172,15 @@ D = Math.ceil(B × 1.07)   ← ราคาขาย Grab
 - **CSV BOM strip:** `text.replace(/^﻿/, '')` ทุก CSV
 - **Image preload:** `preloadImages()` เรียกหลัง load products
 - **Branch sync:** อัพโหลด GRAB CSV → POST `availabilityBranch` → อัพเดท `branch` field ใน Supabase
+
+---
+
+## Stock จาก MSSQL (PROCESS ENGINE)
+
+ปุ่ม **ดึงจาก MSSQL** แทนการอัปโหลด R01.102 CSV (CSV ยังใช้เป็นทางสำรองได้)
+
+- Vercel เข้า MSSQL ในออฟฟิศไม่ได้ → `tools/stock-sync/` (Node, รันในออฟฟิศ) อ่าน `CF_QUANTITY` จาก MSSQL แล้ว upsert ลง `stock_onhand`
+- แอปอ่านผ่าน `lib/stock-source.ts` (`loadMssqlStock`, แบ่งหน้า 1,000 แถว) → `stockReportFromRows()` ใน `lib/process-engine.ts` ได้ `StockReport` เหมือนไฟล์ CSV
+- เตือนเมื่อ sync ล่าสุดเกิน 60 นาที หรือ `ok=false` (`stockSyncWarning`)
+- Migration: `supabase/migrations/202611020001_stock_onhand.sql` (anon อ่านได้อย่างเดียว; เขียนด้วย service-role key ที่เครื่อง agent เท่านั้น)
+- ตั้งค่า/วิธีรัน: `tools/stock-sync/README.md`

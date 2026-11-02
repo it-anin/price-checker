@@ -10,7 +10,7 @@ const file = path.join(__dirname, '../lib/process-engine.ts')
 const compiled = ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
 const engine = { exports: {} }
 new Function('exports', 'require', 'module', compiled)(engine.exports, require, engine)
-const { ENGINE_STORES, parseEngineCsv, processGrabTemplate, readStockReport, validateGrabTemplate, decodeCsv, pendingSkuSets, createResultsZip, engineDate } = engine.exports
+const { ENGINE_STORES, stockReportFromRows, stockSyncWarning, parseEngineCsv, processGrabTemplate, readStockReport, validateGrabTemplate, decodeCsv, pendingSkuSets, createResultsZip, engineDate } = engine.exports
 
 const quote = value => /[",\r\n;]/.test(String(value)) ? '"' + String(value).replace(/"/g, '""') + '"' : String(value)
 function template(branch = 'src', rows = []) {
@@ -202,4 +202,31 @@ test('DOWNLOAD ALL creates a valid ZIP with intact BOM, Thai and all CSV filenam
     const result = execFileSync('python', ['-c', 'import sys,zipfile,json; z=zipfile.ZipFile(sys.argv[1]); assert z.testzip() is None; print(json.dumps([{ "name":n, "content":z.read(n).decode("utf-8")} for n in z.namelist()]))', archive], { timeout: 10000 })
     assert.deepEqual(JSON.parse(result), files)
   } finally { fs.rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('stockReportFromRows builds the same report shape as a CSV upload', () => {
+  const synced = '2026-11-02T01:00:00.000Z'
+  const fromDb = stockReportFromRows('sss', [{ sku: ' ab-1 ', qty: '12.5000' }, { sku: 'AB-1', qty: 2 }, { sku: 'C2', qty: 0 }, { sku: 'SKU', qty: 9 }], synced)
+  assert.equal(fromDb.branch, 'sss')
+  assert.equal(fromDb.source, 'mssql')
+  assert.equal(fromDb.syncedAt, synced)
+  assert.equal(fromDb.stock.get('AB-1'), 14.5)
+  assert.equal(fromDb.stock.get('C2'), 0)
+  assert.equal(fromDb.stock.has('SKU'), false)
+  const fromCsv = report('sss', [['AB-1', '14.5'], ['C2', '0']])
+  assert.deepEqual([...fromDb.stock], [...fromCsv.stock])
+})
+
+test('stockReportFromRows rejects empty data and non-numeric quantities', () => {
+  assert.throws(() => stockReportFromRows('src', [], 'x'), /Stock Sync Agent/)
+  assert.throws(() => stockReportFromRows('src', [{ sku: 'A1', qty: 'abc' }], 'x'), /ไม่ใช่ตัวเลข/)
+  assert.throws(() => stockReportFromRows('src', [{ sku: 'A1', qty: Number.NaN }], 'x'), /ไม่ใช่ตัวเลข/)
+})
+
+test('stockSyncWarning flags old data and failed syncs only', () => {
+  const now = Date.parse('2026-11-02T02:00:00.000Z')
+  assert.equal(stockSyncWarning('src', { synced_at: '2026-11-02T01:50:00.000Z', ok: true }, now), '')
+  assert.match(stockSyncWarning('src', { synced_at: '2026-11-02T00:00:00.000Z', ok: true }, now), /ข้อมูลเก่า 120 นาที/)
+  assert.match(stockSyncWarning('kkl', { synced_at: '2026-11-02T01:59:00.000Z', ok: false, message: 'timeout' }, now), /ล้มเหลว.*timeout/)
+  assert.match(stockSyncWarning('sss', null, now), /ไม่พบเวลา sync/)
 })

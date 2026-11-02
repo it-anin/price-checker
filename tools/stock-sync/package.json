@@ -1,0 +1,16 @@
+{
+  "name": "stock-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Copies R01.102 on-hand stock (CF_QUANTITY) from MSSQL to Supabase",
+  "scripts": {
+    "sync": "node sync.mjs",
+    "dry-run": "node sync.mjs --dry-run",
+    "watch": "node sync.mjs --watch"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.0",
+    "mssql": "^11.0.1"
+  }
+}
