@@ -25,8 +25,24 @@ node --env-file=.env sync.mjs --watch     # loop every SYNC_INTERVAL_MINUTES (de
 ```
 
 ## Verify before trusting it
-Export R01.102 from ProMaxx for one branch at the same moment, then compare per-SKU quantity and the
-grand total with the `--dry-run` output. They must match; if not, check `warehouseIds`.
+Export R01.102 from ProMaxx for each branch **right before** comparing (stock keeps moving), save them as
+`src.csv`, `sss.csv`, `kkl.csv`, then run (read-only, writes nothing to Supabase):
+
+```bash
+node --env-file=.env sync.mjs --compare src.csv sss.csv kkl.csv
+```
+
+It reads each CSV exactly like the web app (SKU = column E, quantity = column G, TIS-620/UTF-8 auto-detect)
+and prints, per branch: SKU counts, grand totals, matched SKUs, SKUs whose qty differ (`diff = MSSQL - CSV`),
+and SKUs present on one side only. Differences are also saved to `compare-<branch>.csv` in the current folder.
+Exit code is 0 only when every SKU matches.
+
+| Result | Meaning |
+|---|---|
+| all branches `✔ ตรงกันทุก SKU` | the query is equivalent to R01.102 |
+| few small diffs | stock moved between the export and the run: export again and re-run |
+| many SKUs only in MSSQL (non-zero) | the CSV was exported for fewer warehouses: set `warehouseIds` in `STOCK_BRANCH_MAP` |
+| many SKUs only in CSV | wrong `branchId`, or the CSV is from another branch |
 
 ## Check the login is really read-only
 ```sql

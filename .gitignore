@@ -41,3 +41,4 @@ yarn-error.log*
 next-env.d.ts
 
 tools/stock-sync/node_modules
+compare-*.csv
