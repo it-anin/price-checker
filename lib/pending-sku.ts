@@ -67,6 +67,13 @@ export function pendingManualBranches(entry: PendingSkuEntry): PendingBranch[] {
   return entry.manualBranches ?? entry.branches
 }
 
+export function pendingBranchCoverage(sku: unknown, sets: Record<EngineBranch, Set<string>>) {
+  const key = normalizeStockSku(sku)
+  const present = ENGINE_BRANCHES.filter(branch => sets[branch].has(key))
+  const missing = ENGINE_BRANCHES.filter(branch => !sets[branch].has(key))
+  return { present, missing, complete: missing.length === 0 }
+}
+
 export function buildPendingPriceChecks(products: Record<string, unknown>[], parse: PendingPriceParser): Map<string, PendingPriceCheck> {
   const checks = new Map<string, PendingPriceCheck>()
   for (const product of products) {
