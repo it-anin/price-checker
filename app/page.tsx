@@ -2382,6 +2382,7 @@ async function confirmUpdatePrices() {
           <div className="pc-tool-groups">
             {filteredToolGroups.map(group => <section key={group.key} className="pc-tool-card" aria-labelledby={'tool-group-' + group.key}>
               <h3 id={'tool-group-' + group.key}><WorkspaceIcon name={group.icon} />{group.title}<span className="pc-tool-card-count">{group.items.length}</span></h3>
+              {group.key === 'grab' && <p className="pc-tool-description">นำเข้า = GRAB Menu (C = ราคา, I = SKU)</p>}
               {group.items.map(tool => <button key={tool.name} className="pc-tool-action" disabled={tool.disabled} onClick={tool.action}><span>{tool.busy ? 'กำลังเตรียมไฟล์...' : tool.name}</span><small>{tool.detail}</small><WorkspaceIcon name="arrow" /></button>)}
               {group.key === 'export' && <div className="pc-tools-master"><p className="pc-master-summary">Product Master <b>{masterSkuCount === null ? 'ยังไม่โหลด' : masterSkuCount.toLocaleString('th-TH')}</b>{masterFileName && <small>{masterFileName}</small>}</p><p className="pc-master-summary">SKU ที่ยังขาด <b>{masterMissingCount === null ? 'ยังไม่ตรวจ' : masterMissingCount.toLocaleString('th-TH')}</b></p></div>}
             </section>)}

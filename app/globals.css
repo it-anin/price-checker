@@ -279,6 +279,7 @@ body {
 .pc-tool-card>h3 { display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 700; color: var(--pc-accent); margin-bottom: 14px; min-height: 25px; }
 .pc-tool-card>h3 .pc-icon { width: 20px; height: 20px; }
 .pc-tool-card-count { margin-left: auto; font: 10px Arial,sans-serif; color: #a19889; }
+.pc-tool-description { margin: 0 0 12px; font-size: 10px; line-height: 1.8; color: #928a7c; }
 .pc-tool-groups .pc-tool-action { display: flex; align-items: center; width: 100%; text-align: left; gap: 9px; min-height: 46px; padding: 12px 0; color: #50483d; border-bottom: 1px solid #eee9df; font-size: 11px; line-height: 1.75; }
 .pc-tool-action>span { flex: 1; min-width: 0; }
 .pc-tool-action:last-child { border-bottom: 0; }
