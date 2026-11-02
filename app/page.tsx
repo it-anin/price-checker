@@ -4,7 +4,7 @@ import { useState, useEffect, useEffectEvent, useRef } from 'react'
 import Link from 'next/link'
 import NextImage from 'next/image'
 import { supabase } from '../lib/supabase'
-import { ENGINE_BRANCHES, createResultsZip, decodeCsv, engineDate, normalizeStockSku, pendingSkuSets, processGrabTemplate, readStockReport, templateName, validateGrabTemplateUpload, type EngineBranch, type StockReport } from '../lib/process-engine'
+import { ENGINE_BRANCHES, createResultsZip, decodeCsv, engineDate, normalizeStockSku, parseEngineCsv, pendingSkuSets, processGrabTemplate, readStockReport, templateName, validateGrabTemplateUpload, type EngineBranch, type StockReport } from '../lib/process-engine'
 import { loadPendingSnapshot, savePendingMutation } from '../lib/process-engine-source'
 import { saveGrabTemplate } from '../lib/grab-template-source'
 import { GRAB_CHANGE_LABELS, grabChangesCsv, grabCsvWithBom, type SavedGrabReview } from '../lib/grab-template-review'
@@ -1936,19 +1936,34 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     let persisting = false
 
     try {
-      const text = (await file.text()).replace(/^\uFEFF/, '')
-      const rows = parseCSVRows(text)
-      // R05.105: A=SKU, E=level 0, starting after the header.
+      const { text } = decodeCsv(await file.arrayBuffer())
+      const { rows } = parseEngineCsv(text)
+      const headerIndex = rows.slice(0, 10).findIndex(row => {
+        const cells = row.map(cell => cell.trim().toUpperCase())
+        return cells.includes('CF_ITEMID') || (cells[0] === 'SKU' && cells[4] === '0')
+      })
+      if (headerIndex < 0) throw new Error('ไม่พบหัวตาราง R05.105: ต้องมี CF_ITEMID หรือหัวตาราง SKU / ระดับ 0')
+      const header = rows[headerIndex].map(cell => cell.trim().toUpperCase())
+      const isRawReport = header.includes('CF_ITEMID')
+      const skuColumn = isRawReport ? header.indexOf('CF_ITEMID') : 0
+      const priceColumn = isRawReport ? header.indexOf('CF_ITEMPRICELEVEL_PRICE') : 4
+      const multipleColumn = header.indexOf('CF_BASEMULTIPLE')
+      const levelColumn = header.indexOf('CF_LEVELNO')
+      if (isRawReport && [priceColumn, multipleColumn, levelColumn].some(column => column < 0)) {
+        throw new Error('หัวตาราง R05.105 ต้องมี CF_ITEMID, CF_BASEMULTIPLE, CF_LEVELNO และ CF_ITEMPRICELEVEL_PRICE')
+      }
+      // Raw Promaxx: B=SKU, G=price, D=base multiple 1, F=level 0.
+      // Retain the explicit compact SKU/.../0 format at A/E.
       const calcMap = new Map<string, { level0: number; newPrice: number }>()
-      for (const row of rows.slice(1)) {
-        if (!row || row.length < 5) continue
-        const sku = row[0]?.trim(), level0 = parsePriceRobust(row[4])
+      for (const row of rows.slice(headerIndex + 1)) {
+        if (isRawReport && (parsePriceRobust(row[multipleColumn] ?? '') !== 1 || parsePriceRobust(row[levelColumn] ?? '') !== 0)) continue
+        const sku = row[skuColumn]?.trim(), level0 = parsePriceRobust(row[priceColumn] ?? '')
         if (!sku || level0 === null || !Number.isFinite(level0) || level0 < 0) continue
         const base = level0 * 0.95 * 1.20
         const newPrice = Math.ceil(base + base * 0.07)
         if (Number.isFinite(newPrice)) calcMap.set(sku, { level0, newPrice })
       }
-      if (!calcMap.size) throw new Error('ไม่พบราคา R05.105 ที่ถูกต้อง: A=SKU, E=ราคาระดับ 0')
+      if (!calcMap.size) throw new Error('ไม่พบราคา R05.105 ที่ถูกต้องสำหรับราคาระดับ 0')
 
       setStatus(`กำลังดึงข้อมูลสินค้า... (${calcMap.size} SKU)`)
       const response = await fetch('/api/products', {

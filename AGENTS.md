@@ -58,10 +58,10 @@ Repository: `it-anin/price-checker`, branch `main`. Next.js 16, React 19, TypeSc
 | Approved GRAB stock template | A=StoreID, C=ITEMNAME, D=ITEMCODE/SKU, E=CURRENTSTOCK, F=MAXSTOCK, P=ITEMSTATUS. No selling price. |
 | R01.102 stock report | E=SKU, G=quantity; skip leading G=`CF_QUANTITY` header. Names `src.csv` / `sss.csv` / `kkl.csv`, case-insensitive. |
 | R05.103 Promaxx prices | B=SKU, E=`5` filter, G=price. |
-| R05.105 calculation upload | **A=SKU, E=level0, from record 2** in `handlePriceCalcUpload`; older B/G notes are stale. |
+| R05.105 calculation upload | `handlePriceCalcUpload()` reads raw CF headers: **B=CF_ITEMID (SKU), G=CF_ITEMPRICELEVEL_PRICE**, filtered by **D=CF_BASEMULTIPLE=1, F=CF_LEVELNO=0**. Detect columns by header name, not position. Also accepts the explicit compact A=SKU / E=`0` layout. Regression checks: `tests/price-calc-upload.test.mjs`. |
 | GM MME Excel | A=type, B=name, C=license, D=price, E=SKU, F=image, G=category. |
 
-- Engine/PENDING readers strip BOM and support UTF-8/TIS-620. Legacy menu/calculation importers have separate readers; verify the path being fixed.
+- Engine/PENDING and R05.105 calculation readers reuse `decodeCsv()` / `parseEngineCsv()` for BOM, UTF-8/TIS-620, quoted fields and literal inch marks. Legacy menu importers have separate readers; verify the path being fixed.
 - `parseEngineCsv()` preserves raw cells/endings and literal inch marks inside unquoted names; invalid quoted fields still fail. Do not remove name quotes.
 - Manager accepts **any filename/extension** but requires the exact 16-column A–P header (case/order/spelling), data-row widths and one known StoreID. Route to canonical `GRAB_SRC.CSV` / `GRAB_SSS.CSV` / `GRAB_KKL.CSV` using the engine guide's StoreID mapping. Reject before writing; retain column warnings.
 
