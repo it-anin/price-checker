@@ -20,6 +20,39 @@ export interface StockReport {
   stock: Map<string, number>
   rowCount: number
   encoding: string
+  // Set only for reports that come from the MSSQL sync instead of a CSV upload.
+  source?: 'mssql'
+  syncedAt?: string
+}
+
+export const STOCK_STALE_MINUTES = 60
+
+export interface StockRow { sku: string; qty: number | string }
+
+// Builds the same StockReport as readStockReport, from rows synced out of MSSQL
+// (CF_QUANTITY of R01.102). Duplicate SKUs are summed, like the CSV path does.
+export function stockReportFromRows(branch: EngineBranch, rows: StockRow[], syncedAt: string): StockReport {
+  const stock = new Map<string, number>()
+  let rowCount = 0
+  for (const row of rows) {
+    const sku = normalizeStockSku(row.sku)
+    if (!isStockSku(sku)) continue
+    const quantity = typeof row.qty === 'number' ? (Number.isFinite(row.qty) ? row.qty : null) : stockNumber(row.qty)
+    if (quantity === null) throw new Error(`ข้อมูล MSSQL ของ ${branch.toUpperCase()}: จำนวนของ SKU ${sku} ไม่ใช่ตัวเลข`)
+    stock.set(sku, (stock.get(sku) ?? 0) + quantity)
+    rowCount++
+  }
+  if (!stock.size) throw new Error(`ยังไม่มีข้อมูลสต็อก MSSQL ของ ${branch.toUpperCase()} ในฐานข้อมูล ตรวจว่า Stock Sync Agent ทำงานอยู่`)
+  return { name: `MSSQL ${branch.toUpperCase()}`, branch, stock, rowCount, encoding: 'MSSQL', source: 'mssql', syncedAt }
+}
+
+// Returns a Thai warning when the synced data is old or the last sync failed.
+export function stockSyncWarning(branch: EngineBranch, status: { synced_at?: string | null; ok?: boolean | null; message?: string | null } | null, now = Date.now()): string {
+  const label = branch.toUpperCase()
+  if (!status || !status.synced_at || !Number.isFinite(Date.parse(status.synced_at))) return `${label}: ไม่พบเวลา sync ล่าสุด`
+  if (status.ok === false) return `${label}: sync ล่าสุดล้มเหลว${status.message ? ` (${status.message})` : ''} ข้อมูลอาจเป็นของรอบก่อน`
+  const minutes = Math.floor((now - Date.parse(status.synced_at)) / 60000)
+  return minutes > STOCK_STALE_MINUTES ? `${label}: ข้อมูลเก่า ${minutes} นาที (sync ล่าสุดเกิน ${STOCK_STALE_MINUTES} นาที)` : ''
 }
 
 export function reportBranch(name: string): EngineBranch {
