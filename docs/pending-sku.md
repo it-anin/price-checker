@@ -2,6 +2,12 @@
 
 The PENDING card in PROCESS ENGINE manages products waiting for Grab approval. Read-only visitors can inspect entries and compare prices. ADD/DELETE use the same Supabase Auth session as GRAB CSV MANAGER.
 
+## Pending column on the product screen
+
+The product table shows Pending coverage beside each SKU. A green check means the SKU is in PENDING for all three active branches (SRC, KKL and SSS); a red cross means one or more are missing, including SKUs absent from PENDING entirely. Coverage includes the union of manual and automatic membership. Legacy WRD/ONN branches do not count toward the three required branches, while older entries without a branch list keep the existing all-three default. SKU matching uses the same normalization as stock processing, preserving leading zeroes.
+
+Click the status to open a small Studio popup listing the missing branches and each branch's current membership. It reads the existing PENDING snapshot and updates when that snapshot changes, including after ADD/DELETE or automatic price resolution. Opening it does not edit PENDING or product data. Loading and failed refreshes use a neutral status rather than claiming incomplete coverage; errors can be retried from the popup. Unsaved automatic results are identified with the same notice as the PENDING workspace.
+
 ## Managing pending entries
 
 Select SRC, SSS and/or KKL (all selected initially), then paste SKUs separated by newlines, commas, semicolons, tabs or pipes. Enter submits; Shift+Enter adds a line. Existing SKUs gain the selected branches without duplicates. DELETE removes only the active tab's branch and removes the entry only when no branches remain. WRD/ONN memberships and additional stored metadata are preserved; the total badge includes these legacy records.

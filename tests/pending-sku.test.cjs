@@ -25,6 +25,22 @@ const parsePrice = value => {
 }
 const normalize = pending.normalizePendingEntries
 
+test('product Pending coverage requires all active branches and preserves SKU identity and legacy behavior', () => {
+  const sets = engine.pendingSkuSets(normalize([
+    { sku: '00001', branches: ['KKL', 'SRC', 'SSS'] },
+    { sku: '00002', branches: ['SRC', 'WRD', 'ONN'] },
+    { sku: 'ALPHA-01', branches: ['KKL'] },
+    { sku: 'OLD', branches: ['WRD', 'ONN'] },
+    { sku: 'LEGACY' },
+  ]))
+  const coverage = sku => pending.pendingBranchCoverage(sku, sets)
+  assert.deepEqual(coverage('00001'), { present: ['src', 'sss', 'kkl'], missing: [], complete: true })
+  assert.deepEqual(coverage('00002'), { present: ['src'], missing: ['sss', 'kkl'], complete: false })
+  assert.deepEqual(coverage(' alpha-01\u200b '), { present: ['kkl'], missing: ['src', 'sss'], complete: false })
+  for (const sku of ['OLD', 'MISSING', '1']) assert.deepEqual(coverage(sku), { present: [], missing: ['src', 'sss', 'kkl'], complete: false })
+  assert.equal(coverage('LEGACY').complete, true)
+})
+
 function store(entries) {
   const state = { entries, updatedAt: '2026-10-30T00:00:00.000Z', reads: 0, writes: 0, failRead: false, failWrite: false, onWrite: null }
   const client = { from(table) {
@@ -260,4 +276,16 @@ test('automatic pending suppresses only mismatched branches and manual suppressi
   assert.equal(stock('src'), '')
   entries = pending.mutatePendingEntries(entries, { kind: 'removeBranch', sku: '001', branch: 'src' }).entries
   assert.equal(stock('src'), '8')
+})
+
+test('product Pending coverage follows the union of manual and automatic branches after edits and price resolution', () => {
+  let entries = syncPrices(normalize([{ sku: '001', branches: ['SRC', 'WRD'] }]), [product('001', { src_price: 110, sss_price: 110, kkl_price: 110 })]).entries
+  const coverage = () => pending.pendingBranchCoverage('001', engine.pendingSkuSets(entries))
+  assert.equal(coverage().complete, true)
+  entries = syncPrices(entries, [product('001', { src_price: 110, sss_price: 110 })]).entries
+  assert.deepEqual(coverage(), { present: ['src', 'sss'], missing: ['kkl'], complete: false })
+  entries = pending.mutatePendingEntries(entries, { kind: 'add', skus: ['001'], branches: ['kkl'] }).entries
+  assert.equal(coverage().complete, true)
+  entries = pending.mutatePendingEntries(entries, { kind: 'removeBranch', sku: '001', branch: 'src' }).entries
+  assert.equal(coverage().complete, true, 'Automatic SRC membership remains after manual SRC removal')
 })
