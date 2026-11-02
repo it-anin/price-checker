@@ -123,6 +123,9 @@ export default function Home() {
   const [isAdding, setIsAdding] = useState(false)
   const [showPriceCalcModal, setShowPriceCalcModal] = useState(false)
   const [priceCalcResults, setPriceCalcResults] = useState<any[]>([])
+  const [savingNewPromaxx, setSavingNewPromaxx] = useState(false)
+  const [newPromaxxSaveError, setNewPromaxxSaveError] = useState('')
+  const priceCalcBusyRef = useRef(false)
   const [updatingPrices, setUpdatingPrices] = useState(false)
   const [lastPriceUpdate, setLastPriceUpdate] = useState<string | null>(null)
   const [priceCalcGrabFile, setPriceCalcGrabFile] = useState<File | null>(null)
@@ -1922,79 +1925,75 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     }
   }
 
-    async function handlePriceCalcUpload(file: File) {
-  setStatus('กำลังคำนวณราคา...')
-  setShowPriceCalcModal(true)
-  setPriceCalcResults([])
+  async function handlePriceCalcUpload(file: File) {
+    if (priceCalcBusyRef.current) return
+    priceCalcBusyRef.current = true
+    setSavingNewPromaxx(true)
+    setNewPromaxxSaveError('')
+    setStatus('กำลังคำนวณราคา...')
+    setShowPriceCalcModal(true)
+    setPriceCalcResults([])
+    let persisting = false
 
-  const text = await file.text()
-  const clean = text.replace(/^\uFEFF/, '')
-  const rows = parseCSVRows(clean)
+    try {
+      const text = (await file.text()).replace(/^\uFEFF/, '')
+      const rows = parseCSVRows(text)
+      // R05.105: A=SKU, E=level 0, starting after the header.
+      const calcMap = new Map<string, { level0: number; newPrice: number }>()
+      for (const row of rows.slice(1)) {
+        if (!row || row.length < 5) continue
+        const sku = row[0]?.trim(), level0 = parsePriceRobust(row[4])
+        if (!sku || level0 === null || !Number.isFinite(level0) || level0 < 0) continue
+        const base = level0 * 0.95 * 1.20
+        const newPrice = Math.ceil(base + base * 0.07)
+        if (Number.isFinite(newPrice)) calcMap.set(sku, { level0, newPrice })
+      }
+      if (!calcMap.size) throw new Error('ไม่พบราคา R05.105 ที่ถูกต้อง: A=SKU, E=ราคาระดับ 0')
 
-  setStatus('(1/3) กำลังอ่านไฟล์ CSV...')
+      setStatus(`กำลังดึงข้อมูลสินค้า... (${calcMap.size} SKU)`)
+      const response = await fetch('/api/products', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skus: [...calcMap.keys()] }),
+      })
+      const data = await response.json()
+      if (!response.ok || !data.success || !Array.isArray(data.products)) throw new Error('ดึงข้อมูลสินค้าเพื่อคำนวณไม่สำเร็จ')
+      const results = (data.products as Product[]).flatMap(product => {
+        const sku = String(product['รหัสสินค้า (SKU NUMBER)'])
+        const calc = calcMap.get(sku)
+        if (!calc) return []
+        const oldPrice = parsePriceRobust(String(product['*ราคาสินค้า'])) ?? 0
+        return [{ sku, name: product['*ชื่อสินค้า (NAME)'], ...calc, oldPrice, changed: Math.abs(calc.newPrice - oldPrice) > 0.01, _product: product }]
+      })
+      if (!results.length) throw new Error('ไม่พบ SKU จากไฟล์ R05.105 ในฐานข้อมูล')
+      setPriceCalcResults(results)
+      setStatus(`กำลังบันทึก New Promaxx... (${results.length} SKU)`)
+      persisting = true
 
-  // Col A (index 0) = SKU, Col E (index 4) = ราคาระดับ 0 (header ชื่อ '0')
-  // เริ่มจาก row 2 (index 1) ข้าม header
-  const calcMap: Record<string, { sku: string; level0: number; D: number }> = {}
-
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i]
-    if (!row || row.length < 5) continue
-    const sku = row[0]?.trim()
-    const level0 = parsePriceRobust(row[4])
-    if (!sku || level0 === null) continue
-
-    const A = level0 * 0.95
-    const B = A * 1.20
-    const C = B * 0.07
-    const D = Math.ceil(B + C)  // ปัดขึ้นทศนิยม
-
-    calcMap[sku] = { sku, level0, D }
-  }
-
-  console.log('[PriceCalc] calcMap size:', Object.keys(calcMap).length, 'sample:', Object.keys(calcMap).slice(0, 3))
-
-  if (Object.keys(calcMap).length === 0) {
-    setPriceCalcResults([{ error: 'ไฟล์ไม่ถูกต้อง หรือ คอลัมน์ผิด' }])
-    setStatus('ไม่พบข้อมูล')
-    return
-  }
-
-  // ดึงข้อมูลจาก Supabase เฉพาะ SKU ที่มีใน CSV
-  const skus = Object.keys(calcMap)
-  setStatus(`(2/3) กำลังดึงข้อมูลจากระบบ... (${skus.length} SKU)`)
-  const res = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus }) })
-  const data = await res.json()
-  console.log('[PriceCalc] API response:', JSON.stringify(data))
-
-  if (!data.success) {
-    setStatus('เกิดข้อผิดพลาดในการดึงข้อมูล')
-    return
-  }
-
-  setStatus('(3/3) กำลังคำนวณราคา...')
-
-  // จับคู่กับข้อมูลใน Supabase
-  const results = data.products.map((p: Product) => {
-    const sku = p['รหัสสินค้า (SKU NUMBER)']
-    const calc = calcMap[sku]
-    if (!calc) return null
-    const oldPrice = parsePriceRobust(String(p['*ราคาสินค้า'])) ?? 0
-    return {
-      sku,
-      name: p['*ชื่อสินค้า (NAME)'],
-      level0: calc.level0,
-      newPrice: calc.D,
-      oldPrice,
-      changed: Math.abs(calc.D - oldPrice) > 0.01,
-      _product: p
+      // Persist every matched calculation, including results equal to the current DB price.
+      for (let offset = 0; offset < results.length; offset += 300) {
+        const chunk = results.slice(offset, offset + 300)
+        const saved = await fetch('/api/products', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ updateNewPromaxxPrice: true, priceMap: Object.fromEntries(chunk.map(result => [result.sku, result.newPrice])) }),
+        })
+        const result = await saved.json()
+        if (!saved.ok || !result.success || result.updated !== chunk.length) throw new Error(result.error || 'บันทึก New Promaxx ไม่ครบ กรุณาคำนวณใหม่เพื่อลองอีกครั้ง')
+        const prices = new Map(chunk.map(result => [result.sku, result.newPrice]))
+        setProducts(previous => previous.map(product => {
+          const price = prices.get(String(product['รหัสสินค้า (SKU NUMBER)']))
+          return price === undefined ? product : { ...product, new_promaxx_price: price }
+        }))
+      }
+      setStatus(`คำนวณและบันทึก New Promaxx แล้ว ${results.length} รายการ`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'คำนวณหรือบันทึก New Promaxx ไม่สำเร็จ'
+      setNewPromaxxSaveError(`${message}${persisting ? ' · บันทึกอาจยังไม่ครบ โหลดรายการสินค้าใหม่เพื่อตรวจสอบก่อนลองอีกครั้ง' : ''}`)
+      setStatus('คำนวณหรือบันทึก New Promaxx ไม่สำเร็จ')
+    } finally {
+      priceCalcBusyRef.current = false
+      setSavingNewPromaxx(false)
     }
-  }).filter(Boolean)
-
-  setPriceCalcResults(results)
-  const changedCount = results.filter((r: any) => r.changed).length
-  setStatus(`คำนวณเสร็จ — เปลี่ยนแปลง ${changedCount} รายการ`)
-}
+  }
 
 function handleCsvToUtf8(file: File) {
   const reader = new FileReader()
@@ -2194,7 +2193,7 @@ async function confirmUpdatePrices() {
       { name: 'แปลง CSV เป็น UTF-8', detail: 'POS', action: () => document.getElementById('csvConvertInput')?.click() },
     ] },
     { key: 'price', icon: 'tag', title: 'ตรวจสอบราคา', items: [
-      { name: 'คำนวณและอัปเดตราคา DB', detail: 'R05.105', action: () => document.getElementById('priceCalcInput')?.click() },
+      { name: 'คำนวณและอัปเดตราคา DB', detail: 'R05.105', action: () => document.getElementById('priceCalcInput')?.click(), disabled: savingNewPromaxx, busy: savingNewPromaxx },
       { name: 'เทียบราคา Promaxx', detail: 'R05.103', action: () => document.getElementById('promaxxCheckInput')?.click() },
       { name: 'ตรวจ GM MME กับ GRAB', detail: '3 สาขา', action: () => { setShowMmeCheckModal(true); setMmeCheckResults({ src: [], kkl: [], sss: [] }) } },
     ] },
@@ -2374,7 +2373,7 @@ async function confirmUpdatePrices() {
           <input type="file" accept=".csv" id="grabInputSrc" onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'src'); e.target.value = '' } }} />
           <input type="file" accept=".csv" id="grabInputKkl" onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'kkl'); e.target.value = '' } }} />
           <input type="file" accept=".csv" id="grabInputSss" onChange={e => { if (e.target.files?.[0]) { handleGrabCheck(e.target.files[0], 'sss'); e.target.value = '' } }} />
-          <input type="file" accept=".csv" id="priceCalcInput" onChange={e => { if (e.target.files?.[0]) { handlePriceCalcUpload(e.target.files[0]); e.target.value = '' } }} />
+          <input type="file" accept=".csv" id="priceCalcInput" disabled={savingNewPromaxx} onChange={e => { if (e.target.files?.[0]) { handlePriceCalcUpload(e.target.files[0]); e.target.value = '' } }} />
           <input type="file" accept=".csv" id="priceCalcGrabInput" onChange={e => { if (e.target.files?.[0]) { handlePriceCalcGrabUpload(e.target.files[0]); e.target.value = '' } }} />
           <input type="file" accept=".xlsx,.xls" id="importInput" onChange={e => { if (e.target.files?.[0]) { handleImportXlsx(e.target.files[0]); e.target.value = '' } }} />
           <input type="file" accept=".csv" id="csvConvertInput" onChange={e => { if (e.target.files?.[0]) { handleCsvToUtf8(e.target.files[0]); e.target.value = '' } }} />
@@ -2420,7 +2419,7 @@ async function confirmUpdatePrices() {
               <div className="pc-table-options"><div className="pc-branch-switch" aria-label="เลือกสาขาเปรียบเทียบ">{branches.map(branch => <button key={branch} className={inspectionBranch === branch ? 'is-active' : ''} aria-pressed={inspectionBranch === branch} disabled={savingPrice} onClick={() => { setInspectionBranch(branch); setPageNumber(1); resetPriceReview() }}>{branchNames[branch]}</button>)}</div><span className="pc-price-view"><WorkspaceIcon name="grid" />ดูราคาทุกระบบ</span></div>
 
               {loadError && <div className="pc-load-error" role="alert"><WorkspaceIcon name="clock" /><div><strong>โหลดข้อมูลสินค้าไม่สำเร็จ</strong><p>{loadError}</p></div><button className="pc-button" onClick={() => search.trim().length >= 3 ? searchProducts(search.trim()) : loadProducts(selectedSheet)}>ลองอีกครั้ง</button></div>}
-              {loading ? <div className="pc-loading" role="status" aria-label="กำลังโหลดสินค้า"><span className="pc-loading-label"><i />กำลังโหลดข้อมูลสินค้า...</span>{Array.from({ length: 6 }, (_, index) => <div className="pc-skeleton-row" key={index}><i /><span /><span /><b /></div>)}</div> : !loadError && filteredProducts.length === 0 ? <div className="pc-empty"><WorkspaceIcon name="search" /><h3>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ไม่พบสินค้าที่ตรงกับเงื่อนไข' : 'ยังไม่มีรายการสินค้า'}</h3><p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ลองเปลี่ยนคำค้นหา สาขา หรือสถานะราคา' : 'เริ่มต้นด้วยการนำเข้าไฟล์ Excel หรือเพิ่มสินค้าใหม่'}</p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? <button className="pc-button" onClick={() => { setSearch(''); setPriceFilter('all'); setSelectedSheet('all'); setBranchFilter('all'); setPageNumber(1) }}>แสดงสินค้าทั้งหมด</button> : <button className="pc-button pc-button-primary" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" />นำเข้าสินค้า</button>}</div> : !loadError && <div className="pc-table-scroll"><table className="pc-products-table pc-expanded-prices"><thead><tr><th className="pc-checkbox-cell"><input type="checkbox" aria-label="เลือกสินค้าทั้งหมดในหน้านี้" checked={pageProducts.length > 0 && pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)']))} ref={input => { if (input) input.indeterminate = pageProducts.some(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) && !pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) }} onChange={event => setSelectedSkus(previous => { const next = new Set(previous); pageProducts.forEach(product => event.target.checked ? next.add(product['รหัสสินค้า (SKU NUMBER)']) : next.delete(product['รหัสสินค้า (SKU NUMBER)'])); return next })} /></th><th className="pc-product-column">สินค้า / SKU</th><th scope="col" className="pc-pending-cell" title="✓ อยู่ใน PENDING ครบ 3 สาขา · ✕ ยังไม่ครบ · คลิกดูรายละเอียด">Pending</th><th>ราคา DB</th><th>Promaxx</th>{branches.map(branch => <th key={branch}>GRAB {branchNames[branch]}</th>)}<th>สถานะ</th><th><span className="pc-sr-only">รายละเอียด</span></th></tr></thead><tbody>{pageProducts.map(product => {
+              {loading ? <div className="pc-loading" role="status" aria-label="กำลังโหลดสินค้า"><span className="pc-loading-label"><i />กำลังโหลดข้อมูลสินค้า...</span>{Array.from({ length: 6 }, (_, index) => <div className="pc-skeleton-row" key={index}><i /><span /><span /><b /></div>)}</div> : !loadError && filteredProducts.length === 0 ? <div className="pc-empty"><WorkspaceIcon name="search" /><h3>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ไม่พบสินค้าที่ตรงกับเงื่อนไข' : 'ยังไม่มีรายการสินค้า'}</h3><p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ลองเปลี่ยนคำค้นหา สาขา หรือสถานะราคา' : 'เริ่มต้นด้วยการนำเข้าไฟล์ Excel หรือเพิ่มสินค้าใหม่'}</p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? <button className="pc-button" onClick={() => { setSearch(''); setPriceFilter('all'); setSelectedSheet('all'); setBranchFilter('all'); setPageNumber(1) }}>แสดงสินค้าทั้งหมด</button> : <button className="pc-button pc-button-primary" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" />นำเข้าสินค้า</button>}</div> : !loadError && <div className="pc-table-scroll"><table className="pc-products-table pc-expanded-prices"><thead><tr><th className="pc-checkbox-cell"><input type="checkbox" aria-label="เลือกสินค้าทั้งหมดในหน้านี้" checked={pageProducts.length > 0 && pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)']))} ref={input => { if (input) input.indeterminate = pageProducts.some(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) && !pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) }} onChange={event => setSelectedSkus(previous => { const next = new Set(previous); pageProducts.forEach(product => event.target.checked ? next.add(product['รหัสสินค้า (SKU NUMBER)']) : next.delete(product['รหัสสินค้า (SKU NUMBER)'])); return next })} /></th><th className="pc-product-column">สินค้า / SKU</th><th scope="col" className="pc-pending-cell" title="✓ อยู่ใน PENDING ครบ 3 สาขา · ✕ ยังไม่ครบ · คลิกดูรายละเอียด">Pending</th><th>ราคา DB</th><th>Promaxx</th><th>New Promaxx</th>{branches.map(branch => <th key={branch}>GRAB {branchNames[branch]}</th>)}<th>สถานะ</th><th><span className="pc-sr-only">รายละเอียด</span></th></tr></thead><tbody>{pageProducts.map(product => {
                 const sku = String(product['รหัสสินค้า (SKU NUMBER)'])
                 const state = priceState(product)
                 const coverage = productPendingReady && productPendingSets ? pendingBranchCoverage(sku, productPendingSets) : null
@@ -2431,7 +2430,7 @@ async function confirmUpdatePrices() {
                   <td><button className="pc-product-link" aria-label={`ตรวจสินค้า ${product['*ชื่อสินค้า (NAME)'] || sku}`} disabled={savingPrice} onClick={() => selectInspectorProduct(product)}><span className="pc-product-thumb"><WorkspaceIcon name="box" />{image && <NextImage src={image} alt="" fill sizes="33px" unoptimized loading="lazy" onError={event => { event.currentTarget.hidden = true }} />}</span><span><strong>{product['*ชื่อสินค้า (NAME)'] || 'ยังไม่ระบุชื่อสินค้า'}</strong><small>{sku}</small><span className="pc-row-branches">{branches.filter(branch => hasProductBranch(product, branch)).map(branch => <i key={branch}>{branchNames[branch]}</i>)}</span></span></button></td>
                   <td className="pc-pending-cell"><button className={`pc-pending-status ${coverage ? coverage.complete ? 'is-complete' : 'is-incomplete' : 'is-unavailable'}`} aria-label={`ดู Pending ของ SKU ${sku}: ${pendingDescription}`} title={pendingDescription} aria-haspopup="dialog" aria-expanded={pendingProduct?.sku === sku} onClick={() => { setTooltip(null); setPendingProduct({ sku, name: String(product['*ชื่อสินค้า (NAME)'] || '') }) }}><WorkspaceIcon name={coverage ? coverage.complete ? 'check' : 'close' : productPendingError ? 'alert' : 'clock'} /><small>{coverage ? `${coverage.present.length}/3` : '—'}</small></button></td>
                   <td className="pc-table-price">{formatMoney(product['*ราคาสินค้า'])}</td>
-                  <td className={pricesDiffer(product.promaxx_price, product['*ราคาสินค้า']) ? 'pc-price-mismatch' : ''}>{formatMoney(product.promaxx_price)}</td>{branches.map(branch => <td key={branch} className={hasProductBranch(product, branch) && pricesDiffer(product[`${branch}_price`], product['*ราคาสินค้า']) ? 'pc-price-mismatch' : ''}>{hasProductBranch(product, branch) ? formatMoney(product[`${branch}_price`]) : '—'}</td>)}
+                  <td className={pricesDiffer(product.promaxx_price, product['*ราคาสินค้า']) ? 'pc-price-mismatch' : ''}>{formatMoney(product.promaxx_price)}</td><td>{formatMoney(product.new_promaxx_price)}</td>{branches.map(branch => <td key={branch} className={hasProductBranch(product, branch) && pricesDiffer(product[`${branch}_price`], product['*ราคาสินค้า']) ? 'pc-price-mismatch' : ''}>{hasProductBranch(product, branch) ? formatMoney(product[`${branch}_price`]) : '—'}</td>)}
                   <td><span className={`pc-status pc-status-${state}`}><WorkspaceIcon name={state === 'matched' ? 'check' : state === 'mismatch' ? 'clock' : 'tag'} />{priceLabels[state]}</span></td><td><button className="pc-row-open" aria-label={`ดูรายละเอียด ${product['*ชื่อสินค้า (NAME)'] || sku}`} disabled={savingPrice} onClick={() => selectInspectorProduct(product)}><WorkspaceIcon name="chevron" /></button></td>
                 </tr>
               })}</tbody></table></div>}
@@ -2687,6 +2686,8 @@ async function confirmUpdatePrices() {
                 <button onClick={() => setShowPriceCalcModal(false)} className="pc-modal-close" aria-label="ปิดหน้าต่าง"><WorkspaceIcon name="close" /></button>
               </header>
 
+              {newPromaxxSaveError ? <p className="pe-error pc-modal-toolbar" role="alert">{newPromaxxSaveError}</p> : <p className="pc-modal-toolbar" role="status">{savingNewPromaxx ? 'กำลังคำนวณและบันทึก New Promaxx...' : 'บันทึก New Promaxx แล้ว · ราคา DB จะเปลี่ยนเมื่อกดอัปเดทเท่านั้น'}</p>}
+
               {/* Grab_menu upload bar */}
               <div style={{ padding: '10px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)', display: 'flex', gap: 10, alignItems: 'center' }} className="pc-modal-toolbar">
                 <span style={{ fontSize: 12, color: 'var(--pc-ink)', fontWeight: 600, whiteSpace: 'nowrap' }}>Grab_menu (.csv):</span>
@@ -2721,7 +2722,7 @@ async function confirmUpdatePrices() {
                 {priceCalcResults[0]?.error ? (
                   <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-danger)' }}>{priceCalcResults[0].error}</div>
                 ) : priceCalcResults.length === 0 ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-ink)' }}>กำลังคำนวณ...</div>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-ink)' }}>{newPromaxxSaveError ? 'ยังไม่มีผลคำนวณ' : 'กำลังคำนวณ...'}</div>
                 ) : (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
@@ -2794,7 +2795,7 @@ async function confirmUpdatePrices() {
                 </button>
                 <button
                   onClick={confirmUpdatePrices}
-                  disabled={updatingPrices || displayRows.length === 0}
+                  disabled={updatingPrices || savingNewPromaxx || displayRows.length === 0}
                   style={{ ...btnStyle, background: 'var(--pc-accent)', color: '#fff', borderColor: 'var(--pc-accent)', opacity: updatingPrices ? 0.6 : 1 }}
                  className="pc-popup-action"><WorkspaceIcon name="check" />
                   {updatingPrices ? 'กำลังอัพเดท...' : `อัพเดท ${displayRows.length} รายการ`}

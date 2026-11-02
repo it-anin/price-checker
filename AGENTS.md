@@ -35,6 +35,7 @@ Repository: `it-anin/price-checker`, branch `main`. Next.js 16, React 19, TypeSc
 ## Current UI and persistence
 
 - Split Inspector shows DB, Promaxx and three GRAB prices. Tools use Studio Cards, with GRAB CSV MANAGER (`pc-tool-card`) below the four groups. Navigation uses outline icons and labels.
+- Product **New Promaxx** follows Promaxx and displays persisted `products.new_promaxx_price` (null = no calculation). `handlePriceCalcUpload()` saves R05.105 results through `POST /api/products` (`updateNewPromaxxPrice`, 300 SKUs/request, 10 concurrent updates); errors remain visible and zero-row writes are failures. Base DB prices still require explicit Update. Apply [its migration](supabase/migrations/20261102103640_add_new_promaxx_price.sql) before deploying; `tests/new-promaxx.test.mjs` covers persistence, zero/missing prices, partial failures and unchanged Promaxx/base prices. Browser QA must mock API/storage responses.
 - Reuse `StudioModal` and theme tokens. Await `notifyPopup()` for notices/confirmations. Escape/close cancels deletion; preserve focus and scroll handling.
 - Product **Pending** column: check = all SRC/KKL/SSS, cross = incomplete, neutral = loading/error. `pendingBranchCoverage()` reads manual + automatic membership, ignoring WRD/ONN. Clicking shows missing branches without writes. Label unsaved automatic results.
 
@@ -42,7 +43,7 @@ Repository: `it-anin/price-checker`, branch `main`. Next.js 16, React 19, TypeSc
 |---|---|
 | Import GRAB SRC/KKL/SSS | Immediately syncs membership and `src_price` / `kkl_price` / `sss_price`. Use full menus: absent SKUs lose that branch. |
 | Compare Promaxx | Immediately saves `promaxx_price`, not the base price. |
-| Calculate/update DB price | Preview first; explicit Update writes the base price. Formula: `ceil(level0 × 0.95 × 1.20 × 1.07)`. |
+| Calculate/update DB price | Calculation saves `new_promaxx_price`; explicit Update writes the base price. Formula: `ceil(level0 × 0.95 × 1.20 × 1.07)`. |
 | GM MME vs GRAB comparison | Browser-only comparison and exports. |
 | PENDING price display | Manual and automatic sections share persisted GRAB/Promaxx checks from Tools imports; base prices load separately via SKU lookup. No local price-upload cards. |
 | GRAB CSV MANAGER upload | Saves validated CSV content to `grab_files` under its canonical branch name. |

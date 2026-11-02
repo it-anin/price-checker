@@ -49,6 +49,7 @@ const PRODUCT_COLUMNS = [
   'kkl_price',
   'sss_price',
   'promaxx_price',
+  'new_promaxx_price',
 ].join(', ')
 
 export async function GET(req: NextRequest) {
@@ -128,6 +129,31 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
+
+  if (body?.updateNewPromaxxPrice === true) {
+    const priceMap: unknown = body.priceMap
+    if (!priceMap || typeof priceMap !== 'object' || Array.isArray(priceMap)) {
+      return NextResponse.json({ success: false, error: 'Invalid New Promaxx price map' }, { status: 400 })
+    }
+    const entries = Object.entries(priceMap)
+    if (!entries.length || entries.length > 300 || entries.some(([sku, price]) => !sku.trim() || typeof price !== 'number' || !Number.isFinite(price) || price < 0)) {
+      return NextResponse.json({ success: false, error: 'New Promaxx requires 1–300 SKUs with valid nonnegative prices' }, { status: 400 })
+    }
+
+    const skuColumn = '"รหัสสินค้า (SKU NUMBER)"'
+    let updated = 0
+    for (let offset = 0; offset < entries.length; offset += 10) {
+      const results = await Promise.all(entries.slice(offset, offset + 10).map(async ([sku, price]) => {
+        const { data, error } = await supabase.from('products')
+          .update({ new_promaxx_price: price }).eq(skuColumn, sku).select(skuColumn).maybeSingle()
+        return error?.message ?? (data ? null : `SKU ${sku} was not updated`)
+      }))
+      updated += results.filter(error => error === null).length
+      const error = results.find(error => error !== null)
+      if (error) return NextResponse.json({ success: false, updated, error: `New Promaxx: ${error}` }, { status: 503 })
+    }
+    return NextResponse.json({ success: true, updated })
+  }
 
   if (body?.availabilityBranch && Array.isArray(body.skus)) {
     const availabilityBranch = normalizeBranchName(body.availabilityBranch)

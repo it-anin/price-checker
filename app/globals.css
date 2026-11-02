@@ -168,7 +168,7 @@ body {
 .pc-row-branches i { font: 6px Arial, sans-serif; color: #829176; border: 1px solid #e1e7d9; padding: 1px 4px; border-radius: 3px; background: #fff; }
 .pc-table-price { font-family: Arial, sans-serif; font-size: 12px; }
 .pc-products-table .pc-price-mismatch { color: #a3682c; }
-.pc-expanded-prices { min-width: 1005px; }
+.pc-expanded-prices { min-width: 1125px; }
 .pc-expanded-prices .pc-price-mismatch { background: #fff8e9; }
 .pc-expanded-prices td:not(:nth-child(2)) { font-family: Arial, sans-serif; font-size: 11px; }
 .pc-expanded-prices .pc-status { font-family: var(--font-workspace), Arial, sans-serif; }
@@ -470,7 +470,7 @@ body {
   .pc-products-table .pc-product-column { width: 230px; }
   .pc-product-link { min-width: 218px; max-width: 240px; }
   .pc-product-link strong { max-width: 175px; font-size: 11px; }
-  .pc-products-table.pc-expanded-prices { min-width: 1020px; }
+  .pc-products-table.pc-expanded-prices { min-width: 1140px; }
   .pc-table-footer { font-size: 8px; padding: 13px; gap: 9px; }
   .pc-pagination { gap: 5px; }
   .pc-pagination button { width: 32px; height: 34px; }
