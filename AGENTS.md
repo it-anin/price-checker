@@ -44,7 +44,7 @@ Repository: `it-anin/price-checker`, branch `main`. Next.js 16, React 19, TypeSc
 | Compare Promaxx | Immediately saves `promaxx_price`, not the base price. |
 | Calculate/update DB price | Preview first; explicit Update writes the base price. Formula: `ceil(level0 × 0.95 × 1.20 × 1.07)`. |
 | GM MME vs GRAB comparison | Browser-only comparison and exports. |
-| PENDING price-file uploads | Browser-only; independent of automatic checks; lost on refresh. |
+| PENDING price display | Manual and automatic sections share persisted GRAB/Promaxx checks from Tools imports; base prices load separately via SKU lookup. No local price-upload cards. |
 | GRAB CSV MANAGER upload | Saves validated CSV content to `grab_files` under its canonical branch name. |
 
 `products` uses SKU `รหัสสินค้า (SKU NUMBER)`, name `*ชื่อสินค้า (NAME)`, base price `*ราคาสินค้า`, and category `หมวดหมู่สินค้า (CATEGORIES)`. `product_master` stores master SKUs; `sku_reference` provides the legacy reference-price comparison.

@@ -716,15 +716,8 @@ body {
 .pn-add-input textarea { font: inherit; flex: 1; width: 100%; min-width: 0; min-height: 86px; border: 1px solid #cfd5c8; border-radius: 7px; padding: 10px 12px; background: white; resize: vertical; }
 .pn-add-input textarea:disabled { background: #f1f2eb; color: #7a806f; }
 .pn-add-input textarea:focus-visible { outline: 3px solid #c7843e; outline-offset: 3px; }
-.pn-price-sources { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; margin-top: 18px; }
-.pn-price-sources>section { padding: 16px; border: 1px solid var(--pc-line); border-radius: 9px; min-width: 0; background: #fcfcf9; }
-.pn-price-sources h3 { display: flex; align-items: center; justify-content: space-between; gap: 8px; font: 700 12px Arial,sans-serif; }
-.pn-price-sources h3 small { font: 10px var(--font-workspace),Arial,sans-serif; color: #7b826e; }
-.pn-price-sources>section>p { margin-top: 10px; font-size: 11px; }
-.pn-price-sources .pe-actions { margin-top: 12px; }
 .pn-source-status { font-size: 11px !important; overflow-wrap: anywhere; }
 .pn-price-note { font-size: 11px !important; margin-top: 12px; }
-.pn-multiline { white-space: pre-line; }
 .pn-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--pc-line); margin-top: 22px; }
 .pn-tabs button { min-height: 44px; padding: 10px 20px; border-bottom: 3px solid transparent; color: #838a77; font: 700 12px Arial,sans-serif; }
 .pn-tabs button.is-active { border-bottom-color: var(--pc-accent); color: var(--pc-accent); background: #fff6e9; border-radius: 6px 6px 0 0; }
@@ -746,7 +739,6 @@ body {
 .pn-no-name { color: #949985; font-size: 11px; }
 .pn-footer-note { margin-top: 13px; font-size: 11px !important; }
 @media (max-width: 1050px) {
-  .pn-price-sources { grid-template-columns: 1fr; }
   .pn-heading-actions { justify-content: flex-start; }
 }
 @media (max-width: 640px) {
