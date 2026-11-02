@@ -57,3 +57,23 @@ export function toStockRows(records, branch, syncedAt) {
   }
   return [...bySku].map(([sku, qty]) => ({ branch, sku, qty: Number(qty.toFixed(4)), synced_at: syncedAt }))
 }
+
+// Builds the mssql connection config from environment variables.
+// A named instance (e.g. BigyaMainPC\SQLSERVER) must NOT be combined with a port:
+// tedious rejects both together, so MSSQL_INSTANCE replaces MSSQL_PORT.
+export function buildConnectionConfig(env) {
+  for (const name of ['MSSQL_SERVER', 'MSSQL_DATABASE', 'MSSQL_USER', 'MSSQL_PASSWORD']) {
+    if (!env[name]) throw new Error(`ยังไม่ได้ตั้ง ${name}`)
+  }
+  const config = {
+    server: env.MSSQL_SERVER,
+    database: env.MSSQL_DATABASE,
+    user: env.MSSQL_USER,
+    password: env.MSSQL_PASSWORD,
+    options: { encrypt: env.MSSQL_ENCRYPT === 'true', trustServerCertificate: env.MSSQL_TRUST_CERT !== 'false' },
+    requestTimeout: 120000,
+  }
+  if (env.MSSQL_INSTANCE) config.options.instanceName = env.MSSQL_INSTANCE
+  else config.port = Number(env.MSSQL_PORT || 1433)
+  return config
+}

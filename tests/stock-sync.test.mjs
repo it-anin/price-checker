@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildStockQuery, parseBranchMap, toStockRows } from '../tools/stock-sync/query.mjs'
+import { buildConnectionConfig, buildStockQuery, parseBranchMap, toStockRows } from '../tools/stock-sync/query.mjs'
 
 test('query keeps every R01.102 CF_QUANTITY condition', () => {
   const query = buildStockQuery()
@@ -27,4 +27,29 @@ test('parseBranchMap validates the config', () => {
 test('toStockRows trims, merges duplicates, rounds and skips null/invalid', () => {
   const rows = toStockRows([{ sku: ' a1 ', qty: 0.1 }, { sku: 'A1', qty: 0.2 }, { sku: '', qty: 5 }, { sku: 'B2', qty: null }, { sku: 'C3', qty: 'x' }], 'src', 't')
   assert.deepEqual(rows, [{ branch: 'src', sku: 'A1', qty: 0.3, synced_at: 't' }])
+})
+
+test('buildConnectionConfig: named instance replaces the port', () => {
+  const base = { MSSQL_SERVER: 'BigyaMainPC', MSSQL_DATABASE: 'MSMAXX', MSSQL_USER: 'web_readonly', MSSQL_PASSWORD: 'x' }
+  const named = buildConnectionConfig({ ...base, MSSQL_INSTANCE: 'SQLSERVER', MSSQL_PORT: '1433' })
+  assert.equal(named.options.instanceName, 'SQLSERVER')
+  assert.ok(!('port' in named), 'port must not be sent with instanceName')
+  assert.equal(named.server, 'BigyaMainPC')
+  assert.equal(named.database, 'MSMAXX')
+})
+
+test('buildConnectionConfig: default instance uses port, defaulting to 1433', () => {
+  const base = { MSSQL_SERVER: 'h', MSSQL_DATABASE: 'd', MSSQL_USER: 'u', MSSQL_PASSWORD: 'p' }
+  assert.equal(buildConnectionConfig(base).port, 1433)
+  assert.equal(buildConnectionConfig({ ...base, MSSQL_PORT: '14330' }).port, 14330)
+  assert.ok(!('instanceName' in buildConnectionConfig(base).options))
+  assert.equal(buildConnectionConfig(base).options.trustServerCertificate, true)
+  assert.equal(buildConnectionConfig({ ...base, MSSQL_ENCRYPT: 'true' }).options.encrypt, true)
+})
+
+test('buildConnectionConfig: missing required values are reported by name', () => {
+  const base = { MSSQL_SERVER: 'h', MSSQL_DATABASE: 'd', MSSQL_USER: 'u', MSSQL_PASSWORD: 'p' }
+  for (const name of Object.keys(base)) {
+    assert.throws(() => buildConnectionConfig({ ...base, [name]: '' }), new RegExp(name))
+  }
 })

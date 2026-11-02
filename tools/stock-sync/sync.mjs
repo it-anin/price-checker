@@ -2,7 +2,7 @@
 // Usage: node sync.mjs [--dry-run] [--watch]
 import sql from 'mssql'
 import { createClient } from '@supabase/supabase-js'
-import { buildStockQuery, parseBranchMap, toStockRows } from './query.mjs'
+import { buildConnectionConfig, buildStockQuery, parseBranchMap, toStockRows } from './query.mjs'
 
 const dryRun = process.argv.includes('--dry-run')
 const watch = process.argv.includes('--watch')
@@ -39,15 +39,7 @@ async function setStatus(supabase, branch, status) {
 async function runOnce() {
   const branchMap = parseBranchMap(env('STOCK_BRANCH_MAP'))
   const supabase = dryRun ? null : createClient(env('SUPABASE_URL'), env('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false } })
-  const pool = await new sql.ConnectionPool({
-    server: env('MSSQL_SERVER'),
-    port: Number(process.env.MSSQL_PORT || 1433),
-    database: env('MSSQL_DATABASE'),
-    user: env('MSSQL_USER'),
-    password: env('MSSQL_PASSWORD'),
-    options: { encrypt: process.env.MSSQL_ENCRYPT === 'true', trustServerCertificate: process.env.MSSQL_TRUST_CERT !== 'false' },
-    requestTimeout: 120000,
-  }).connect()
+  const pool = await new sql.ConnectionPool(buildConnectionConfig(process.env)).connect()
   try {
     for (const [branch, config] of Object.entries(branchMap)) {
       const syncedAt = new Date().toISOString()
