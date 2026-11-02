@@ -40,6 +40,34 @@ test('upload determines all three canonical filenames from StoreID in the CSV co
   }
 })
 
+test('inch-mark names upload and process with the original text and strict stock columns intact', () => {
+  const name = 'UM Finger Cot Splint E01 (M/2-3") NEW 08-26'
+  for (const delimiter of [',', ';', '\t']) {
+    const rows = stockRows()
+    rows[3][2] = name
+    const text = csv(rows, delimiter).replace(quote(name), name)
+    const template = validateGrabTemplateUpload(text)
+    assert.equal(template.document.delimiter, delimiter)
+    assert.equal(template.document.rows[3][2], name)
+    const report = { branch: 'src', stock: new Map([['00001', 12]]), name: 'src.CSV', rowCount: 1, encoding: 'TIS-620' }
+    const output = parseEngineCsv(processGrabTemplate(template.name, text, report, 2, new Set()).content)
+    assert.deepEqual(output.rawRows.slice(0, 3), template.document.rawRows.slice(0, 3))
+    for (let column = 0; column < 16; column++) {
+      if ([4, 5, 15].includes(column)) continue
+      assert.equal(output.rawRows[3][column], template.document.rawRows[3][column])
+    }
+    assert.equal(output.rows[3][2], name)
+    assert.deepEqual([output.rows[3][4], output.rows[3][5], output.rows[3][15]], ['10', '10', 'in stock'])
+    const invalid = stockRows()
+    invalid[3][2] = name
+    invalid[2][2] = 'WRONG_NAME'
+    assert.throws(() => validateGrabTemplateUpload(csv(invalid, delimiter).replace(quote(name), name)), /คอลัมน์ C/)
+    const extra = stockRows()
+    extra[3][2] = name; extra[3].push('extra')
+    assert.throws(() => validateGrabTemplateUpload(csv(extra, delimiter).replace(quote(name), name)), /16 คอลัมน์/)
+  }
+})
+
 test('every machine header column is required verbatim in its approved position', () => {
   for (let column = 0; column < headers.length; column++) {
     for (const wrong of ['BAD', headers[column].toLowerCase(), ` ${headers[column]} `, '']) {

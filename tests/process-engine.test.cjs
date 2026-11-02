@@ -21,6 +21,49 @@ function report(branch = 'src', rows = []) {
   return readStockReport(`${branch}.csv`, ['A,B,C,D,SKU,F,QTY', ...rows.map(([sku, qty]) => `,,,,${sku},,${quote(qty)}`)].join('\r\n'), 'UTF-8')
 }
 
+test('bare inch marks preserve product names and column boundaries for every delimiter', () => {
+  const names = ['UM Finger Cot Splint E01 (M/2-3") NEW 08-26', 'Gauze 3" x 4"', 'Cotton 2"']
+  for (const delimiter of [',', ';', '\t']) {
+    const input = names.map((name, index) => ['item', name, `000${index}`, '12'].join(delimiter)).join('\r\n') + '\r\n'
+    const parsed = parseEngineCsv(input)
+    assert.equal(parsed.delimiter, delimiter)
+    assert.deepEqual(parsed.rows, names.map((name, index) => ['item', name, `000${index}`, '12']))
+    assert.deepEqual(parsed.rawRows.map(row => row[1]), names)
+    assert.deepEqual(parsed.endings, ['\r\n', '\r\n', '\r\n'])
+  }
+})
+
+test('bare inch marks coexist with escaped quotes, embedded delimiters and multiline quoted fields', () => {
+  const name = 'UM Finger Cot Splint E01 (M/2-3") NEW 08-26'
+  for (const delimiter of [',', ';', '\t']) {
+    const description = 'ยา, "ไทย"; description\tcontinued\nบรรทัดสอง'
+    const escaped = '"' + description.replace(/"/g, '""') + '"'
+    const parsed = parseEngineCsv([name, escaped, '00001', '12'].join(delimiter) + '\r\n')
+    assert.equal(parsed.delimiter, delimiter)
+    assert.deepEqual(parsed.rows, [[name, description, '00001', '12']])
+    assert.equal(parsed.rawRows[0][1], escaped)
+    for (const invalid of ['"unclosed', '"a"bad', '"a" "b"']) {
+      assert.throws(() => parseEngineCsv(['item', invalid, '12'].join(delimiter)), /เครื่องหมายคำพูด/)
+    }
+  }
+})
+
+test('R01.102 reads row 1893 with an inch-mark name in ordinary TIS-620 and UTF-8 CSVs', () => {
+  const name = 'ยา UM Finger Cot Splint E01 (M/2-3") NEW 08-26'
+  const lines = ['A,B,NAME,D,SKU,F,QTY', ...Array.from({ length: 1892 }, (_, index) => [
+    '', '', index === 1891 ? name : 'product', '', String(index + 1).padStart(5, '0'), '', index === 1891 ? '17' : '1',
+  ].join(','))]
+  const text = lines.join('\r\n') + '\r\n'
+  const tis620 = Uint8Array.from([...text], ch => ch.charCodeAt(0) > 127 ? ch.charCodeAt(0) - 0xd60 : ch.charCodeAt(0))
+  for (const bytes of [new TextEncoder().encode(text), tis620]) {
+    const decoded = decodeCsv(bytes.buffer)
+    const result = readStockReport('src.CSV', decoded.text, decoded.encoding)
+    assert.equal(result.rowCount, 1892)
+    assert.equal(result.stock.get('01892'), 17)
+    assert.equal(parseEngineCsv(decoded.text).rows[1892][2], name)
+  }
+})
+
 test('pending has priority; subtract once; zero, negative and missing stock are empty', () => {
   const input = template('src', [{ sku: '001' }, { sku: '002' }, { sku: '003' }, { sku: '004' }, { sku: '005' }])
   const stock = report('src', [['001', 12], ['002', 20], ['003', 5], ['004', -2]])

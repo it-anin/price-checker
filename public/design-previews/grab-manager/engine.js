@@ -34,17 +34,27 @@ export function decodeCsv(buffer) {
 export function parseEngineCsv(input) {
     const text = input.replace(/^\uFEFF/, '');
     const counts = { ',': 0, ';': 0, '\t': 0 };
-    let quoted = false;
+    let quoted = false, fieldStarted = false;
     for (let i = 0; i < Math.min(text.length, 16000); i++) {
-        if (text[i] === '"') {
+        const ch = text[i];
+        if (ch === '"' && (quoted || !fieldStarted)) {
             if (quoted && text[i + 1] === '"') {
                 i++;
                 continue;
             }
             quoted = !quoted;
+            fieldStarted = true;
         }
-        else if (!quoted && text[i] in counts)
-            counts[text[i]]++;
+        else if (!quoted) {
+            if (ch in counts) {
+                counts[ch]++;
+                fieldStarted = false;
+            }
+            else if (ch === '\r' || ch === '\n')
+                fieldStarted = false;
+            else if (ch.trim())
+                fieldStarted = true;
+        }
     }
     const delimiter = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
     const rows = [], rawRows = [], endings = [];
@@ -89,10 +99,17 @@ export function parseEngineCsv(input) {
             start = i + 1;
         }
         else if (ch === '"') {
-            if (closed || cell.trim())
+            if (closed)
                 throw new Error(`CSV มีเครื่องหมายคำพูดไม่ถูกต้องที่แถว ${rows.length + 1}`);
-            cell = '';
-            inQuotes = true;
+            // Some report exports leave inch marks unescaped inside unquoted names.
+            // Only a quote at the start of a field opens CSV quoting; keep interior
+            // quotes literally, while quoted fields still require valid escaping.
+            if (cell.trim())
+                cell += ch;
+            else {
+                cell = '';
+                inQuotes = true;
+            }
         }
         else {
             if (closed && ch.trim())
