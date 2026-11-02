@@ -61,7 +61,47 @@ function WorkspaceIcon({ name, className = '' }: { name: string; className?: str
   return <svg className={`pc-icon ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name] ?? paths.box}</svg>
 }
 
+function StudioModal({ label, width = 900, onClose, children }: { label: string; width?: number; onClose: () => void; children: React.ReactNode }) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const previousOverflow = document.body.style.overflow
+    dialog.showModal()
+    document.body.style.overflow = 'hidden'
+    return () => {
+      dialog.close()
+      document.body.style.overflow = previousOverflow
+      requestAnimationFrame(() => { if (opener?.isConnected) opener.focus() })
+    }
+  }, [])
+  useEffect(() => {
+    // Disabling a busy action can move browser focus back to the body.
+    // Keep keyboard navigation inside the active popup while its data loads.
+    const dialog = dialogRef.current
+    if (dialog?.open && document.activeElement === document.body) dialog.focus()
+  })
+  return <dialog ref={dialogRef} className="pc-modal" tabIndex={-1} aria-label={label} style={{ width: `min(${width}px, calc(100vw - 32px))` }} onCancel={event => { event.preventDefault(); onClose() }}>{children}</dialog>
+}
+
+type PopupNotice = { message: string; confirm: boolean; resolve: (answer: boolean) => void }
+
 export default function Home() {
+  const [popupNotice, setPopupNotice] = useState<PopupNotice | null>(null)
+  const popupQueue = useRef<PopupNotice[]>([])
+  function notifyPopup(message: string, confirm = false) {
+    return new Promise<boolean>(resolve => {
+      const notice = { message, confirm, resolve }
+      popupQueue.current.push(notice)
+      if (popupQueue.current.length === 1) setPopupNotice(notice)
+    })
+  }
+  function dismissPopup(answer: boolean) {
+    const notice = popupQueue.current.shift()
+    setPopupNotice(popupQueue.current[0] ?? null)
+    notice?.resolve(answer)
+  }
   const [products, setProducts] = useState<Product[]>([])
   const [stats, setStats] = useState<Stats>({ totalProducts: 0, sheets: [] })
   const [search, setSearch] = useState('')
@@ -502,7 +542,7 @@ export default function Home() {
         }
       }
       setEngineReports(previous => ({ ...previous, ...next }))
-      if (problems.length) window.alert(`ตรวจไฟล์ R01.102\n\n${problems.join('\n')}`)
+      if (problems.length) await notifyPopup(`ตรวจไฟล์ R01.102\n\n${problems.join('\n')}`)
     } finally { engineBusyRef.current = false; setEngineBusy('') }
   }
 
@@ -532,7 +572,7 @@ export default function Home() {
     for (const branch of branches) {
       const value = engineSubtract[branch].trim()
       if (!value || !Number.isFinite(Number(value)) || Number(value) < 0) {
-        window.alert(`SUBTRACT ${branch.toUpperCase()} ต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป`)
+        await notifyPopup(`SUBTRACT ${branch.toUpperCase()} ต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป`)
         return
       }
       subtracts[branch] = Number(value)
@@ -600,14 +640,14 @@ export default function Home() {
       setEngineSummary({ processed: outputs.length, updated, skipped })
       setEngineWarnings(warnings)
       logEngine(`PROCESSED ${outputs.length} สาขา / UPDATED ${updated} แถว / SKIPPED ${skipped} สาขา`)
-      if (warnings.length) window.alert(`พบปัญหาระหว่างประมวลผล กรุณาตรวจ SYSTEM LOG ก่อนดาวน์โหลด\n\n${warnings.join('\n\n')}`)
+      if (warnings.length) await notifyPopup(`พบปัญหาระหว่างประมวลผล กรุณาตรวจ SYSTEM LOG ก่อนดาวน์โหลด\n\n${warnings.join('\n\n')}`)
     } catch (error) {
       const warning = engineMessage(error)
       pendingReadyRef.current = false; setPendingLoading(false); setPendingError(warning)
       setEngineWarnings([warning]); setEngineSummary({ processed: 0, updated: 0, skipped: branches.length })
       setEngineProgress({ current: 0, total: branches.length, label: 'หยุด: ตรวจสอบ PENDING SKU UPDATE' })
       logEngine(`RUN STOPPED · ${warning}`)
-      window.alert(`RUN หยุดทำงาน\n\n${warning}\n\nไม่มีการสร้างไฟล์ผลลัพธ์`)
+      await notifyPopup(`RUN หยุดทำงาน\n\n${warning}\n\nไม่มีการสร้างไฟล์ผลลัพธ์`)
     } finally { engineBusyRef.current = false; setEngineBusy('') }
   }
 
@@ -645,7 +685,7 @@ export default function Home() {
       await refreshGrabFiles()
       logEngine(`UPLOAD TEMPLATE · SAVED ${reviews.length} / BLOCKED ${problems.length}`)
       if (reviews.some(review => review.changed)) openGrabChangeNotice(reviews)
-      else if (problems.length) window.alert(`บันทึกสำเร็จ ${reviews.length} ไฟล์ / BLOCKED ${problems.length} ไฟล์\n\n${problems.join('\n\n')}`)
+      else if (problems.length) await notifyPopup(`บันทึกสำเร็จ ${reviews.length} ไฟล์ / BLOCKED ${problems.length} ไฟล์\n\n${problems.join('\n\n')}`)
     } finally { engineBusyRef.current = false; setEngineBusy('') }
   }
 
@@ -1759,8 +1799,8 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
       return
     }
 
-    const ok = window.confirm(
-      `ยืนยันลบหมวดหมู่ "${selectedSheet}" ออกจากทุกสาขา?\nการลบนี้ไม่สามารถย้อนกลับได้`
+    const ok = await notifyPopup(
+      `ยืนยันลบหมวดหมู่ "${selectedSheet}" ออกจากทุกสาขา?\nการลบนี้ไม่สามารถย้อนกลับได้`, true
     )
     if (!ok) return
 
@@ -2475,40 +2515,37 @@ async function confirmUpdatePrices() {
         const notFoundCount = displayGrabResults.filter((r: any) => r.notFound).length
 
         return (
-  <div style={{
-    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-    display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
-  }}>
-    <div style={{ background: '#fff', borderRadius: 6, width: 700, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+  <StudioModal label="ผลตรวจสอบราคา GRAB" width={900} onClose={closeGrabModal}>
+    <div className="pc-modal-panel">
 
       {/* Header */}
-      <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <strong>🛵 ผลตรวจสอบราคา GRAB</strong>
+      <header className="pc-modal-header">
+        <h2><WorkspaceIcon name="branch" />ผลตรวจสอบราคา GRAB</h2>
         <button onClick={closeGrabModal}
-          style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
-      </div>
+          className="pc-modal-close" aria-label="ปิดหน้าต่าง"><WorkspaceIcon name="close" /></button>
+      </header>
 
       {/* Summary */}
       {grabResults.length > 0 && !grabResults[0]?.error && (
-        <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13, flexWrap: 'wrap' }}>
+        <div style={{ padding: '10px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)', display: 'flex', gap: 20, fontSize: 13, flexWrap: 'wrap' }} className="pc-modal-toolbar">
           <span>แสดง: <strong>{displayGrabResults.length}</strong> / {totalCount}</span>
-          <span style={{ color: '#28a745' }}>✓ ตรง: <strong>{matchedCount}</strong></span>
-          <span style={{ color: '#dc3545' }}>✗ ต้องแก้ไขใน GRAB: <strong>{mismatchCount}</strong></span>
+          <span style={{ color: 'var(--pc-success)' }}>✓ ตรง: <strong>{matchedCount}</strong></span>
+          <span style={{ color: 'var(--pc-danger)' }}>✗ ต้องแก้ไขใน GRAB: <strong>{mismatchCount}</strong></span>
           {notFoundCount > 0 && (
-            <span style={{ color: '#000' }}>⚠ ไม่พบข้อมูลใน Supabase: <strong>{notFoundCount}</strong></span>
+            <span style={{ color: 'var(--pc-ink)' }}>⚠ ไม่พบข้อมูลใน Supabase: <strong>{notFoundCount}</strong></span>
           )}
         </div>
       )}
 
       {/* Toolbar */}
       {grabResults.length > 0 && !grabResults[0]?.error && (
-        <div style={{ padding: '8px 20px', background: '#fff', borderBottom: '1px solid #eee', display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ padding: '8px 20px', background: '#fff', borderBottom: '1px solid var(--pc-line)', display: 'flex', gap: 12, alignItems: 'center' }} className="pc-modal-toolbar">
           <input
             type="text"
             placeholder="ค้นหา SKU / ชื่อสินค้า..."
             value={grabSearch}
             onChange={(e) => setGrabSearch(e.target.value)}
-            style={{ padding: '6px 10px', border: '1px solid #ccc', borderRadius: 4, fontSize: 12, width: 220 }}
+            style={{ padding: '6px 10px', border: '1px solid var(--pc-line)', borderRadius: 4, fontSize: 12, width: 220 }}
           />
           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
             <input
@@ -2518,24 +2555,24 @@ async function confirmUpdatePrices() {
             />
             เฉพาะราคาไม่ตรง
           </label>
-          <span style={{ fontSize: 11, color: '#666', marginLeft: 'auto' }}>
+          <span style={{ fontSize: 11, color: 'var(--pc-muted)', marginLeft: 'auto' }}>
             💡 คลิกที่ราคาใน GRAB เพื่อแก้ไข (ไม่บันทึกลง DB)
           </span>
         </div>
       )}
 
       {/* Table */}
-      <div style={{ overflowY: 'auto', flex: 1 }}>
+      <div style={{ overflowY: 'auto', flex: 1 }} className="pc-modal-body">
         {grabResults[0]?.error ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{grabResults[0].error}</div>
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-danger)' }}>{grabResults[0].error}</div>
         ) : grabResults.length === 0 ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#000' }}>กำลังโหลด...</div>
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-ink)' }}>กำลังโหลด...</div>
         ) : displayGrabResults.length === 0 ? (
-          <div style={{ padding: 40, textAlign: 'center', color: '#000' }}>ไม่พบรายการที่ตรงกับเงื่อนไข</div>
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-ink)' }}>ไม่พบรายการที่ตรงกับเงื่อนไข</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
-              <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+              <tr style={{ background: 'var(--pc-bg)', position: 'sticky', top: 0 }}>
                 <th style={th}>#</th>
                 <th style={th}>SKU</th>
                 <th style={th}>ชื่อสินค้า</th>
@@ -2560,11 +2597,11 @@ async function confirmUpdatePrices() {
                   setEditingGrabValue('')
                 }
                 return (
-                  <tr key={r.sku || i} style={{ background: r.notFound ? '#f0f0f0' : r.effectiveMatched ? 'transparent' : '#fff3cd' }}>
+                  <tr key={r.sku || i} style={{ background: r.notFound ? 'var(--pc-bg)' : r.effectiveMatched ? 'transparent' : 'var(--pc-soft)' }}>
                     <td style={td}>{i + 1}</td>
-                    <td style={{ ...td, color: '#000' }}><strong>{r.sku}</strong></td>
-                    <td style={{ ...td, color: '#000' }}>{r.name || '-'}</td>
-                    <td style={{ ...td, fontWeight: 600, color: '#000' }}>
+                    <td style={{ ...td, color: 'var(--pc-ink)' }}><strong>{r.sku}</strong></td>
+                    <td style={{ ...td, color: 'var(--pc-ink)' }}>{r.name || '-'}</td>
+                    <td style={{ ...td, fontWeight: 600, color: 'var(--pc-ink)' }}>
                       {r.notFound ? (
                         <span>-</span>
                       ) : isEditing ? (
@@ -2578,14 +2615,14 @@ async function confirmUpdatePrices() {
                             if (e.key === 'Enter') commitEdit()
                             else if (e.key === 'Escape') cancelEdit()
                           }}
-                          style={{ width: 110, padding: '3px 6px', border: '1px solid #007bff', borderRadius: 3, fontSize: 12 }}
+                          style={{ width: 110, padding: '3px 6px', border: '1px solid var(--pc-accent)', borderRadius: 3, fontSize: 12 }}
                         />
                       ) : (
                         <span
                           onClick={() => { setEditingGrabSku(r.sku); setEditingGrabValue(String(r.effectiveGrabPrice)) }}
                           title="คลิกเพื่อแก้ไข"
-                          style={{ cursor: 'pointer', padding: '2px 6px', borderRadius: 3, color: r.isEdited ? '#007bff' : '#000' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = '#e7f1ff')}
+                          style={{ cursor: 'pointer', padding: '2px 6px', borderRadius: 3, color: r.isEdited ? 'var(--pc-accent)' : 'var(--pc-ink)' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--pc-soft)')}
                           onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                         >
                           {r.effectiveGrabPrice?.toLocaleString() ?? '-'}
@@ -2593,13 +2630,13 @@ async function confirmUpdatePrices() {
                         </span>
                       )}
                     </td>
-                    <td style={{ ...td, fontWeight: 600, color: '#000' }}>{r.dbPrice?.toLocaleString() ?? '-'}</td>
+                    <td style={{ ...td, fontWeight: 600, color: 'var(--pc-ink)' }}>{r.dbPrice?.toLocaleString() ?? '-'}</td>
                     <td style={td}>
                       {r.notFound
-                        ? <span style={{ background: '#e0e0e0', color: '#000', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบข้อมูลใน Supabase</span>
+                        ? <span style={{ background: 'var(--pc-bg)', color: 'var(--pc-ink)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบข้อมูลใน Supabase</span>
                         : r.effectiveMatched
-                          ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
-                          : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ แก้ไขใน GRAB</span>
+                          ? <span style={{ background: 'var(--pc-success-soft)', color: 'var(--pc-success)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
+                          : <span style={{ background: 'var(--pc-danger-soft)', color: 'var(--pc-danger)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ แก้ไขใน GRAB</span>
                       }
                     </td>
                   </tr>
@@ -2611,27 +2648,27 @@ async function confirmUpdatePrices() {
       </div>
 
       {/* Footer */}
-      <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="pc-modal-footer">
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={exportGrabXlsx}
             disabled={grabMismatchProducts.length === 0}
-            style={{ ...btnStyle, background: '#d4edda', borderColor: '#28a745', color: '#155724', opacity: grabMismatchProducts.length === 0 ? 0.5 : 1 }}
-          >
-            📥 Export ราคาไม่ตรง ({grabMismatchProducts.length})
+            style={{ ...btnStyle, background: 'var(--pc-soft)', borderColor: 'var(--pc-line)', color: 'var(--pc-accent-dark)', opacity: grabMismatchProducts.length === 0 ? 0.5 : 1 }}
+           className="pc-popup-action"><WorkspaceIcon name="download" />
+            Export ราคาไม่ตรง ({grabMismatchProducts.length})
           </button>
           <button
             onClick={exportNotFoundXlsx}
             disabled={grabResults.filter((r: any) => r.notFound).length === 0}
-            style={{ ...btnStyle, background: '#e8e8e8', borderColor: '#999', color: '#000', opacity: grabResults.filter((r: any) => r.notFound).length === 0 ? 0.5 : 1 }}
-          >
-            ⚠ Export ไม่พบข้อมูลใน Supabase ({grabResults.filter((r: any) => r.notFound).length})
+            style={{ ...btnStyle, background: 'var(--pc-bg)', borderColor: 'var(--pc-muted)', color: 'var(--pc-ink)', opacity: grabResults.filter((r: any) => r.notFound).length === 0 ? 0.5 : 1 }}
+           className="pc-popup-action"><WorkspaceIcon name="download" />
+            Export ไม่พบข้อมูลใน Supabase ({grabResults.filter((r: any) => r.notFound).length})
           </button>
         </div>
         <button onClick={closeGrabModal} style={btnStyle}>ปิด</button>
       </div>
     </div>
-  </div>
+  </StudioModal>
         )
       })()}
 
@@ -2646,59 +2683,59 @@ async function confirmUpdatePrices() {
         })
         const displayRows = enriched.filter(r => r.effectiveChanged)
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ background: '#fff', borderRadius: 6, width: 800, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+          <StudioModal label="ผลคำนวณราคา" width={1000} onClose={() => setShowPriceCalcModal(false)}>
+            <div className="pc-modal-panel">
 
               {/* Header */}
-              <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '6px 6px 0 0' }}>
-                <strong>🧮 ผลคำนวณราคา</strong>
-                <button onClick={() => setShowPriceCalcModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
-              </div>
+              <header className="pc-modal-header">
+                <h2><WorkspaceIcon name="tag" />ผลคำนวณราคา</h2>
+                <button onClick={() => setShowPriceCalcModal(false)} className="pc-modal-close" aria-label="ปิดหน้าต่าง"><WorkspaceIcon name="close" /></button>
+              </header>
 
               {/* Grab_menu upload bar */}
-              <div style={{ padding: '10px 20px', background: '#f0f7ff', borderBottom: '1px solid #c8dff8', display: 'flex', gap: 10, alignItems: 'center' }}>
-                <span style={{ fontSize: 12, color: '#444', fontWeight: 600, whiteSpace: 'nowrap' }}>Grab_menu (.csv):</span>
+              <div style={{ padding: '10px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)', display: 'flex', gap: 10, alignItems: 'center' }} className="pc-modal-toolbar">
+                <span style={{ fontSize: 12, color: 'var(--pc-ink)', fontWeight: 600, whiteSpace: 'nowrap' }}>Grab_menu (.csv):</span>
                 <button onClick={() => document.getElementById('priceCalcGrabInput')?.click()}
-                  style={{ ...btnStyle, fontSize: 11, padding: '5px 12px', background: priceCalcGrabFile ? '#d4edda' : '#fff', borderColor: priceCalcGrabFile ? '#28a745' : '#999', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  style={{ ...btnStyle, fontSize: 11, padding: '5px 12px', background: priceCalcGrabFile ? 'var(--pc-success-soft)' : '#fff', borderColor: priceCalcGrabFile ? 'var(--pc-success)' : 'var(--pc-muted)', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                   title={priceCalcGrabFile ? priceCalcGrabFile.name : 'เลือกไฟล์ Grab_menu เพื่อเปรียบเทียบราคาจริง'}
-                >
-                  {priceCalcGrabFile ? `✅ ${priceCalcGrabFile.name}` : '📂 เลือกไฟล์ Grab_menu'}
+                 className="pc-popup-action"><WorkspaceIcon name="upload" />
+                  {priceCalcGrabFile ? `${priceCalcGrabFile.name}` : 'เลือกไฟล์ Grab_menu'}
                 </button>
                 {!priceCalcGrabFile && (
-                  <span style={{ fontSize: 11, color: '#888' }}>← อัพโหลดเพื่อแสดงราคา Grab จริง (ปัจจุบันใช้ราคาจาก DB)</span>
+                  <span style={{ fontSize: 11, color: 'var(--pc-muted)' }}>← อัพโหลดเพื่อแสดงราคา Grab จริง (ปัจจุบันใช้ราคาจาก DB)</span>
                 )}
                 {hasGrabMap && (
-                  <span style={{ fontSize: 11, color: '#28a745', marginLeft: 4 }}>✅ โหลด {Object.keys(priceCalcGrabMap).length.toLocaleString()} SKU จาก Grab_menu</span>
+                  <span style={{ fontSize: 11, color: 'var(--pc-success)', marginLeft: 4 }}>✅ โหลด {Object.keys(priceCalcGrabMap).length.toLocaleString()} SKU จาก Grab_menu</span>
                 )}
               </div>
 
               {/* Summary */}
               {priceCalcResults.length > 0 && !priceCalcResults[0]?.error && (
-                <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
+                <div style={{ padding: '10px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)', display: 'flex', gap: 20, fontSize: 13 }} className="pc-modal-toolbar">
                   <span>ทั้งหมด: <strong>{enriched.length}</strong></span>
-                  <span style={{ color: '#28a745' }}>เปลี่ยนแปลง: <strong>{displayRows.length}</strong></span>
-                  <span style={{ color: '#000' }}>ราคาเดิม: <strong>{enriched.length - displayRows.length}</strong></span>
-                  <div style={{ marginLeft: 'auto', fontSize: 11, color: '#666' }}>
+                  <span style={{ color: 'var(--pc-success)' }}>เปลี่ยนแปลง: <strong>{displayRows.length}</strong></span>
+                  <span style={{ color: 'var(--pc-ink)' }}>ราคาเดิม: <strong>{enriched.length - displayRows.length}</strong></span>
+                  <div style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--pc-muted)' }}>
                     สูตร Grab = ระดับ 0 × 0.95 × 1.20 × 1.07
                   </div>
                 </div>
               )}
 
               {/* Table */}
-              <div style={{ overflowY: 'auto', flex: 1 }}>
+              <div style={{ overflowY: 'auto', flex: 1 }} className="pc-modal-body">
                 {priceCalcResults[0]?.error ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{priceCalcResults[0].error}</div>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-danger)' }}>{priceCalcResults[0].error}</div>
                 ) : priceCalcResults.length === 0 ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#000' }}>กำลังคำนวณ...</div>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-ink)' }}>กำลังคำนวณ...</div>
                 ) : (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
-                      <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+                      <tr style={{ background: 'var(--pc-bg)', position: 'sticky', top: 0 }}>
                         <th style={th}>#</th>
                         <th style={th}>SKU</th>
                         <th style={th}>ชื่อสินค้า</th>
                         <th style={th}>ราคาระดับ 0 ใหม่</th>
-                        <th style={{ ...th, color: hasGrabMap ? '#000' : '#999' }}>
+                        <th style={{ ...th, color: hasGrabMap ? 'var(--pc-ink)' : 'var(--pc-muted)' }}>
                           ราคาขาย Grab ปัจจุบัน{!hasGrabMap && <span style={{ fontWeight: 400, fontSize: 10 }}> (DB)</span>}
                         </th>
                         <th style={th}>ราคาขาย Grab ใหม่</th>
@@ -2707,7 +2744,7 @@ async function confirmUpdatePrices() {
                     </thead>
                     <tbody>
                       {displayRows.map((r: any, i: number) => (
-                        <tr key={i} style={{ background: '#fff3cd' }}>
+                        <tr key={i} style={{ background: 'var(--pc-soft)' }}>
                           <td style={td}>{i + 1}</td>
                           <td style={td}><strong>{r.sku}</strong></td>
                           <td style={td}>{r.name}</td>
@@ -2716,13 +2753,13 @@ async function confirmUpdatePrices() {
                             {hasGrabMap
                               ? r.grabCurrent !== undefined
                                 ? <strong>{r.grabCurrent.toLocaleString()}</strong>
-                                : <span style={{ color: '#999', fontSize: 11 }}>ไม่พบใน Grab</span>
+                                : <span style={{ color: 'var(--pc-muted)', fontSize: 11 }}>ไม่พบใน Grab</span>
                               : r.oldPrice.toLocaleString()
                             }
                           </td>
-                          <td style={{ ...td, color: '#28a745', fontWeight: 600 }}>{r.newPrice.toLocaleString()}</td>
+                          <td style={{ ...td, color: 'var(--pc-success)', fontWeight: 600 }}>{r.newPrice.toLocaleString()}</td>
                           <td style={td}>
-                            <span style={{ background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ เปลี่ยนแปลง</span>
+                            <span style={{ background: 'var(--pc-soft)', color: 'var(--pc-accent-dark)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ เปลี่ยนแปลง</span>
                           </td>
                         </tr>
                       ))}
@@ -2732,7 +2769,7 @@ async function confirmUpdatePrices() {
               </div>
 
               {/* Footer */}
-              <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <div className="pc-modal-footer">
                 <button onClick={() => setShowPriceCalcModal(false)} style={btnStyle}>ยกเลิก</button>
                 <button
                   onClick={async () => {
@@ -2756,39 +2793,39 @@ async function confirmUpdatePrices() {
                     XLSX.writeFile(wb, `GM MME ${dd}.${mm}.${yyyy}.xlsx`)
                   }}
                   disabled={displayRows.length === 0}
-                  style={{ ...btnStyle, background: '#17a2b8', color: '#fff', borderColor: '#117a8b' }}
-                >
-                  📥 Export Excel
+                  style={{ ...btnStyle, background: 'var(--pc-accent)', color: '#fff', borderColor: 'var(--pc-accent)' }}
+                 className="pc-popup-action"><WorkspaceIcon name="download" />
+                  Export Excel
                 </button>
                 <button
                   onClick={confirmUpdatePrices}
                   disabled={updatingPrices || displayRows.length === 0}
-                  style={{ ...btnStyle, background: '#28a745', color: '#fff', borderColor: '#1e7e34', opacity: updatingPrices ? 0.6 : 1 }}
-                >
-                  {updatingPrices ? '⏳ กำลังอัพเดท...' : `💾 อัพเดท ${displayRows.length} รายการ`}
+                  style={{ ...btnStyle, background: 'var(--pc-accent)', color: '#fff', borderColor: 'var(--pc-accent)', opacity: updatingPrices ? 0.6 : 1 }}
+                 className="pc-popup-action"><WorkspaceIcon name="check" />
+                  {updatingPrices ? 'กำลังอัพเดท...' : `อัพเดท ${displayRows.length} รายการ`}
                 </button>
               </div>
             </div>
-          </div>
+          </StudioModal>
         )
       })()}
 
 
       {/* Import Modal */}
       {showImportModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-          <div style={{ background: '#fff', borderRadius: 6, width: 500, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
-            <div style={{ background: '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>📂 Import ข้อมูลจาก Excel</strong>
-              <button onClick={() => setShowImportModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
-            </div>
-            <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', fontSize: 13 }}>
+        <StudioModal label="Import ข้อมูลจาก Excel" width={600} onClose={() => setShowImportModal(false)}>
+          <div className="pc-modal-panel">
+            <header className="pc-modal-header">
+              <h2><WorkspaceIcon name="upload" />Import ข้อมูลจาก Excel</h2>
+              <button onClick={() => setShowImportModal(false)} className="pc-modal-close" aria-label="ปิดหน้าต่าง"><WorkspaceIcon name="close" /></button>
+            </header>
+            <div style={{ padding: '10px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)', fontSize: 13 }} className="pc-modal-toolbar">
               พบ <strong>{importSheets.length}</strong> ชีท | รวม <strong>{importSheets.reduce((s, sh) => s + sh.rows.length, 0)}</strong> รายการ
             </div>
-            <div style={{ overflowY: 'auto', flex: 1, padding: 16 }}>
+            <div style={{ overflowY: 'auto', flex: 1, padding: 16 }} className="pc-modal-body">
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
-                  <tr style={{ background: '#f5f5f5' }}>
+                  <tr style={{ background: 'var(--pc-bg)' }}>
                     <th style={th}>#</th>
                     <th style={th}>ชีท</th>
                     <th style={th}>จำนวนรายการ</th>
@@ -2805,50 +2842,44 @@ async function confirmUpdatePrices() {
                 </tbody>
               </table>
               {importError && (
-                <div style={{ marginTop: 12, padding: '8px 12px', background: '#f8d7da', borderRadius: 4, fontSize: 13, color: '#721c24' }}>
+                <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--pc-danger-soft)', borderRadius: 4, fontSize: 13, color: 'var(--pc-danger)' }}>
                   ❌ {importError}
                 </div>
               )}
               {importLog && (
-                <div style={{ marginTop: 12, padding: '8px 12px', background: importLog.startsWith('✅') ? '#d4edda' : importLog.startsWith('❌') ? '#f8d7da' : '#fff3cd', borderRadius: 4, fontSize: 13 }}>
+                <div style={{ marginTop: 12, padding: '8px 12px', background: importLog.startsWith('✅') ? 'var(--pc-success-soft)' : importLog.startsWith('❌') ? 'var(--pc-danger-soft)' : 'var(--pc-soft)', borderRadius: 4, fontSize: 13 }}>
                   {importLog}
                 </div>
               )}
             </div>
-            <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div className="pc-modal-footer">
               <button onClick={() => setShowImportModal(false)} style={btnStyle}>ปิด</button>
               <button
                 onClick={confirmImport}
                 disabled={importingData || !!importError || importSheets.reduce((s, sh) => s + sh.rows.length, 0) === 0}
-                style={{ ...btnStyle, background: '#4a8bc4', color: '#fff', borderColor: '#3d7ab3', opacity: importingData ? 0.6 : 1 }}
-              >
-                {importingData ? '⏳ กำลัง Import...' : `📥 Import ทั้งหมด (${importSheets.reduce((s, sh) => s + sh.rows.length, 0)} รายการ)`}
+                style={{ ...btnStyle, background: 'var(--pc-accent)', color: '#fff', borderColor: 'var(--pc-accent)', opacity: importingData ? 0.6 : 1 }}
+               className="pc-popup-action"><WorkspaceIcon name="upload" />
+                {importingData ? 'กำลัง Import...' : `Import ทั้งหมด (${importSheets.reduce((s, sh) => s + sh.rows.length, 0)} รายการ)`}
               </button>
             </div>
           </div>
-        </div>
+        </StudioModal>
       )}
 
       {/* Edit Modal */}
       {editProduct && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
-          display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
-        }}>
-          <div className="edit-modal-anim" role="dialog" aria-modal="true" aria-label={isAdding ? 'เพิ่มรายการสินค้า' : 'แก้ไขรายละเอียดสินค้า'} style={{
-            background: '#fff', borderRadius: 6, width: 560, maxHeight: '92vh', overflowY: 'auto',
-            boxShadow: '0 10px 40px rgba(0,0,0,0.3)'
-          }}>
+        <StudioModal label="รายละเอียดสินค้า" width={720} onClose={() => { setEditProduct(null); setIsAdding(false) }}>
+          <div className="pc-modal-panel">
             {/* Modal Header */}
-            <div style={{ background: isAdding ? '#2d6a2d' : '#4a4a4a', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <strong>{isAdding ? '➕ เพิ่มรายการสินค้า' : '✏️ แก้ไขสินค้า'}</strong>
+            <header className="pc-modal-header">
+              <h2><WorkspaceIcon name="box" />{isAdding ? 'เพิ่มรายการสินค้า' : 'แก้ไขสินค้า'}</h2>
               <button aria-label="ปิดการแก้ไขสินค้า" onClick={() => { setEditProduct(null); setIsAdding(false) }}
-                style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
-            </div>
+                className="pc-modal-close"><WorkspaceIcon name="close" /></button>
+            </header>
 
             {/* Modal Body */}
-            <div style={{ padding: 20, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div style={{ gridColumn: 'span 2' }}>
+            <div style={{ padding: 20, display: 'grid', gap: 12 }} className="pc-modal-body pc-modal-form">
+              <div style={{ gridColumn: '1 / -1' }}>
                 <label style={labelStyle}>ประเภทสินค้า</label>
                 <input style={inputStyle}
                   value={editProduct['ประเภทสินค้า'] || ''}
@@ -2869,17 +2900,17 @@ async function confirmUpdatePrices() {
                   onChange={e => setEditProduct({ ...editProduct, 'รหัสสินค้า (SKU NUMBER)': e.target.value })}
                 />
               </div>
-              <div style={{ gridColumn: 'span 2' }}>
-                <div style={{ marginTop: 4, padding: 14, borderRadius: 10, border: '2px dashed #1a73e8', background: '#f4f8ff' }}>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div style={{ marginTop: 4, padding: 14, borderRadius: 10, border: '2px dashed var(--pc-accent)', background: 'var(--pc-bg)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <label style={{ ...labelStyle, margin: 0, fontSize: 15, color: '#0b57d0', fontWeight: 700 }}>
+                    <label style={{ ...labelStyle, margin: 0, fontSize: 15, color: 'var(--pc-accent)', fontWeight: 700 }}>
                       รูปภาพสินค้า + ข้อความมุมขวาล่าง
                     </label>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#0b57d0', background: '#dce9ff', borderRadius: 999, padding: '4px 8px' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--pc-accent)', background: 'var(--pc-soft)', borderRadius: 999, padding: '4px 8px' }}>
                       ขั้นตอนสำคัญ
                     </span>
                   </div>
-                  <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.5, color: '#355070' }}>
+                  <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.5, color: 'var(--pc-muted)' }}>
                     1. เลือกรูปสินค้า 2. ตรวจ Preview 3. กดอัพโหลด Drive 4. กดบันทึก
                   </div>
                   <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -2892,19 +2923,19 @@ async function confirmUpdatePrices() {
                     />
                     <label
                       htmlFor="editProductImageInput"
-                      style={{ ...btnStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 170, background: '#0b57d0', color: '#fff', borderColor: '#0842a0', cursor: 'pointer' }}
+                      style={{ ...btnStyle, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 170, background: 'var(--pc-accent)', color: '#fff', borderColor: 'var(--pc-accent-dark)', cursor: 'pointer' }}
                     >
                       📂 เลือกรูปภาพสินค้า
                     </label>
-                    <div style={{ flex: '1 1 220px', minHeight: 38, display: 'flex', alignItems: 'center', padding: '8px 10px', borderRadius: 6, border: '1px solid #c7d7f7', background: '#fff', fontSize: 12, color: editImageFileName ? '#1f2328' : '#6b7280' }}>
+                    <div style={{ flex: '1 1 220px', minHeight: 38, display: 'flex', alignItems: 'center', padding: '8px 10px', borderRadius: 6, border: '1px solid var(--pc-line)', background: '#fff', fontSize: 12, color: editImageFileName ? 'var(--pc-ink)' : 'var(--pc-muted)' }}>
                       {editImageFileName || 'ยังไม่ได้เลือกรูป (รองรับ PNG / JPEG / WebP)'}
                     </div>
                   </div>
-                  <div style={{ marginTop: 10, fontSize: 12, color: '#4b5563' }}>
-                    ใส่เลขที่ใบอนุญาต (เลขอย่างเดียว) — ระบบจะพิมพ์คำว่า <b style={{ color: '#355070' }}>"เลขที่ใบอนุญาต"</b> นำหน้าให้อัตโนมัติ เช่น เลขที่ใบอนุญาต 65-2-3-2-0003417
+                  <div style={{ marginTop: 10, fontSize: 12, color: 'var(--pc-muted)' }}>
+                    ใส่เลขที่ใบอนุญาต (เลขอย่างเดียว) — ระบบจะพิมพ์คำว่า <b style={{ color: 'var(--pc-muted)' }}>"เลขที่ใบอนุญาต"</b> นำหน้าให้อัตโนมัติ เช่น เลขที่ใบอนุญาต 65-2-3-2-0003417
                   </div>
                   <div style={{ marginTop: 8, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#355070' }}>ข้อความบนรูป:</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--pc-muted)' }}>ข้อความบนรูป:</div>
                   <input
                     style={{ ...inputStyle, flex: '1 1 160px', marginTop: 0 }}
                     placeholder="ใส่เลขที่ใบอนุญาต (เลขอย่างเดียว)"
@@ -2915,52 +2946,52 @@ async function confirmUpdatePrices() {
                     type="button"
                     onClick={downloadEditImage}
                     disabled={!editImageSrc}
-                    style={{ ...btnStyle, background: '#1a73e8', color: '#fff', borderColor: '#1558b3' }}
-                  >
-                    ⬇️ Download รูป
+                    style={{ ...btnStyle, background: 'var(--pc-accent)', color: '#fff', borderColor: 'var(--pc-accent-dark)' }}
+                   className="pc-popup-action"><WorkspaceIcon name="download" />
+                    Download รูป
                   </button>
                   <button
                     type="button"
                     onClick={cleanGreenBorderAndText}
                     disabled={cleaningImage || (!editImageSrc && !editProduct?.['*รูปภาพสินค้า'])}
-                    style={{ ...btnStyle, background: '#e65100', color: '#fff', borderColor: '#bf360c', opacity: cleaningImage ? 0.6 : 1 }}
-                  >
-                    {cleaningImage ? '⏳ กำลังลบกรอบ...' : '🧹 ลบกรอบ+ข้อความ'}
+                    style={{ ...btnStyle, background: 'var(--pc-accent)', color: '#fff', borderColor: 'var(--pc-accent)', opacity: cleaningImage ? 0.6 : 1 }}
+                   className="pc-popup-action"><WorkspaceIcon name="clock" />
+                    {cleaningImage ? 'กำลังลบกรอบ...' : 'ลบกรอบ+ข้อความ'}
                   </button>
                   <button
                     type="button"
                     onClick={uploadEditImageToDrive}
                     disabled={!editImageSrc || uploadingDrive}
-                    style={{ ...btnStyle, background: '#188038', color: '#fff', borderColor: '#0d652d', opacity: uploadingDrive ? 0.6 : 1 }}
-                  >
-                    {uploadingDrive ? '⏳ กำลังอัพโหลด...' : '☁️ อัพโหลด Drive'}
+                    style={{ ...btnStyle, background: 'var(--pc-accent)', color: '#fff', borderColor: 'var(--pc-accent-dark)', opacity: uploadingDrive ? 0.6 : 1 }}
+                   className="pc-popup-action"><WorkspaceIcon name="upload" />
+                    {uploadingDrive ? 'กำลังอัพโหลด...' : 'อัพโหลด Drive'}
                   </button>
                   </div>
-                  <div style={{ marginTop: 10, textAlign: 'center', background: '#fff', borderRadius: 8, padding: 10, border: '1px solid #dbe4f0' }}>
+                  <div style={{ marginTop: 10, textAlign: 'center', background: '#fff', borderRadius: 8, padding: 10, border: '1px solid var(--pc-line)' }}>
                     {editImageSrc ? (
                       <canvas
                         ref={editCanvasRef}
                         style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 4, background: '#fff' }}
                       />
                     ) : (
-                      <div style={{ padding: '20px 12px', fontSize: 12, color: '#6b7280' }}>
+                      <div style={{ padding: '20px 12px', fontSize: 12, color: 'var(--pc-muted)' }}>
                         Preview รูปจะขึ้นที่นี่หลังจากเลือกรูปภาพ
                       </div>
                     )}
                   </div>
                 </div>
                 {editImageMsg && (
-                  <div style={{ marginTop: 6, fontSize: 12, color: editImageMsg.includes('สำเร็จ') ? '#1a7f37' : '#a52828' }}>
+                  <div style={{ marginTop: 6, fontSize: 12, color: editImageMsg.includes('สำเร็จ') ? 'var(--pc-success)' : 'var(--pc-danger)' }}>
                     {editImageMsg}
                   </div>
                 )}
                 <label style={{ ...labelStyle, marginTop: 10, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   รูปภาพสินค้า (Google Drive Link)
                   {driveLinkOwner?.type === 'anin' && (
-                    <span title={driveLinkOwner.email} style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 }}>🏢 Anin (องค์กร)</span>
+                    <span title={driveLinkOwner.email} style={{ background: 'var(--pc-success-soft)', color: 'var(--pc-success)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 }}>🏢 Anin (องค์กร)</span>
                   )}
                   {driveLinkOwner?.type === 'external' && (
-                    <span title={driveLinkOwner.email} style={{ background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 }}>🌐 External (เมล์นอก)</span>
+                    <span title={driveLinkOwner.email} style={{ background: 'var(--pc-soft)', color: 'var(--pc-accent-dark)', padding: '2px 8px', borderRadius: 10, fontSize: 10, fontWeight: 600 }}>🌐 External (เมล์นอก)</span>
                   )}
                 </label>
                 <input style={inputStyle}
@@ -2974,14 +3005,14 @@ async function confirmUpdatePrices() {
                       href={driveDownloadUrl(editProduct['*รูปภาพสินค้า'])!}
                       target="_blank"
                       rel="noreferrer"
-                      style={{ ...btnStyle, background: '#8ab4f8', color: '#174ea6', borderColor: '#aecbfa', textDecoration: 'none', display: 'inline-block', padding: '4px 12px', fontSize: 12, borderRadius: 4 }}
+                      style={{ ...btnStyle, background: 'var(--pc-soft)', color: 'var(--pc-accent-dark)', borderColor: 'var(--pc-line)', textDecoration: 'none', display: 'inline-block', padding: '4px 12px', fontSize: 12, borderRadius: 4 }}
                     >
                       ⬇️ Download รูปจาก Drive
                     </a>
                   </div>
                 )}
                 {editProduct['*รูปภาพสินค้า'] && (
-                  <div style={{ marginTop: 8, textAlign: 'center', background: '#f8f8f8', borderRadius: 4, padding: 8, border: '1px solid #eee' }}>
+                  <div style={{ marginTop: 8, textAlign: 'center', background: 'var(--pc-bg)', borderRadius: 4, padding: 8, border: '1px solid var(--pc-line)' }}>
                     <img
                       src={convertDriveLink(editProduct['*รูปภาพสินค้า'])}
                       alt="preview"
@@ -2991,7 +3022,7 @@ async function confirmUpdatePrices() {
                   </div>
                 )}
               </div>
-              <div style={{ gridColumn: 'span 2' }}>
+              <div style={{ gridColumn: '1 / -1' }}>
                 <label style={labelStyle}>ชื่อสินค้า</label>
                 <input style={inputStyle}
                   value={editProduct['*ชื่อสินค้า (NAME)'] || ''}
@@ -3015,16 +3046,16 @@ async function confirmUpdatePrices() {
             </div>
 
             {/* Modal Footer */}
-            <div style={{ padding: '0 20px 20px', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <div className="pc-modal-footer">
               <button onClick={() => { setEditProduct(null); setIsAdding(false) }} style={btnStyle}>ยกเลิก</button>
               <button onClick={() => { setSaveBtnAnim(true); setTimeout(() => setSaveBtnAnim(false), 200); saveProduct(); }}
-                className={saveBtnAnim ? 'btn-press-anim' : ''}
-                style={{ ...btnStyle, background: isAdding ? '#28a745' : '#4a8bc4', color: '#fff', borderColor: isAdding ? '#1e7e34' : '#3d7ab3' }}>
-                {isAdding ? '➕ เพิ่มสินค้า' : '💾 บันทึก'}
+                className={`pc-popup-action ${saveBtnAnim ? 'btn-press-anim' : ''}`}
+                style={{ ...btnStyle, background: 'var(--pc-accent)', color: '#fff', borderColor: 'var(--pc-accent)' }}><WorkspaceIcon name="check" />
+                {isAdding ? 'เพิ่มสินค้า' : 'บันทึก'}
               </button>
             </div>
           </div>
-        </div>
+        </StudioModal>
       )}
 
       {/* GM MME vs GRAB Modal */}
@@ -3055,72 +3086,72 @@ async function confirmUpdatePrices() {
         ).length
 
         const statusBadge = (r: any) => {
-          if (!r) return <span style={{ color: '#bbb', fontSize: 11 }}>—</span>
-          if (r.status === 'updated') return <span style={{ background: '#d4edda', color: '#155724', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>✅</span>
-          if (r.status === 'notFound') return <span style={{ background: '#e0e0e0', color: '#555', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>⚠</span>
-          return <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>❌</span>
+          if (!r) return <span style={{ color: 'var(--pc-muted)', fontSize: 11 }}>—</span>
+          if (r.status === 'updated') return <span style={{ background: 'var(--pc-success-soft)', color: 'var(--pc-success)', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>✅</span>
+          if (r.status === 'notFound') return <span style={{ background: 'var(--pc-bg)', color: 'var(--pc-muted)', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>⚠</span>
+          return <span style={{ background: 'var(--pc-danger-soft)', color: 'var(--pc-danger)', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>❌</span>
         }
 
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ background: '#fff', borderRadius: 6, width: mmeActiveTab === 'compare' ? 920 : 800, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)', transition: 'width 0.2s' }}>
+          <StudioModal label="ตรวจสอบ GM MME vs GRAB Menu" width={1100} onClose={() => setShowMmeCheckModal(false)}>
+            <div className="pc-modal-panel">
 
               {/* Header */}
-              <div style={{ background: '#2d5fa6', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '6px 6px 0 0' }}>
-                <strong>📋 ตรวจสอบ GM MME vs GRAB Menu</strong>
-                <button onClick={() => setShowMmeCheckModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
-              </div>
+              <header className="pc-modal-header">
+                <h2><WorkspaceIcon name="check" />ตรวจสอบ GM MME vs GRAB Menu</h2>
+                <button onClick={() => setShowMmeCheckModal(false)} className="pc-modal-close" aria-label="ปิดหน้าต่าง"><WorkspaceIcon name="close" /></button>
+              </header>
 
               {/* Upload section */}
-              <div style={{ padding: '12px 20px', background: '#f0f7ff', borderBottom: '1px solid #c8dff8' }}>
+              <div style={{ padding: '12px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)' }} className="pc-modal-toolbar">
                 <div style={{ display: 'flex', gap: 10, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <span style={{ fontSize: 12, color: '#444', whiteSpace: 'nowrap', fontWeight: 600 }}>Grab_menu (.csv):</span>
+                  <span style={{ fontSize: 12, color: 'var(--pc-ink)', whiteSpace: 'nowrap', fontWeight: 600 }}>Grab_menu (.csv):</span>
                   {branches.map(b => (
                     <button key={b.key} onClick={() => document.getElementById(b.inputId)?.click()}
-                      style={{ ...btnStyle, fontSize: 11, padding: '5px 10px', background: b.file ? '#d4edda' : '#fff', borderColor: b.file ? '#28a745' : '#999', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      style={{ ...btnStyle, fontSize: 11, padding: '5px 10px', background: b.file ? 'var(--pc-success-soft)' : '#fff', borderColor: b.file ? 'var(--pc-success)' : 'var(--pc-muted)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                       title={b.file ? b.file.name : `เลือกไฟล์ Grab_menu สาขา ${b.label}`}
-                    >
-                      {b.file ? `✅ ${b.label}` : `📂 ${b.label}`}
+                     className="pc-popup-action"><WorkspaceIcon name="upload" />
+                      {b.file ? `${b.label}` : `${b.label}`}
                     </button>
                   ))}
                 </div>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12, color: '#444', whiteSpace: 'nowrap', fontWeight: 600 }}>GM MME (.xlsx):</span>
+                  <span style={{ fontSize: 12, color: 'var(--pc-ink)', whiteSpace: 'nowrap', fontWeight: 600 }}>GM MME (.xlsx):</span>
                   <button onClick={() => document.getElementById('mmeCheckMmeInput')?.click()}
-                    style={{ ...btnStyle, fontSize: 11, padding: '5px 10px', background: mmeCheckMmeFile ? '#d4edda' : '#fff', borderColor: mmeCheckMmeFile ? '#28a745' : '#999', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                    style={{ ...btnStyle, fontSize: 11, padding: '5px 10px', background: mmeCheckMmeFile ? 'var(--pc-success-soft)' : '#fff', borderColor: mmeCheckMmeFile ? 'var(--pc-success)' : 'var(--pc-muted)', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                     title={mmeCheckMmeFile ? mmeCheckMmeFile.name : 'เลือกไฟล์ GM MME'}
-                  >
-                    {mmeCheckMmeFile ? `✅ ${mmeCheckMmeFile.name}` : '📂 เลือกไฟล์'}
+                   className="pc-popup-action"><WorkspaceIcon name="upload" />
+                    {mmeCheckMmeFile ? `${mmeCheckMmeFile.name}` : 'เลือกไฟล์'}
                   </button>
                   <button onClick={handleMmeVsGrabCheck} disabled={!canCheck}
-                    style={{ ...btnStyle, background: canCheck ? '#2d5fa6' : '#ccc', color: canCheck ? '#fff' : '#999', borderColor: '#2d5fa6', marginLeft: 'auto', opacity: mmeChecking ? 0.6 : 1 }}
-                  >
-                    {mmeChecking ? '⏳ กำลังตรวจสอบ...' : '🔍 ตรวจสอบ'}
+                    style={{ ...btnStyle, background: canCheck ? 'var(--pc-accent)' : 'var(--pc-line)', color: canCheck ? '#fff' : 'var(--pc-muted)', borderColor: 'var(--pc-accent)', marginLeft: 'auto', opacity: mmeChecking ? 0.6 : 1 }}
+                   className="pc-popup-action"><WorkspaceIcon name="check" />
+                    {mmeChecking ? 'กำลังตรวจสอบ...' : 'ตรวจสอบ'}
                   </button>
                 </div>
               </div>
 
               {/* Tabs */}
               {hasResults && (
-                <div style={{ display: 'flex', borderBottom: '2px solid #ddd', background: '#fafafa' }}>
+                <div style={{ display: 'flex', borderBottom: '2px solid var(--pc-line)', background: 'var(--pc-bg)' }} className="pc-modal-tabs">
                   {checkedBranches.map(b => {
                     const notUpd = mmeCheckResults[b.key].filter((r: any) => r.status === 'notUpdated').length
                     const isActive = mmeActiveTab === b.key
                     return (
                       <button key={b.key} onClick={() => setMmeActiveTab(b.key)}
-                        style={{ padding: '8px 18px', border: 'none', borderBottom: isActive ? '2px solid #2d5fa6' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: isActive ? 700 : 400, color: isActive ? '#2d5fa6' : '#555', fontSize: 13, marginBottom: -2 }}
-                      >
-                        🛵 {b.label}
-                        {notUpd > 0 && <span style={{ marginLeft: 5, background: '#dc3545', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{notUpd}</span>}
+                        style={{ padding: '8px 18px', border: 'none', borderBottom: isActive ? '2px solid var(--pc-accent)' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: isActive ? 700 : 400, color: isActive ? 'var(--pc-accent)' : 'var(--pc-muted)', fontSize: 13, marginBottom: -2 }}
+                       className="pc-popup-action"><WorkspaceIcon name="branch" />
+                        {b.label}
+                        {notUpd > 0 && <span style={{ marginLeft: 5, background: 'var(--pc-danger)', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{notUpd}</span>}
                       </button>
                     )
                   })}
                   {checkedBranches.length >= 2 && (
                     <button onClick={() => setMmeActiveTab('compare')}
-                      style={{ padding: '8px 18px', border: 'none', borderBottom: mmeActiveTab === 'compare' ? '2px solid #6f42c1' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: mmeActiveTab === 'compare' ? 700 : 400, color: mmeActiveTab === 'compare' ? '#6f42c1' : '#555', fontSize: 13, marginBottom: -2, marginLeft: 'auto' }}
-                    >
-                      📊 เปรียบเทียบ
-                      {compareNotUpdatedCount > 0 && <span style={{ marginLeft: 5, background: '#dc3545', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{compareNotUpdatedCount}</span>}
+                      style={{ padding: '8px 18px', border: 'none', borderBottom: mmeActiveTab === 'compare' ? '2px solid var(--pc-accent)' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: mmeActiveTab === 'compare' ? 700 : 400, color: mmeActiveTab === 'compare' ? 'var(--pc-accent)' : 'var(--pc-muted)', fontSize: 13, marginBottom: -2, marginLeft: 'auto' }}
+                     className="pc-popup-action"><WorkspaceIcon name="grid" />
+                      เปรียบเทียบ
+                      {compareNotUpdatedCount > 0 && <span style={{ marginLeft: 5, background: 'var(--pc-danger)', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{compareNotUpdatedCount}</span>}
                     </button>
                   )}
                 </div>
@@ -3128,34 +3159,34 @@ async function confirmUpdatePrices() {
 
               {/* Summary bar */}
               {mmeActiveTab !== 'compare' && tabResults.length > 0 && (
-                <div style={{ padding: '8px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
+                <div style={{ padding: '8px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)', display: 'flex', gap: 20, fontSize: 13 }} className="pc-modal-toolbar">
                   <span>ทั้งหมด: <strong>{tabResults.length}</strong></span>
-                  <span style={{ color: '#28a745' }}>✅ แก้ไขแล้ว: <strong>{tabResults.filter((r: any) => r.status === 'updated').length}</strong></span>
-                  <span style={{ color: '#dc3545' }}>❌ ยังไม่แก้ไข: <strong>{tabResults.filter((r: any) => r.status === 'notUpdated').length}</strong></span>
+                  <span style={{ color: 'var(--pc-success)' }}>✅ แก้ไขแล้ว: <strong>{tabResults.filter((r: any) => r.status === 'updated').length}</strong></span>
+                  <span style={{ color: 'var(--pc-danger)' }}>❌ ยังไม่แก้ไข: <strong>{tabResults.filter((r: any) => r.status === 'notUpdated').length}</strong></span>
                   {tabResults.filter((r: any) => r.status === 'notFound').length > 0 && (
-                    <span style={{ color: '#856404' }}>⚠ ไม่พบใน GRAB: <strong>{tabResults.filter((r: any) => r.status === 'notFound').length}</strong></span>
+                    <span style={{ color: 'var(--pc-accent-dark)' }}>⚠ ไม่พบใน GRAB: <strong>{tabResults.filter((r: any) => r.status === 'notFound').length}</strong></span>
                   )}
                 </div>
               )}
               {mmeActiveTab === 'compare' && compareRows.length > 0 && (
-                <div style={{ padding: '8px 20px', background: '#f3eeff', borderBottom: '1px solid #d6c8f5', display: 'flex', gap: 20, fontSize: 13 }}>
+                <div style={{ padding: '8px 20px', background: 'var(--pc-soft)', borderBottom: '1px solid var(--pc-line)', display: 'flex', gap: 20, fontSize: 13 }} className="pc-modal-toolbar">
                   <span>SKU ทั้งหมด: <strong>{compareRows.length}</strong></span>
-                  <span style={{ color: '#dc3545' }}>❌ มีสาขาที่ยังไม่แก้ไข: <strong>{compareNotUpdatedCount}</strong></span>
-                  <span style={{ color: '#28a745' }}>✅ แก้ไขครบทุกสาขา: <strong>{compareRows.filter(r => checkedBranches.every(b => r[b.key as 'src'|'kkl'|'sss']?.status === 'updated')).length}</strong></span>
+                  <span style={{ color: 'var(--pc-danger)' }}>❌ มีสาขาที่ยังไม่แก้ไข: <strong>{compareNotUpdatedCount}</strong></span>
+                  <span style={{ color: 'var(--pc-success)' }}>✅ แก้ไขครบทุกสาขา: <strong>{compareRows.filter(r => checkedBranches.every(b => r[b.key as 'src'|'kkl'|'sss']?.status === 'updated')).length}</strong></span>
                 </div>
               )}
 
               {/* Table area */}
-              <div style={{ overflowY: 'auto', flex: 1 }}>
+              <div style={{ overflowY: 'auto', flex: 1 }} className="pc-modal-body">
                 {!hasResults ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#888', fontSize: 13 }}>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-muted)', fontSize: 13 }}>
                     เลือกไฟล์ Grab_menu อย่างน้อย 1 สาขา และ GM MME (.xlsx) แล้วกด &quot;ตรวจสอบ&quot;
                   </div>
                 ) : mmeActiveTab === 'compare' ? (
                   /* Compare table */
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
-                      <tr style={{ background: '#f0ebff', position: 'sticky', top: 0 }}>
+                      <tr style={{ background: 'var(--pc-soft)', position: 'sticky', top: 0 }}>
                         <th style={th}>#</th>
                         <th style={th}>SKU</th>
                         <th style={th}>ชื่อสินค้า</th>
@@ -3170,10 +3201,10 @@ async function confirmUpdatePrices() {
                         const anyNotUpdated = checkedBranches.some(b => r[b.key as 'src'|'kkl'|'sss']?.status === 'notUpdated')
                         const allUpdated = checkedBranches.every(b => r[b.key as 'src'|'kkl'|'sss']?.status === 'updated')
                         return (
-                          <tr key={r.sku} style={{ background: anyNotUpdated ? '#fff0f0' : allUpdated ? '#f6fff6' : 'transparent' }}>
+                          <tr key={r.sku} style={{ background: anyNotUpdated ? 'var(--pc-danger-soft)' : allUpdated ? 'var(--pc-success-soft)' : 'transparent' }}>
                             <td style={td}>{i + 1}</td>
-                            <td style={{ ...td, color: '#000' }}><strong>{r.sku}</strong></td>
-                            <td style={{ ...td, color: '#000' }}>{r.name || '-'}</td>
+                            <td style={{ ...td, color: 'var(--pc-ink)' }}><strong>{r.sku}</strong></td>
+                            <td style={{ ...td, color: 'var(--pc-ink)' }}>{r.name || '-'}</td>
                             <td style={{ ...td, textAlign: 'center', fontWeight: 600 }}>{r.mmePrice?.toLocaleString() ?? '-'}</td>
                             {checkedBranches.map(b => {
                               const br = r[b.key as 'src'|'kkl'|'sss']
@@ -3181,7 +3212,7 @@ async function confirmUpdatePrices() {
                                 <td key={b.key} style={{ ...td, textAlign: 'center' }}>
                                   {statusBadge(br)}
                                   {br?.grabPrice != null && (
-                                    <div style={{ fontSize: 10, color: '#666', marginTop: 2 }}>{br.grabPrice.toLocaleString()}</div>
+                                    <div style={{ fontSize: 10, color: 'var(--pc-muted)', marginTop: 2 }}>{br.grabPrice.toLocaleString()}</div>
                                   )}
                                 </td>
                               )
@@ -3192,14 +3223,14 @@ async function confirmUpdatePrices() {
                     </tbody>
                   </table>
                 ) : tabResults.length === 0 ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#888', fontSize: 13 }}>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-muted)', fontSize: 13 }}>
                     {tabHasFile ? 'ไม่มีข้อมูล' : 'ไม่ได้อัพโหลดไฟล์สาขานี้'}
                   </div>
                 ) : (
                   /* Single branch table */
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
-                      <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+                      <tr style={{ background: 'var(--pc-bg)', position: 'sticky', top: 0 }}>
                         <th style={th}>#</th>
                         <th style={th}>SKU</th>
                         <th style={th}>ชื่อสินค้า</th>
@@ -3210,18 +3241,18 @@ async function confirmUpdatePrices() {
                     </thead>
                     <tbody>
                       {tabResults.map((r: any, i: number) => (
-                        <tr key={i} style={{ background: r.status === 'updated' ? 'transparent' : r.status === 'notFound' ? '#f5f5f5' : '#fff0f0' }}>
+                        <tr key={i} style={{ background: r.status === 'updated' ? 'transparent' : r.status === 'notFound' ? 'var(--pc-bg)' : 'var(--pc-danger-soft)' }}>
                           <td style={td}>{i + 1}</td>
-                          <td style={{ ...td, color: '#000' }}><strong>{r.sku}</strong></td>
-                          <td style={{ ...td, color: '#000' }}>{r.name || '-'}</td>
+                          <td style={{ ...td, color: 'var(--pc-ink)' }}><strong>{r.sku}</strong></td>
+                          <td style={{ ...td, color: 'var(--pc-ink)' }}>{r.name || '-'}</td>
                           <td style={{ ...td, fontWeight: 600 }}>{r.mmePrice?.toLocaleString() ?? '-'}</td>
                           <td style={{ ...td, fontWeight: 600 }}>{r.grabPrice?.toLocaleString() ?? '-'}</td>
                           <td style={td}>
                             {r.status === 'updated'
-                              ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✅ แก้ไขแล้ว</span>
+                              ? <span style={{ background: 'var(--pc-success-soft)', color: 'var(--pc-success)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✅ แก้ไขแล้ว</span>
                               : r.status === 'notFound'
-                                ? <span style={{ background: '#e0e0e0', color: '#555', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบใน GRAB</span>
-                                : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>❌ ยังไม่แก้ไข</span>
+                                ? <span style={{ background: 'var(--pc-bg)', color: 'var(--pc-muted)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบใน GRAB</span>
+                                : <span style={{ background: 'var(--pc-danger-soft)', color: 'var(--pc-danger)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>❌ ยังไม่แก้ไข</span>
                             }
                           </td>
                         </tr>
@@ -3232,7 +3263,7 @@ async function confirmUpdatePrices() {
               </div>
 
               {/* Footer */}
-              <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="pc-modal-footer">
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {checkedBranches.map(b => {
                     const notUpdated = mmeCheckResults[b.key].filter((r: any) => r.status === 'notUpdated')
@@ -3266,9 +3297,9 @@ async function confirmUpdatePrices() {
                           const yyyy = now.getFullYear()
                           XLSX.writeFile(wb2, `GM MME ยังไม่แก้ไข ${b.label} ${dd}.${mm2}.${yyyy}.xlsx`)
                         }}
-                        style={{ ...btnStyle, background: '#f8d7da', borderColor: '#dc3545', color: '#721c24', opacity: notUpdated.length === 0 ? 0.5 : 1 }}
-                      >
-                        📥 Export {b.label} ({notUpdated.length})
+                        style={{ ...btnStyle, background: 'var(--pc-soft)', borderColor: 'var(--pc-line)', color: 'var(--pc-accent-dark)', opacity: notUpdated.length === 0 ? 0.5 : 1 }}
+                       className="pc-popup-action"><WorkspaceIcon name="download" />
+                        Export {b.label} ({notUpdated.length})
                       </button>
                     )
                   })}
@@ -3276,7 +3307,7 @@ async function confirmUpdatePrices() {
                 <button onClick={() => setShowMmeCheckModal(false)} style={btnStyle}>ปิด</button>
               </div>
             </div>
-          </div>
+          </StudioModal>
         )
       })()}
 
@@ -3290,50 +3321,50 @@ async function confirmUpdatePrices() {
         const tabData = missingBranchResults[missingBranchTab] ?? []
         const isLoaded = missingBranchLoaded[missingBranchTab]
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ background: '#fff', borderRadius: 6, width: 960, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
+          <StudioModal label="สินค้าที่ขาดใน GRAB" width={1100} onClose={() => setShowMissingBranchModal(false)}>
+            <div className="pc-modal-panel">
 
               {/* Header */}
-              <div style={{ background: '#e65100', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '6px 6px 0 0' }}>
-                <strong>🔍 สินค้าที่ขาดใน GRAB</strong>
-                <button onClick={() => setShowMissingBranchModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
-              </div>
+              <header className="pc-modal-header">
+                <h2><WorkspaceIcon name="branch" />สินค้าที่ขาดใน GRAB</h2>
+                <button onClick={() => setShowMissingBranchModal(false)} className="pc-modal-close" aria-label="ปิดหน้าต่าง"><WorkspaceIcon name="close" /></button>
+              </header>
 
               {/* Tabs */}
-              <div style={{ display: 'flex', borderBottom: '2px solid #ddd', background: '#fafafa' }}>
+              <div style={{ display: 'flex', borderBottom: '2px solid var(--pc-line)', background: 'var(--pc-bg)' }} className="pc-modal-tabs">
                 {branches.map(b => {
                   const isActive = missingBranchTab === b.key
                   const count = missingBranchLoaded[b.key] ? missingBranchResults[b.key].length : null
                   return (
                     <button key={b.key}
                       onClick={() => { setMissingBranchTab(b.key); setMissingBranchExportCat('all'); setMissingBranchSearch(''); loadMissingBranch(b.key) }}
-                      style={{ padding: '8px 24px', border: 'none', borderBottom: isActive ? '2px solid #e65100' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: isActive ? 700 : 400, color: isActive ? '#e65100' : '#555', fontSize: 13, marginBottom: -2 }}
-                    >
-                      🛵 {b.label}
+                      style={{ padding: '8px 24px', border: 'none', borderBottom: isActive ? '2px solid var(--pc-accent)' : '2px solid transparent', background: 'none', cursor: 'pointer', fontWeight: isActive ? 700 : 400, color: isActive ? 'var(--pc-accent)' : 'var(--pc-muted)', fontSize: 13, marginBottom: -2 }}
+                     className="pc-popup-action"><WorkspaceIcon name="download" />
+                      {b.label}
                       {count !== null && (
-                        <span style={{ marginLeft: 6, background: count > 0 ? '#e65100' : '#28a745', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{count}</span>
+                        <span style={{ marginLeft: 6, background: count > 0 ? 'var(--pc-accent)' : 'var(--pc-success)', color: '#fff', borderRadius: 10, fontSize: 10, padding: '1px 6px' }}>{count}</span>
                       )}
                     </button>
                   )
                 })}
-                <div style={{ marginLeft: 'auto', padding: '8px 16px', fontSize: 11, color: '#888', alignSelf: 'center' }}>
+                <div style={{ marginLeft: 'auto', padding: '8px 16px', fontSize: 11, color: 'var(--pc-muted)', alignSelf: 'center' }}>
                   ข้อมูลอ้างอิงจาก branch field ใน DB (อัพเดทเมื่ออัพโหลด GRAB CSV)
                 </div>
               </div>
 
               {/* Summary + Search */}
               {isLoaded && (
-                <div style={{ padding: '8px 20px', background: '#fff8f2', borderBottom: '1px solid #ffe0cc', display: 'flex', gap: 16, fontSize: 13, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span>ทั้งหมด: <strong style={{ color: tabData.length > 0 ? '#e65100' : '#28a745' }}>{tabData.length} รายการ</strong></span>
+                <div style={{ padding: '8px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)', display: 'flex', gap: 16, fontSize: 13, alignItems: 'center', flexWrap: 'wrap' }} className="pc-modal-toolbar">
+                  <span>ทั้งหมด: <strong style={{ color: tabData.length > 0 ? 'var(--pc-accent)' : 'var(--pc-success)' }}>{tabData.length} รายการ</strong></span>
                   <input
                     type="text"
                     placeholder="ค้นหาชื่อ / SKU..."
                     value={missingBranchSearch}
                     onChange={e => setMissingBranchSearch(e.target.value)}
-                    style={{ padding: '3px 10px', fontSize: 12, borderRadius: 4, border: '1px solid #ccc', width: 200 }}
+                    style={{ padding: '3px 10px', fontSize: 12, borderRadius: 4, border: '1px solid var(--pc-line)', width: 200 }}
                   />
                   {missingBranchSearch && (
-                    <span style={{ color: '#888' }}>พบ {tabData.filter((p: any) => {
+                    <span style={{ color: 'var(--pc-muted)' }}>พบ {tabData.filter((p: any) => {
                       const q = missingBranchSearch.toLowerCase()
                       return (p['*ชื่อสินค้า (NAME)'] || '').toLowerCase().includes(q) || (p['รหัสสินค้า (SKU NUMBER)'] || '').toLowerCase().includes(q)
                     }).length} รายการ</span>
@@ -3342,17 +3373,17 @@ async function confirmUpdatePrices() {
               )}
 
               {/* Table */}
-              <div style={{ overflowY: 'auto', flex: 1 }}>
+              <div style={{ overflowY: 'auto', flex: 1 }} className="pc-modal-body">
                 {!isLoaded || missingBranchLoading ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#888', fontSize: 13 }}>⏳ กำลังโหลด...</div>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-muted)', fontSize: 13 }}>⏳ กำลังโหลด...</div>
                 ) : tabData.length === 0 ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#28a745', fontSize: 14 }}>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-success)', fontSize: 14 }}>
                     ✅ ไม่มีสินค้าที่ขาดใน GRAB {missingBranchTab.toUpperCase()}
                   </div>
                 ) : (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
-                      <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+                      <tr style={{ background: 'var(--pc-bg)', position: 'sticky', top: 0 }}>
                         <th style={th}>#</th>
                         <th style={th}>SKU</th>
                         <th style={th}>ชื่อสินค้า</th>
@@ -3372,17 +3403,17 @@ async function confirmUpdatePrices() {
                         const q = missingBranchSearch.toLowerCase()
                         return (p['*ชื่อสินค้า (NAME)'] || '').toLowerCase().includes(q) || (p['รหัสสินค้า (SKU NUMBER)'] || '').toLowerCase().includes(q)
                       }).map((p: any, i: number) => (
-                        <tr key={p['รหัสสินค้า (SKU NUMBER)']} style={{ background: '#fff8f2' }}>
+                        <tr key={p['รหัสสินค้า (SKU NUMBER)']} style={{ background: 'var(--pc-bg)' }}>
                           <td style={td}>{i + 1}</td>
-                          <td style={{ ...td, color: '#000' }}><strong>{p['รหัสสินค้า (SKU NUMBER)']}</strong></td>
-                          <td style={{ ...td, color: '#000' }}>{p['*ชื่อสินค้า (NAME)'] || '-'}</td>
+                          <td style={{ ...td, color: 'var(--pc-ink)' }}><strong>{p['รหัสสินค้า (SKU NUMBER)']}</strong></td>
+                          <td style={{ ...td, color: 'var(--pc-ink)' }}>{p['*ชื่อสินค้า (NAME)'] || '-'}</td>
                           <td style={{ ...td, fontWeight: 600 }}>{p['*ราคาสินค้า'] || '-'}</td>
                           <td style={td}>{p['หมวดหมู่สินค้า (CATEGORIES)'] || '-'}</td>
                           {(['src','kkl','sss'] as const).map(b => (
                             <td key={b} style={{ ...td, textAlign: 'center' }}>
                               {p[b]
-                                ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>✅</span>
-                                : <span style={{ background: '#f8d7da', color: '#721c24', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>❌</span>
+                                ? <span style={{ background: 'var(--pc-success-soft)', color: 'var(--pc-success)', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>✅</span>
+                                : <span style={{ background: 'var(--pc-danger-soft)', color: 'var(--pc-danger)', padding: '2px 6px', borderRadius: 10, fontSize: 10 }}>❌</span>
                               }
                             </td>
                           ))}
@@ -3391,14 +3422,14 @@ async function confirmUpdatePrices() {
                             const dbPrice = parsePriceRobust(String(p['*ราคาสินค้า']))
                             const mismatch = val !== null && val !== undefined && dbPrice !== null && Math.abs(Number(val) - dbPrice) >= 0.01
                             return (
-                              <td key={`${b}-price`} style={{ ...td, textAlign: 'center', background: mismatch ? '#fff3cd' : 'transparent' }}>
+                              <td key={`${b}-price`} style={{ ...td, textAlign: 'center', background: mismatch ? 'var(--pc-soft)' : 'transparent' }}>
                                 {val !== null && val !== undefined ? (
-                                  <span style={{ fontWeight: 600, color: mismatch ? '#856404' : '#155724', fontSize: 11 }}>
+                                  <span style={{ fontWeight: 600, color: mismatch ? 'var(--pc-accent-dark)' : 'var(--pc-success)', fontSize: 11 }}>
                                     {Number(val).toLocaleString()}
-                                    {mismatch && <span style={{ display: 'block', fontSize: 9, color: '#856404' }}>≠ DB</span>}
+                                    {mismatch && <span style={{ display: 'block', fontSize: 9, color: 'var(--pc-accent-dark)' }}>≠ DB</span>}
                                   </span>
                                 ) : (
-                                  <span style={{ color: '#ccc', fontSize: 11 }}>-</span>
+                                  <span style={{ color: 'var(--pc-line)', fontSize: 11 }}>-</span>
                                 )}
                               </td>
                             )
@@ -3411,7 +3442,7 @@ async function confirmUpdatePrices() {
               </div>
 
               {/* Footer */}
-              <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="pc-modal-footer">
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                   {(() => {
                     const cats = isLoaded ? [...new Set(tabData.map((p: any) => p['หมวดหมู่สินค้า (CATEGORIES)'] || '').filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th')) : []
@@ -3421,7 +3452,7 @@ async function confirmUpdatePrices() {
                         value={missingBranchExportCat}
                         onChange={e => setMissingBranchExportCat(e.target.value)}
                         disabled={!isLoaded || tabData.length === 0}
-                        style={{ padding: '5px 8px', fontSize: 12, borderRadius: 4, border: '1px solid #ccc', cursor: 'pointer' }}
+                        style={{ padding: '5px 8px', fontSize: 12, borderRadius: 4, border: '1px solid var(--pc-line)', cursor: 'pointer' }}
                       >
                         <option value="all">ทุกหมวดหมู่ ({tabData.length})</option>
                         {cats.map((c: string) => {
@@ -3463,9 +3494,9 @@ async function confirmUpdatePrices() {
                           const catSuffix = missingBranchExportCat === 'all' ? '' : ` ${missingBranchExportCat}`
                           XLSX.writeFile(wb, `สินค้าขาด GRAB ${missingBranchTab.toUpperCase()}${catSuffix} ${dd}.${mm2}.${yyyy}.xlsx`)
                         }}
-                        style={{ ...btnStyle, background: '#fff3e0', borderColor: '#e65100', color: '#e65100', opacity: (!isLoaded || exportData.length === 0) ? 0.5 : 1 }}
-                      >
-                        📥 Export ({exportData.length})
+                        style={{ ...btnStyle, background: 'var(--pc-soft)', borderColor: 'var(--pc-line)', color: 'var(--pc-accent-dark)', opacity: (!isLoaded || exportData.length === 0) ? 0.5 : 1 }}
+                       className="pc-popup-action"><WorkspaceIcon name="download" />
+                        Export ({exportData.length})
                       </button>
                     </>)
                   })()}
@@ -3477,14 +3508,14 @@ async function confirmUpdatePrices() {
                       setTimeout(() => loadMissingBranch(missingBranchTab), 0)
                     }}
                     style={{ ...btnStyle, opacity: missingBranchLoading ? 0.5 : 1 }}
-                  >
-                    🔄 รีโหลด
+                   className="pc-popup-action"><WorkspaceIcon name="refresh" />
+                    รีโหลด
                   </button>
                 </div>
                 <button onClick={() => setShowMissingBranchModal(false)} style={btnStyle}>ปิด</button>
               </div>
             </div>
-          </div>
+          </StudioModal>
         )
       })()}
 
@@ -3514,28 +3545,28 @@ async function confirmUpdatePrices() {
         const branchBadge = (has: boolean) => (
           <span style={{
             display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600,
-            background: has ? '#d4edda' : '#f8d7da',
-            color: has ? '#155724' : '#721c24'
+            background: has ? 'var(--pc-success-soft)' : 'var(--pc-danger-soft)',
+            color: has ? 'var(--pc-success)' : 'var(--pc-danger)'
           }}>{has ? '✓' : '✗'}</span>
         )
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ background: '#fff', borderRadius: 8, width: '90vw', maxWidth: 900, height: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
-              <div style={{ padding: '12px 20px', borderBottom: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <StudioModal label="Product Master vs สาขา" width={1000} onClose={() => setShowMasterBranchModal(false)}>
+            <div className="pc-modal-panel">
+              <header className="pc-modal-header">
                 <div>
-                  <strong style={{ fontSize: 15 }}>🔍 Product Master vs สาขา</strong>
-                  <span style={{ marginLeft: 12, fontSize: 12, color: '#555' }}>
+                  <h2><WorkspaceIcon name="grid" />Product Master vs สาขา</h2>
+                  <span style={{ marginLeft: 12, fontSize: 12, color: 'var(--pc-muted)' }}>
                     {masterBranchResults.length} SKU
                     {missingCounts.src + missingCounts.kkl + missingCounts.sss > 0 && (
-                      <> — ขาด SRC: <strong style={{ color: '#c74634' }}>{missingCounts.src}</strong>{' '}
-                      KKL: <strong style={{ color: '#c74634' }}>{missingCounts.kkl}</strong>{' '}
-                      SSS: <strong style={{ color: '#c74634' }}>{missingCounts.sss}</strong></>
+                      <> — ขาด SRC: <strong style={{ color: 'var(--pc-danger)' }}>{missingCounts.src}</strong>{' '}
+                      KKL: <strong style={{ color: 'var(--pc-danger)' }}>{missingCounts.kkl}</strong>{' '}
+                      SSS: <strong style={{ color: 'var(--pc-danger)' }}>{missingCounts.sss}</strong></>
                     )}
                   </span>
                 </div>
-                <button onClick={() => setShowMasterBranchModal(false)} style={{ ...btnStyle, padding: '4px 12px' }}>✕ ปิด</button>
-              </div>
-              <div style={{ display: 'flex', borderBottom: '2px solid #ddd', background: '#fafafa' }}>
+                <button onClick={() => setShowMasterBranchModal(false)} className="pc-modal-close" aria-label="ปิดหน้าต่าง"><WorkspaceIcon name="close" /></button>
+              </header>
+              <div style={{ display: 'flex', borderBottom: '2px solid var(--pc-line)', background: 'var(--pc-bg)' }} className="pc-modal-tabs">
                 {branchTabs.map(t => {
                   const isActive = masterBranchTab === t.key
                   const cnt = t.key === 'all' ? masterBranchResults.length : missingCounts[t.key]
@@ -3545,22 +3576,22 @@ async function confirmUpdatePrices() {
                       style={{
                         padding: '8px 16px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: isActive ? 700 : 400,
                         background: isActive ? '#fff' : 'transparent',
-                        borderBottom: isActive ? '2px solid #4a8bc4' : '2px solid transparent',
-                        color: isActive ? '#4a8bc4' : (t.key !== 'all' && cnt > 0 ? '#c74634' : '#555')
+                        borderBottom: isActive ? '2px solid var(--pc-accent)' : '2px solid transparent',
+                        color: isActive ? 'var(--pc-accent)' : (t.key !== 'all' && cnt > 0 ? 'var(--pc-danger)' : 'var(--pc-muted)')
                       }}
                     >{t.label} ({cnt})</button>
                   )
                 })}
               </div>
-              <div style={{ padding: '8px 16px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid #eee' }}>
+              <div style={{ padding: '8px 16px', display: 'flex', gap: 8, alignItems: 'center', borderBottom: '1px solid var(--pc-line)' }} className="pc-modal-toolbar">
                 <input
                   type="text"
                   placeholder="ค้นหา SKU / ชื่อสินค้า..."
                   value={masterBranchSearch}
                   onChange={e => setMasterBranchSearch(e.target.value)}
-                  style={{ padding: '4px 10px', fontSize: 12, borderRadius: 4, border: '1px solid #ccc', width: 220 }}
+                  style={{ padding: '4px 10px', fontSize: 12, borderRadius: 4, border: '1px solid var(--pc-line)', width: 220 }}
                 />
-                {masterBranchSearch && <span style={{ color: '#888', fontSize: 12 }}>พบ {filtered.length} รายการ</span>}
+                {masterBranchSearch && <span style={{ color: 'var(--pc-muted)', fontSize: 12 }}>พบ {filtered.length} รายการ</span>}
                 <button
                   onClick={async () => {
                     if (filtered.length === 0) return
@@ -3584,14 +3615,14 @@ async function confirmUpdatePrices() {
                     XLSX.writeFile(wb, `Master vs สาขา ${tabLabel} ${dd}.${mm}.${yyyy}.xlsx`)
                   }}
                   disabled={filtered.length === 0}
-                  style={{ ...btnStyle, fontSize: 11, padding: '4px 10px', background: '#e8f5e9', borderColor: '#388e3c', color: '#1b5e20', opacity: filtered.length === 0 ? 0.5 : 1 }}
-                >📥 Export</button>
+                  style={{ ...btnStyle, fontSize: 11, padding: '4px 10px', background: 'var(--pc-success-soft)', borderColor: 'var(--pc-success)', color: 'var(--pc-success)', opacity: filtered.length === 0 ? 0.5 : 1 }}
+                 className="pc-popup-action"><WorkspaceIcon name="download" />Export</button>
               </div>
-              <div style={{ overflowY: 'auto', flex: 1 }}>
+              <div style={{ overflowY: 'auto', flex: 1 }} className="pc-modal-body">
                 {masterBranchLoading ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#888', fontSize: 13 }}>⏳ กำลังโหลด...</div>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-muted)', fontSize: 13 }}>⏳ กำลังโหลด...</div>
                 ) : filtered.length === 0 ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#28a745', fontSize: 14 }}>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-success)', fontSize: 14 }}>
                     {masterBranchResults.length === 0 ? 'ไม่มีข้อมูล — กรุณาอัพโหลด Product Master ก่อน' : '✅ ไม่มีรายการที่ขาดในสาขานี้'}
                   </div>
                 ) : (
@@ -3608,10 +3639,10 @@ async function confirmUpdatePrices() {
                     </thead>
                     <tbody>
                       {filtered.map((r, i) => (
-                        <tr key={r.sku} style={{ background: (!r.src || !r.kkl || !r.sss) ? '#fff8f8' : 'transparent' }}>
-                          <td style={{ ...td, color: '#888', textAlign: 'center' }}>{i + 1}</td>
+                        <tr key={r.sku} style={{ background: (!r.src || !r.kkl || !r.sss) ? 'var(--pc-danger-soft)' : 'transparent' }}>
+                          <td style={{ ...td, color: 'var(--pc-muted)', textAlign: 'center' }}>{i + 1}</td>
                           <td style={{ ...td, fontFamily: 'monospace', fontWeight: 600 }}>{r.sku}</td>
-                          <td style={td}>{r.name || <span style={{ color: '#aaa' }}>—</span>}</td>
+                          <td style={td}>{r.name || <span style={{ color: 'var(--pc-muted)' }}>—</span>}</td>
                           <td style={{ ...td, textAlign: 'center' }}>{branchBadge(r.src)}</td>
                           <td style={{ ...td, textAlign: 'center' }}>{branchBadge(r.kkl)}</td>
                           <td style={{ ...td, textAlign: 'center' }}>{branchBadge(r.sss)}</td>
@@ -3622,9 +3653,20 @@ async function confirmUpdatePrices() {
                 )}
               </div>
             </div>
-          </div>
+          </StudioModal>
         )
       })()}
+
+      {popupNotice && <StudioModal label={popupNotice.confirm ? 'ยืนยันการลบหมวดหมู่' : 'แจ้งเตือน'} width={520} onClose={() => dismissPopup(false)}>
+        <div className="pc-modal-panel">
+          <header className="pc-modal-header"><h2><WorkspaceIcon name="alert" />{popupNotice.confirm ? 'ยืนยันการลบหมวดหมู่' : 'แจ้งเตือน'}</h2><button className="pc-modal-close" aria-label="ปิดแจ้งเตือน" onClick={() => dismissPopup(false)}><WorkspaceIcon name="close" /></button></header>
+          <div className="pc-modal-body pc-modal-message">{popupNotice.message}</div>
+          <footer className="pc-modal-footer">
+            {popupNotice.confirm && <button className="pc-button" autoFocus onClick={() => dismissPopup(false)}>ยกเลิก</button>}
+            <button className={`pc-button ${popupNotice.confirm ? 'pc-modal-danger' : 'pc-button-primary'}`} autoFocus={!popupNotice.confirm} onClick={() => dismissPopup(true)}>{popupNotice.confirm ? 'ยืนยันลบ' : 'รับทราบ'}</button>
+          </footer>
+        </div>
+      </StudioModal>}
 
       {/* Image Tooltip */}
       {tooltip && (
@@ -3634,7 +3676,7 @@ async function confirmUpdatePrices() {
           top: tooltip.y + 15,
           zIndex: 9999,
           background: '#fff',
-          border: '2px solid #4a8bc4',
+          border: '2px solid var(--pc-accent)',
           borderRadius: 8,
           padding: 8,
           boxShadow: '0 10px 40px rgba(0,0,0,0.3)',
@@ -3648,7 +3690,7 @@ async function confirmUpdatePrices() {
               onError={e => (e.currentTarget.style.display = 'none')}
             />
           ) : (
-            <div style={{ padding: 40, color: '#000', fontSize: 12 }}>ไม่มีรูป</div>
+            <div style={{ padding: 40, color: 'var(--pc-ink)', fontSize: 12 }}>ไม่มีรูป</div>
           )}
         </div>
       )}
@@ -3660,43 +3702,43 @@ async function confirmUpdatePrices() {
         const matchedList = promaxxResults.filter((r: any) => !r.notFound && r.matched)
         const notFoundList = promaxxResults.filter((r: any) => r.notFound)
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 }}>
-            <div style={{ background: '#fff', borderRadius: 6, width: 740, maxHeight: '85vh', display: 'flex', flexDirection: 'column', boxShadow: '0 10px 40px rgba(0,0,0,0.3)' }}>
-              <div style={{ background: '#6d28d9', color: '#fff', padding: '15px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '6px 6px 0 0' }}>
-                <strong>🔍 ผลตรวจสอบ Promaxx (R05.103) vs DB</strong>
-                <button onClick={() => setShowPromaxxModal(false)} style={{ background: 'none', border: 'none', color: '#fff', fontSize: 20, cursor: 'pointer' }}>×</button>
-              </div>
+          <StudioModal label="ผลตรวจสอบ Promaxx (R05.103) vs DB" width={1000} onClose={() => setShowPromaxxModal(false)}>
+            <div className="pc-modal-panel">
+              <header className="pc-modal-header">
+                <h2><WorkspaceIcon name="tag" />ผลตรวจสอบ Promaxx (R05.103) vs DB</h2>
+                <button onClick={() => setShowPromaxxModal(false)} className="pc-modal-close" aria-label="ปิดหน้าต่าง"><WorkspaceIcon name="close" /></button>
+              </header>
               {/* Progress bar */}
               {promaxxProgress.total > 0 && (
-                <div style={{ padding: '10px 20px', background: '#f0e6ff', borderBottom: '1px solid #d1b3ff' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#5b21b6', marginBottom: 4 }}>
+                <div style={{ padding: '10px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--pc-accent-dark)', marginBottom: 4 }}>
                     <span>{promaxxProgress.phase === 'fetch' ? '🔄 กำลังดึงข้อมูล...' : '💾 กำลังบันทึกราคา...'}</span>
                     <span>{promaxxProgress.current.toLocaleString()} / {promaxxProgress.total.toLocaleString()}</span>
                   </div>
-                  <div style={{ background: '#e9d5ff', borderRadius: 999, height: 6, overflow: 'hidden' }}>
-                    <div style={{ background: '#7c3aed', height: '100%', width: `${Math.min(100, (promaxxProgress.current / promaxxProgress.total) * 100)}%`, transition: 'width 0.3s' }} />
+                  <div style={{ background: 'var(--pc-soft)', borderRadius: 999, height: 6, overflow: 'hidden' }}>
+                    <div style={{ background: 'var(--pc-accent)', height: '100%', width: `${Math.min(100, (promaxxProgress.current / promaxxProgress.total) * 100)}%`, transition: 'width 0.3s' }} />
                   </div>
                 </div>
               )}
               {promaxxResults.length > 0 && !promaxxResults[0]?.error && (
-                <div style={{ padding: '10px 20px', background: '#f8f8f8', borderBottom: '1px solid #ddd', display: 'flex', gap: 20, fontSize: 13 }}>
+                <div style={{ padding: '10px 20px', background: 'var(--pc-bg)', borderBottom: '1px solid var(--pc-line)', display: 'flex', gap: 20, fontSize: 13 }} className="pc-modal-toolbar">
                   <span>ทั้งหมด: <strong>{promaxxResults.length}</strong></span>
-                  <span style={{ color: '#28a745' }}>✓ ตรง: <strong>{matchedList.length}</strong></span>
-                  <span style={{ color: '#dc3545' }}>✗ ราคาไม่ตรง: <strong>{mismatchList.length}</strong></span>
-                  {notFoundList.length > 0 && <span style={{ color: '#856404' }}>⚠ ไม่พบใน DB: <strong>{notFoundList.length}</strong></span>}
+                  <span style={{ color: 'var(--pc-success)' }}>✓ ตรง: <strong>{matchedList.length}</strong></span>
+                  <span style={{ color: 'var(--pc-danger)' }}>✗ ราคาไม่ตรง: <strong>{mismatchList.length}</strong></span>
+                  {notFoundList.length > 0 && <span style={{ color: 'var(--pc-accent-dark)' }}>⚠ ไม่พบใน DB: <strong>{notFoundList.length}</strong></span>}
                 </div>
               )}
-              <div style={{ overflowY: 'auto', flex: 1 }}>
+              <div style={{ overflowY: 'auto', flex: 1 }} className="pc-modal-body">
                 {promaxxChecking ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#888' }}>⏳ กำลังโหลด...</div>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-muted)' }}>⏳ กำลังโหลด...</div>
                 ) : promaxxResults[0]?.error ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#dc3545' }}>{promaxxResults[0].error}</div>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-danger)' }}>{promaxxResults[0].error}</div>
                 ) : promaxxResults.length === 0 ? (
-                  <div style={{ padding: 40, textAlign: 'center', color: '#888' }}>ไม่มีข้อมูล</div>
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--pc-muted)' }}>ไม่มีข้อมูล</div>
                 ) : (
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                     <thead>
-                      <tr style={{ background: '#f5f5f5', position: 'sticky', top: 0 }}>
+                      <tr style={{ background: 'var(--pc-bg)', position: 'sticky', top: 0 }}>
                         <th style={th}>#</th>
                         <th style={th}>SKU</th>
                         <th style={th}>ชื่อสินค้า</th>
@@ -3707,7 +3749,7 @@ async function confirmUpdatePrices() {
                     </thead>
                     <tbody>
                       {promaxxResults.map((r: any, i: number) => (
-                        <tr key={i} style={{ background: r.notFound ? '#f5f5f5' : r.matched ? 'transparent' : '#fff3cd' }}>
+                        <tr key={i} style={{ background: r.notFound ? 'var(--pc-bg)' : r.matched ? 'transparent' : 'var(--pc-soft)' }}>
                           <td style={td}>{i + 1}</td>
                           <td style={td}><strong>{r.sku}</strong></td>
                           <td style={td}>{r.name || '-'}</td>
@@ -3715,10 +3757,10 @@ async function confirmUpdatePrices() {
                           <td style={td}>{r.notFound ? '-' : r.dbPrice?.toLocaleString()}</td>
                           <td style={td}>
                             {r.notFound
-                              ? <span style={{ background: '#e0e0e0', color: '#555', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบใน DB</span>
+                              ? <span style={{ background: 'var(--pc-bg)', color: 'var(--pc-muted)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>⚠ ไม่พบใน DB</span>
                               : r.matched
-                                ? <span style={{ background: '#d4edda', color: '#155724', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
-                                : <span style={{ background: '#fff3cd', color: '#856404', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ ราคาไม่ตรง</span>
+                                ? <span style={{ background: 'var(--pc-success-soft)', color: 'var(--pc-success)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✓ ตรง</span>
+                                : <span style={{ background: 'var(--pc-soft)', color: 'var(--pc-accent-dark)', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>✗ ราคาไม่ตรง</span>
                             }
                           </td>
                         </tr>
@@ -3727,7 +3769,7 @@ async function confirmUpdatePrices() {
                   </table>
                 )}
               </div>
-              <div style={{ padding: '12px 20px', borderTop: '1px solid #ddd', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="pc-modal-footer">
                 <button
                   disabled={mismatchList.length === 0}
                   onClick={async () => {
@@ -3748,14 +3790,14 @@ async function confirmUpdatePrices() {
                     const yyyy = now.getFullYear()
                     XLSX.writeFile(wb, `Promaxx vs DB ราคาไม่ตรง ${dd}.${mm}.${yyyy}.xlsx`)
                   }}
-                  style={{ ...btnStyle, background: '#f3e8ff', borderColor: '#8b5cf6', color: '#5b21b6', opacity: mismatchList.length === 0 ? 0.5 : 1 }}
-                >
-                  📥 Export ราคาไม่ตรง ({mismatchList.length})
+                  style={{ ...btnStyle, background: 'var(--pc-soft)', borderColor: 'var(--pc-line)', color: 'var(--pc-accent-dark)', opacity: mismatchList.length === 0 ? 0.5 : 1 }}
+                 className="pc-popup-action"><WorkspaceIcon name="download" />
+                  Export ราคาไม่ตรง ({mismatchList.length})
                 </button>
                 <button onClick={() => setShowPromaxxModal(false)} style={btnStyle}>ปิด</button>
               </div>
             </div>
-          </div>
+          </StudioModal>
         )
       })()}
 
@@ -3764,22 +3806,22 @@ async function confirmUpdatePrices() {
 }
 
 const btnStyle: React.CSSProperties = {
-  padding: '7px 16px', border: '1px solid #777', borderRadius: 20,
-  fontSize: 12, fontWeight: 600, cursor: 'pointer', background: '#f5f5f5'
+  padding: '10px 14px', border: '1px solid var(--pc-line)', borderRadius: 8,
+  fontSize: 11, fontWeight: 700, cursor: 'pointer', background: '#fff', color: 'var(--pc-ink)', minHeight: 40
 }
 const th: React.CSSProperties = {
-  padding: '8px 12px', textAlign: 'left', border: '1px solid #ccc',
-  fontWeight: 600, position: 'sticky', top: 0, background: '#f5f5f5'
+  padding: '12px 16px', textAlign: 'left', borderBottom: '1px solid var(--pc-line)',
+  fontWeight: 600, position: 'sticky', top: 0, background: 'var(--pc-bg)'
 }
 const td: React.CSSProperties = {
-  padding: '8px 12px', border: '1px solid #eee', color: '#000'
+  padding: '12px 16px', borderBottom: '1px solid var(--pc-line)', color: 'var(--pc-ink)'
 }
 const labelStyle: React.CSSProperties = {
-  fontSize: 11, color: '#000', display: 'block', marginBottom: 4
+  fontSize: 11, color: 'var(--pc-ink)', display: 'block', marginBottom: 4
 }
 const inputStyle: React.CSSProperties = {
-  width: '100%', padding: '6px 10px', border: '1px solid #999',
-  borderRadius: 3, fontSize: 13, fontFamily: 'sans-serif', color: '#000',
+  width: '100%', padding: '6px 10px', border: '1px solid var(--pc-muted)',
+  borderRadius: 8, fontSize: 13, fontFamily: 'inherit', color: 'var(--pc-ink)',
   boxSizing: 'border-box'
 }
 

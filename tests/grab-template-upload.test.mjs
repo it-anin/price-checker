@@ -234,7 +234,7 @@ test('the manager writes only validated files under canonical names and keeps re
     pendingNameCache: { current: cache }, logEngine: message => logs.push(message),
     invalidateEngineResults: () => invalidations++, setEngineChecks: () => {},
     refreshGrabFiles: async () => { refreshes++ }, engineMessage: error => error.message,
-    window: { alert: message => alerts.push(message) },
+    notifyPopup: async message => { alerts.push(message) },
   })
   const file = (name, text) => ({ name, arrayBuffer: async () => new TextEncoder().encode(text).buffer })
   await handler([file('GRAB_SSS.CSV', original), file('bad.csv', invalid), file('another export.csv', csv(stockRows('kkl')))])
