@@ -28,7 +28,7 @@ Repository: `it-anin/price-checker`, branch `main`. Next.js 16, React 19, TypeSc
 | Tools, Studio Cards, navigation | `toolGroups` in `app/page.tsx`; [tools guide](docs/tools-studio-cards.md) |
 | Popups, product/image editor | `StudioModal`, `notifyPopup` in `app/page.tsx`; [popup guide](docs/popup-theme.md) |
 | Stock engine and CSV validation | `lib/process-engine.ts`; [engine guide](docs/process-engine.md) |
-| Live MSSQL stock (button, request mailbox, office agent) | `lib/stock-source.ts`, `lib/stock-live.ts`, `tools/stock-sync/`; [bridge guide](docs/mssql-bridge.md), [starter prompt for new projects](docs/mssql-bridge-prompt.md) |
+| Live MSSQL stock (button, request mailbox, office agent) | `lib/stock-source.ts`, `lib/stock-live.ts`, `tools/stock-sync/`; [bridge guide](docs/mssql-bridge.md), [starter prompt for new projects](docs/mssql-bridge-prompt.md), [`.REP`-driven search project prompt](docs/mssql-bridge-prompt-search.md) |
 | GRAB template saves and change review | `lib/grab-template-source.ts`, `lib/grab-template-review.ts`; engine guide |
 | Pending membership, automatic price checks, price-checking Pending column | `lib/pending-sku.ts`, `lib/process-engine-source.ts`; [pending guide](docs/pending-sku.md) |
 | Archived design studies | [archive instructions](design-previews/README.md) |
