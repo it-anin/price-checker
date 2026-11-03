@@ -129,7 +129,6 @@ export default function Home() {
   const [newPromaxxSaveError, setNewPromaxxSaveError] = useState('')
   const priceCalcBusyRef = useRef(false)
   const [updatingPrices, setUpdatingPrices] = useState(false)
-  const [lastPriceUpdate, setLastPriceUpdate] = useState<string | null>(null)
   const [priceCalcGrabFile, setPriceCalcGrabFile] = useState<File | null>(null)
   const [priceCalcGrabMap, setPriceCalcGrabMap] = useState<Record<string, number>>({})
   const [showImportModal, setShowImportModal] = useState(false)
@@ -2122,9 +2121,6 @@ async function confirmUpdatePrices() {
     const dd = String(now.getDate()).padStart(2, '0')
     const mm = String(now.getMonth() + 1).padStart(2, '0')
     const yyyy = now.getFullYear()
-    const hh = String(now.getHours()).padStart(2, '0')
-    const min = String(now.getMinutes()).padStart(2, '0')
-    setLastPriceUpdate(`${dd}/${mm}/${yyyy} ${hh}:${min}`)
     setStatus(`✅ อัพเดทราคาสำเร็จ ${data.updated} รายการ`)
 
     // Export Excel หลังอัพเดทสำเร็จ
@@ -2241,7 +2237,6 @@ async function confirmUpdatePrices() {
       setProducts(previous => previous.map(product => product['รหัสสินค้า (SKU NUMBER)'] === review.sku ? { ...product, '*ราคาสินค้า': review.price } : product))
       setPriceDrafts(previous => { const next = { ...previous }; delete next[review.sku]; return next })
       setPriceReview(null)
-      setLastPriceUpdate(new Intl.DateTimeFormat('th-TH', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Bangkok' }).format(new Date()))
       setStatus(`บันทึกราคา ${review.sku} สำเร็จ · ${formatMoney(review.price)}`)
     } catch {
       setInspectorError('บันทึกราคาไม่สำเร็จ ข้อมูลที่กรอกยังอยู่ กรุณาลองอีกครั้ง')
@@ -2329,15 +2324,13 @@ async function confirmUpdatePrices() {
 
       <main className="pc-workspace" id="product-workspace">
         <header className="pc-page-header">
-          <div><div className="pc-eyebrow">PRICE CHECKER / {engineOpen ? 'STOCK OPERATIONS' : toolsOpen ? 'TOOLS' : 'PRODUCT OPERATIONS'}</div><h1>{engineOpen ? 'PROCESS ENGINE' : toolsOpen ? 'เครื่องมือทั้งหมด' : 'ตรวจและปรับราคาสินค้า'}<span className="pc-heading-dot">.</span></h1><p>{engineOpen ? 'เติมสต็อก R01.102 ลงใน Template ที่ Grab อนุมัติ แยกตามสาขา' : toolsOpen ? 'เลือกหมวดที่ต้องการ แล้วเริ่มงานได้ทันที' : 'ดูผลต่าง ตรวจค่าที่เสนอ แล้วยืนยันก่อนเปลี่ยนราคา'}</p></div>
+          <div><div className="pc-eyebrow">PRICE CHECKER / {engineOpen ? 'STOCK OPERATIONS' : toolsOpen ? 'TOOLS' : 'PRODUCT OPERATIONS'}</div><h1>{engineOpen ? 'PROCESS ENGINE' : toolsOpen ? 'เครื่องมือทั้งหมด' : 'ตรวจและปรับราคาสินค้า'}<span className="pc-heading-dot">.</span></h1>{(engineOpen || toolsOpen) && <p>{engineOpen ? 'เติมสต็อก R01.102 ลงใน Template ที่ Grab อนุมัติ แยกตามสาขา' : 'เลือกหมวดที่ต้องการ แล้วเริ่มงานได้ทันที'}</p>}</div>
           <div className="pc-header-actions">
             <span className="pc-workspace-label">ANIN <i /> WORKSPACE</span>
             {engineOpen ? <button className="pc-button" onClick={() => { setEngineOpen(false); setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" />รายการสินค้า</button> : <><button className="pc-button pc-button-subtle" onClick={openAddProduct}><WorkspaceIcon name="plus" />เพิ่มสินค้า</button><button className="pc-button" onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="engine" />PROCESS ENGINE</button><button className="pc-button" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="settings" />เครื่องมือ</button></>}
           </div>
         </header>
 
-        <div className="pc-context-strip" hidden={engineOpen || toolsOpen}><span><i className="pc-context-dot" />รายการที่โหลด <b>{products.length.toLocaleString('th-TH')}</b></span><span className="pc-context-issues"><WorkspaceIcon name="clock" />ต้องตรวจ {inspectionBranch.toUpperCase()} <b>{issueCount.toLocaleString('th-TH')}</b></span><span className="pc-last-update">{lastPriceUpdate ? `บันทึกราคาล่าสุด ${lastPriceUpdate}` : 'จัดการข้อมูลสินค้าและราคาของทั้ง 3 สาขา'}</span></div>
-        {!engineOpen && !toolsOpen && (engineBusy === 'pending-auto' || pendingAutoEntries.length > 0 || pendingAutoStatus.error) && <div className="pn-auto-banner" role="status"><span>{engineBusy === 'pending-auto' ? 'กำลังตรวจ PENDING อัตโนมัติจาก GRAB / Promaxx...' : pendingAutoStatus.error ? `ตรวจ PENDING อัตโนมัติไม่สำเร็จ: ${pendingAutoStatus.error}` : `PENDING อัตโนมัติ: ราคา GRAB ≠ Promaxx ${pendingAutoEntries.length} SKU${pendingAutoStatus.saved ? '' : ' · เข้าสู่ระบบเพื่อบันทึก'}`}</span><button className="pc-text-button" onClick={() => { setEngineOpen(true); setToolsOpen(false) }}>ดู PENDING</button></div>}
 
 
 
