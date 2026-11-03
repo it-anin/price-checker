@@ -179,7 +179,7 @@ D = Math.ceil(B × 1.07)   ← ราคาขาย Grab
 
 ## Stock จาก MSSQL (PROCESS ENGINE)
 
-ปุ่ม **ดึงสดจาก MSSQL** ดึงสต็อก R01.102 (`CF_QUANTITY`) สด ๆ ทุกครั้งที่กด แทนการอัปโหลด CSV (CSV ยังใช้เป็นทางสำรองได้) — **ไม่มีการ sync เป็นรอบ**
+ปุ่ม **ดึงจากฐานข้อมูล** ดึงสต็อก R01.102 (`CF_QUANTITY`) สด ๆ ทุกครั้งที่กด แทนการอัปโหลด CSV (CSV ยังใช้เป็นทางสำรองได้) — **ไม่มีการ sync เป็นรอบ**
 
 - Vercel เข้า MSSQL ในออฟฟิศไม่ได้ → `tools/stock-sync/` (Node, รันบน BigyaMainPC ด้วย `--serve`) รอคำขอจาก Supabase แล้ว query MSSQL ตอนนั้น
 - Flow: ผู้ใช้ที่ **ล็อกอินแล้ว** กดปุ่ม → `handleEngineLoadLive()` → RPC `request_stock_sync()` (`lib/stock-source.ts` `requestLiveStock`) สร้างแถว `stock_requests` → agent claim, query 3 สาขา, เขียน `stock_onhand`/`stock_sync_status`, ปิดคำขอ → เว็บ poll (`waitForStockRequest`, `lib/stock-live.ts`) → `loadStockFromDb()` → `loadMssqlStock()` → `stockReportFromRows()` ได้ `StockReport` เหมือนไฟล์ CSV

@@ -82,7 +82,7 @@ On start the agent closes requests left `pending/running` by a crash with `error
 | `lib/stock-live.ts` | pure: `agentOnline`, `requestStatusText`, `pollStockRequest` (injectable `sleep`/`now`) | copy as is |
 | `lib/stock-source.ts` | Supabase calls: `requestLiveStock`, `waitForStockRequest`, `loadAgentLastSeen`, `loadMssqlStock` (paged) | copy, rename |
 | `lib/process-engine.ts` | `stockReportFromRows` (rows → domain object), `stockSyncWarning` (stored-data age) | pattern only |
-| `app/page.tsx` | `handleEngineLoadLive()` and `loadStockFromDb()`; button text `ดึงสดจาก MSSQL` | pattern only |
+| `app/page.tsx` | `handleEngineLoadLive()` and `loadStockFromDb()`; button text `ดึงจากฐานข้อมูล` | pattern only |
 | `tests/stock-sync.test.mjs`, `tests/stock-live.test.cjs` | helper tests; fake Supabase for claim/finish | copy and adapt |
 
 ## 5. Security model

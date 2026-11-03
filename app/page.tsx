@@ -613,7 +613,7 @@ export default function Home() {
     }
     setEngineReports(previous => ({ ...previous, ...next }))
     const messages = [...problems, ...warnings]
-    if (messages.length) window.alert(`ดึงสต็อกจาก MSSQL\n\n${messages.join('\n')}`)
+    if (messages.length) window.alert(`ดึงจากฐานข้อมูล\n\n${messages.join('\n')}`)
   }
 
   async function handleEngineLoadFromDb() {
@@ -629,7 +629,7 @@ export default function Home() {
     if (engineBusyRef.current) return
     if (!grabAdminUser) {
       setPendingAuthOpen(true); setGrabAdminError('')
-      window.alert('ต้องเข้าสู่ระบบก่อนดึงสต็อกสดจาก MSSQL\n\nใช้บัญชีเดียวกับ GRAB CSV MANAGER ฟอร์มเข้าสู่ระบบอยู่ที่การ์ด PENDING ด้านล่าง')
+      window.alert('ต้องเข้าสู่ระบบก่อนดึงจากฐานข้อมูล\n\nใช้บัญชีเดียวกับ GRAB CSV MANAGER ฟอร์มเข้าสู่ระบบอยู่ที่การ์ด PENDING ด้านล่าง')
       setTimeout(() => document.getElementById('pending-login')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100)
       return
     }
@@ -638,19 +638,19 @@ export default function Home() {
     try {
       const lastSeen = await loadAgentLastSeen()
       if (!agentOnline(lastSeen)) {
-        logEngine('⚠ agent ไม่ตอบสนอง ดึงสดไม่ได้')
+        logEngine('⚠ agent ไม่ตอบสนอง ดึงจากฐานข้อมูลไม่ได้')
         if (window.confirm('เครื่อง agent (BigyaMainPC) ไม่ตอบสนอง จึงดึงข้อมูลสดไม่ได้\n\nต้องการใช้ข้อมูลที่ดึงไว้ล่าสุดแทนหรือไม่? (เวลาของข้อมูลแสดงในการ์ดแต่ละสาขา)')) await loadStockFromDb()
         return
       }
-      logEngine('LIVE · สั่งดึงสต็อกสดจาก MSSQL...')
+      logEngine('LIVE · สั่งดึงจากฐานข้อมูล...')
       const id = await requestLiveStock()
       const row = await waitForStockRequest(id, update => logEngine(`LIVE · ${requestStatusText(update)}`))
       logEngine(`LIVE · ${requestStatusText(row)}`)
       await loadStockFromDb()
     } catch (error) {
       const message = engineMessage(error)
-      logEngine(`BLOCKED ดึงสดไม่สำเร็จ: ${message}`)
-      window.alert(`ดึงสต็อกสดจาก MSSQL ไม่สำเร็จ\n\n${message}\n\nรายงานที่โหลดไว้เดิมยังไม่ถูกเปลี่ยน`)
+      logEngine(`BLOCKED ดึงจากฐานข้อมูลไม่สำเร็จ: ${message}`)
+      window.alert(`ดึงจากฐานข้อมูล ไม่สำเร็จ\n\n${message}\n\nรายงานที่โหลดไว้เดิมยังไม่ถูกเปลี่ยน`)
     } finally { engineBusyRef.current = false; setEngineBusy('') }
   }
 
@@ -2407,13 +2407,13 @@ async function confirmUpdatePrices() {
         {engineOpen && <section className="pe-workspace" aria-label="PROCESS ENGINE workspace" aria-busy={Boolean(engineBusy)}>
           <div className="pe-notice"><WorkspaceIcon name="clock" /><p>R01.102 และผลลัพธ์เก็บในหน่วยความจำของหน้านี้เท่านั้น <strong>ดาวน์โหลดก่อนรีเฟรชหรือปิดหน้า</strong> · Template เก็บไว้ใน Supabase และใช้ซ้ำได้ทุกวัน</p></div>
           <section className="pe-card" aria-labelledby="pe-reports-heading">
-            <div className="pe-card-heading"><div><span className="pc-eyebrow">01 / PREPARE</span><h2 id="pe-reports-heading">UPLOAD REPORT R01.102</h2><p>ส่งออกสาขาละไฟล์ ตั้งชื่อ src.csv, sss.csv, kkl.csv · รองรับ UTF-8 และ TIS-620 อัตโนมัติ · หรือดึงสดจาก MSSQL (ต้องเข้าสู่ระบบ)</p></div><button className="pc-button pc-button-primary" disabled={Boolean(engineBusy)} onClick={() => document.getElementById('engineReportInput')?.click()}><WorkspaceIcon name="upload" />UPLOAD R01.102</button><button className={`pc-button pe-mssql-button${engineBusy === 'mssql' ? ' is-loading' : ''}`} disabled={Boolean(engineBusy)} aria-busy={engineBusy === 'mssql'} onClick={() => void handleEngineLoadLive()}>
+            <div className="pe-card-heading"><div><span className="pc-eyebrow">01 / PREPARE</span><h2 id="pe-reports-heading">UPLOAD REPORT R01.102</h2><p>ส่งออกสาขาละไฟล์ ตั้งชื่อ src.csv, sss.csv, kkl.csv · รองรับ UTF-8 และ TIS-620 อัตโนมัติ · หรือดึงจากฐานข้อมูล (ต้องเข้าสู่ระบบ)</p></div><button className="pc-button pc-button-primary" disabled={Boolean(engineBusy)} onClick={() => document.getElementById('engineReportInput')?.click()}><WorkspaceIcon name="upload" />UPLOAD R01.102</button><button className={`pc-button pe-mssql-button${engineBusy === 'mssql' ? ' is-loading' : ''}`} disabled={Boolean(engineBusy)} aria-busy={engineBusy === 'mssql'} onClick={() => void handleEngineLoadLive()}>
                 <span className="pe-mssql-button-icon" aria-hidden="true">{engineBusy === 'mssql' ? <span className="pe-mssql-orbit"><WorkspaceIcon name="database" /></span> : <WorkspaceIcon name="refresh" />}</span>
-                <span>{engineBusy === 'mssql' ? 'กำลังดึงสด...' : 'ดึงสดจาก MSSQL'}</span>
+                <span>{engineBusy === 'mssql' ? 'กำลังดึงข้อมูล...' : 'ดึงจากฐานข้อมูล'}</span>
               </button><input hidden id="engineReportInput" type="file" accept=".csv" multiple disabled={Boolean(engineBusy)} onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void handleEngineReports(files) }} /></div>
             <div className="pe-branch-grid">{ENGINE_BRANCHES.map(branch => {
               const report = engineReports[branch]
-              return <div className={`pe-branch-report ${report ? 'is-ready' : ''}`} key={branch}><div><strong>{branch.toUpperCase()}</strong><span className={`pc-status ${report ? 'pc-status-matched' : 'pc-status-unpriced'}`}>{report ? (report.source === 'mssql' ? 'MSSQL' : 'อัปโหลดแล้ว') : 'รอข้อมูล'}</span></div>{report ? <><b>{report.name}</b><p>{report.stock.size.toLocaleString('th-TH')} SKUs · {report.source === 'mssql' && report.syncedAt ? `ข้อมูล ณ ${new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(report.syncedAt))}` : report.encoding}</p><button className="pc-text-button" disabled={Boolean(engineBusy)} aria-label={`นำรายงาน ${branch.toUpperCase()} ออก`} onClick={() => { setEngineReports(previous => { const next = { ...previous }; delete next[branch]; return next }); setEngineChecks(null); invalidateEngineResults() }}><WorkspaceIcon name="close" />นำไฟล์ออก</button></> : <p>เลือก {branch}.csv หรือกด “ดึงสดจาก MSSQL”</p>}</div>
+              return <div className={`pe-branch-report ${report ? 'is-ready' : ''}`} key={branch}><div><strong>{branch.toUpperCase()}</strong><span className={`pc-status ${report ? 'pc-status-matched' : 'pc-status-unpriced'}`}>{report ? (report.source === 'mssql' ? 'MSSQL' : 'อัปโหลดแล้ว') : 'รอข้อมูล'}</span></div>{report ? <><b>{report.name}</b><p>{report.stock.size.toLocaleString('th-TH')} SKUs · {report.source === 'mssql' && report.syncedAt ? `ข้อมูล ณ ${new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(report.syncedAt))}` : report.encoding}</p><button className="pc-text-button" disabled={Boolean(engineBusy)} aria-label={`นำรายงาน ${branch.toUpperCase()} ออก`} onClick={() => { setEngineReports(previous => { const next = { ...previous }; delete next[branch]; return next }); setEngineChecks(null); invalidateEngineResults() }}><WorkspaceIcon name="close" />นำไฟล์ออก</button></> : <p>เลือก {branch}.csv หรือกด “ดึงจากฐานข้อมูล”</p>}</div>
             })}</div>
           </section>
 

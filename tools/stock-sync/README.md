@@ -2,7 +2,7 @@
 
 Vercel cannot reach the office MSSQL, so this small Node program runs **in the office** and answers the web app:
 
-1. A signed-in user presses **"ดึงสดจาก MSSQL"** in PROCESS ENGINE.
+1. A signed-in user presses **"ดึงจากฐานข้อมูล"** in PROCESS ENGINE.
 2. The web app asks Supabase (`request_stock_sync()`), which creates one `stock_requests` row.
 3. This agent (`--serve`) sees the request within ~2 s, queries MSSQL **right then** (stock of report R01.102,
    column `CF_QUANTITY`), writes `stock_onhand` / `stock_sync_status` and closes the request.

@@ -41,9 +41,9 @@ THE PRODUCT
 - A search page over ProMaxx data. People type a SKU, a code or a name and see matching rows. Anything beyond search is undecided:
   do not invent extra features; ask me.
 - The data is COPIED into this project's Supabase and the search runs against that copy (fast, no MSSQL call per keystroke).
-  A button "ดึงสดจาก MSSQL" refreshes the copy by asking the office agent to query MSSQL at that moment (the bridge pattern).
+  A button "ดึงจากฐานข้อมูล" refreshes the copy by asking the office agent to query MSSQL at that moment (the bridge pattern).
   There is no timer: MSSQL is queried only when someone presses the button.
-- Empty copy (first use): show a clear Thai message such as "ยังไม่มีข้อมูล กดดึงสดจาก MSSQL" instead of an empty table.
+- Empty copy (first use): show a clear Thai message such as "ยังไม่มีข้อมูล กดดึงจากฐานข้อมูล" instead of an empty table.
 - Always show "ข้อมูล ณ <date time>" and warn when the copy is old or the last refresh failed.
 
 WHERE THE DATA COMES FROM (important)

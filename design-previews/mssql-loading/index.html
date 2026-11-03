@@ -58,7 +58,7 @@ body.is-solo .shell{max-width:780px}body.is-solo .edition,body.is-solo .original
 </header>
 <section class="hero" aria-labelledby="page-title">
  <div class="hero-copy"><div class="eyebrow">MSSQL / LOADING & WAITING</div><h1 id="page-title">10 จังหวะสำหรับปุ่ม MSSQL<span class="dot">.</span></h1><p id="hero-description">เลือกแอนิเมชันระหว่างดึงข้อมูลและรอผล ในโทนเดียวกับปุ่มเดิม</p></div>
- <div class="original"><div><span class="original-label">THE ORIGINAL</span><span>ปุ่มที่ใช้อยู่</span></div><span class="original-button"><svg aria-hidden="true"><use href="#i-sync"/></svg>ดึงสดจาก MSSQL</span></div>
+ <div class="original"><div><span class="original-label">THE ORIGINAL</span><span>ปุ่มที่ใช้อยู่</span></div><span class="original-button"><svg aria-hidden="true"><use href="#i-sync"/></svg>ดึงจากฐานข้อมูล</span></div>
 </section>
 <div class="toolbar" aria-label="ควบคุมตัวอย่าง">
  <div class="state-controls" role="group" aria-label="เลือกสถานะตัวอย่าง"><span class="control-label">สถานะ</span><button class="state-choice" data-stage="idle" aria-pressed="false">พร้อมใช้งาน</button><button class="state-choice" data-stage="loading" aria-pressed="true">กำลังดึง</button><button class="state-choice" data-stage="waiting" aria-pressed="false">รอผล</button><button class="state-choice" data-stage="success" aria-pressed="false">สำเร็จ</button></div>
@@ -84,8 +84,8 @@ const designs = [
  {id:'10',name:'Path Draw',slug:'path-draw',note:'วาดเส้นลูกศรทีละส่วน ได้จังหวะใหม่จากรูปทรงเดิม',visual:'<svg viewBox="0 0 24 24"><path d="M20 7v5h-5M6 6a8 8 0 0 1 13 3"/><path d="M4 17v-5h5M5 15a8 8 0 0 0 13 3"/></svg>'}
 ];
 const phases = {
- idle:{label:'ดึงสดจาก MSSQL',status:'พร้อมใช้งาน'},
- loading:{label:'กำลังดึงสด...',status:'กำลังดึงข้อมูล'},
+ idle:{label:'ดึงจากฐานข้อมูล',status:'พร้อมใช้งาน'},
+ loading:{label:'กำลังดึงข้อมูล...',status:'กำลังดึงข้อมูล'},
  waiting:{label:'รอการตอบกลับ...',status:'รอผลจาก MSSQL'},
  success:{label:'ดึงข้อมูลสำเร็จ',status:'สำเร็จแล้ว'}
 };
@@ -100,7 +100,7 @@ function card(design){
   '<div class="card-top"><span class="design-number">'+design.id+' / 10</span><span class="card-state" id="phase-'+design.id+'" data-phase="loading">กำลังดึงข้อมูล</span></div>'+
   '<div class="stage"><button class="demo-button motion-'+design.id+'" data-demo="'+design.id+'" data-state="loading" disabled aria-busy="true" aria-describedby="phase-'+design.id+'">'+
   (design.effect||'')+'<span class="button-visual" aria-hidden="true"><span class="glyph-default">'+icon('sync')+'</span><span class="glyph-motion">'+design.visual+'</span><span class="glyph-success">'+icon('check')+'</span></span>'+
-  '<span class="button-copy"><span class="button-label">กำลังดึงสด...</span>'+(design.branches?'<span class="branch-tags" aria-hidden="true"><i>SRC</i><i>KKL</i><i>SSS</i></span>':'')+'</span></button></div>'+
+  '<span class="button-copy"><span class="button-label">กำลังดึงข้อมูล...</span>'+(design.branches?'<span class="branch-tags" aria-hidden="true"><i>SRC</i><i>KKL</i><i>SSS</i></span>':'')+'</span></button></div>'+
   '<div class="card-copy"><div class="title-row"><h3 id="title-'+design.id+'">'+design.name+'</h3>'+(design.recommended?'<span class="recommend">แนะนำ</span>':'')+'</div><p>'+design.note+'</p></div>'+
   '<div class="card-actions"><button data-run="'+design.id+'" aria-label="ลองเล่นแบบ '+design.id+' '+design.name+'">'+icon('play')+'ลองเล่น</button><button data-export="'+design.id+'" aria-label="ดาวน์โหลด HTML แบบ '+design.id+' '+design.name+'">'+icon('code')+'HTML</button><button class="choose" data-choose="'+design.id+'" aria-pressed="false">เลือกแบบนี้</button></div></article>';
 }
