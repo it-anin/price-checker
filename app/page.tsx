@@ -237,6 +237,7 @@ export default function Home() {
   const [pendingLoading, setPendingLoading] = useState(false)
   const [pendingError, setPendingError] = useState('')
   const [pendingSaveError, setPendingSaveError] = useState('')
+  const [pendingExportNotice, setPendingExportNotice] = useState<{ error: boolean; message: string } | null>(null)
   const [pendingProduct, setPendingProduct] = useState<{ sku: string; name: string } | null>(null)
   const [pendingInput, setPendingInput] = useState('')
   const [pendingSelectedBranches, setPendingSelectedBranches] = useState<Record<EngineBranch, boolean>>({ src: true, sss: true, kkl: true })
@@ -483,6 +484,61 @@ export default function Home() {
     const skus = parsePendingInput(pendingInput)
     if (!skus.length) { setPendingSaveError('กรุณากรอก SKU'); return }
     void editPending({ kind: 'add', skus, branches })
+  }
+
+  function selectPendingBranch(branch: EngineBranch) {
+    setPendingTab(branch)
+    setPendingAutoTab(branch)
+    setPendingExportNotice(null)
+  }
+
+  async function exportPendingGmMmeXlsx(branch: EngineBranch) {
+    if (engineBusyRef.current) return
+    engineBusyRef.current = true; setEngineBusy('pending-export'); setPendingExportNotice(null)
+    const branchName = branch.toUpperCase() as 'SRC' | 'SSS' | 'KKL'
+    try {
+      const snapshot = await loadPendingSnapshot()
+      const skus = snapshot.entries.filter(entry => entry.branches.includes(branchName)).map(entry => entry.sku)
+      if (!skus.length) {
+        setPendingExportNotice({ error: false, message: `ไม่มี PENDING ที่บันทึกไว้สำหรับ ${branchName}` })
+        return
+      }
+
+      const productsBySku = new Map<string, Product>()
+      for (let offset = 0; offset < skus.length; offset += 1200) {
+        const chunks = Array.from({ length: Math.min(4, Math.ceil((skus.length - offset) / 300)) }, (_, index) => skus.slice(offset + index * 300, offset + (index + 1) * 300))
+        const batches = await Promise.all(chunks.map(async chunk => {
+          const response = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus: chunk }) })
+          if (!response.ok) throw new Error('โหลดข้อมูลสินค้าสำหรับ Export ไม่สำเร็จ กรุณาลองใหม่')
+          const data = await response.json()
+          if (!data.success || !Array.isArray(data.products)) throw new Error('อ่านข้อมูลสินค้าสำหรับ Export ไม่สำเร็จ กรุณาลองใหม่')
+          return data.products as Product[]
+        }))
+        for (const product of batches.flat()) productsBySku.set(normalizeStockSku(product['รหัสสินค้า (SKU NUMBER)']), product)
+      }
+
+      const missing = skus.filter(sku => !productsBySku.has(sku))
+      const selected = skus.flatMap(sku => {
+        const product = productsBySku.get(sku)
+        return product ? [{ ...product, '*ราคาสินค้า': productPrice(product['*ราคาสินค้า']) ?? '' }] : []
+      })
+      if (!selected.length) throw new Error(`ไม่พบข้อมูลสินค้าใน Supabase สำหรับ PENDING ${branchName} (${skus.length} SKU)`)
+
+      const XLSX = await import('xlsx')
+      const rows = toExportRows(selected)
+      const ws = XLSX.utils.json_to_sheet(rows)
+      ws['!cols'] = [16.5, 24.5, 24.5, 24.5, 24.5, 24.5, 33.64].map(wch => ({ wch }))
+      ws['!rows'] = [{ hpt: 21 }, ...rows.map(() => ({ hpt: 141 }))]
+      rows.forEach((_, index) => { ws[`D${index + 2}`].z = '#,##0.00' })
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'TEMPLATE')
+      XLSX.writeFile(wb, `GM MME PENDING ${branchName} ${engineDate()}.xlsx`)
+      const message = `Export PENDING ${branchName} สำเร็จ ${selected.length.toLocaleString('th-TH')}/${skus.length.toLocaleString('th-TH')} รายการ${missing.length ? ` · ไม่พบข้อมูลสินค้า ${missing.length} SKU: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ' …' : ''}` : ''}`
+      setPendingExportNotice({ error: missing.length > 0, message })
+      setStatus(message)
+    } catch (error) {
+      setPendingExportNotice({ error: true, message: `Export PENDING ${branchName} ไม่สำเร็จ: ${engineMessage(error)}` })
+    } finally { engineBusyRef.current = false; setEngineBusy('') }
   }
 
   function pendingPriceText(loaded: boolean, price: number | undefined) {
@@ -1591,7 +1647,7 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
       '*ประเภทสินค้า': p['ประเภทสินค้า'] || '',
       '*ชื่อสินค้า': p['*ชื่อสินค้า (NAME)'] || '',
       '*เลขที่ใบอนุญาตโฆษณา': p['*เลขที่ใบอนุญาตโฆษณา'] || '',
-      '*ราคาสินค้า': p['*ราคาสินค้า'] || '',
+      '*ราคาสินค้า': p['*ราคาสินค้า'] ?? '',
       'รหัสสินค้า': p['รหัสสินค้า (SKU NUMBER)'] || '',
       '*รูปภาพสินค้า': p['*รูปภาพสินค้า'] || '',
       'หมวดหมู่รายการสินค้า': p['หมวดหมู่สินค้า (CATEGORIES)'] || ''
@@ -2359,10 +2415,10 @@ async function confirmUpdatePrices() {
             })}</div>
           </section>
 
-          <section className="pe-card pn-card" aria-labelledby="pending-heading" aria-busy={pendingLoading || engineBusy === 'pending' || engineBusy === 'pending-auto'}>
+          <section className="pe-card pn-card" aria-labelledby="pending-heading" aria-busy={pendingLoading || engineBusy === 'pending' || engineBusy === 'pending-auto' || engineBusy === 'pending-export'}>
             <div className="pe-card-heading">
               <div><span className="pc-eyebrow">02 / PENDING APPROVAL</span><h2 id="pending-heading">PENDING SKU UPDATE <span className="pc-count">{pendingSnapshot ? pendingSnapshot.entries.length : '—'} SKUs</span></h2><p>ระงับขายแยกสาขา ทั้งรายการราคาไม่ตรงที่เพิ่มอัตโนมัติ และรายการที่เพิ่มเองเพื่อรออนุมัติ</p></div>
-              <div className="pn-heading-actions"><button className="pc-button" disabled={Boolean(engineBusy) || pendingLoading} onClick={() => void refreshPendingCard()}><WorkspaceIcon name="refresh" />โหลดรายการใหม่</button>{!grabAdminUser && <button className="pc-button" disabled={Boolean(engineBusy)} aria-expanded={pendingAuthOpen} aria-controls="pending-login" onClick={() => { setPendingAuthOpen(value => !value); setGrabAdminError('') }}>เข้าสู่ระบบเพื่อ ADD / DELETE</button>}</div>
+              <div className="pn-heading-actions"><button className="pc-button" disabled={Boolean(engineBusy) || pendingLoading} aria-busy={engineBusy === 'pending-export'} onClick={() => void exportPendingGmMmeXlsx(pendingTab)}><WorkspaceIcon name="download" />{engineBusy === 'pending-export' ? 'กำลัง Export...' : `Export GM MME · ${pendingTab.toUpperCase()}`}</button><button className="pc-button" disabled={Boolean(engineBusy) || pendingLoading} onClick={() => void refreshPendingCard()}><WorkspaceIcon name="refresh" />โหลดรายการใหม่</button>{!grabAdminUser && <button className="pc-button" disabled={Boolean(engineBusy)} aria-expanded={pendingAuthOpen} aria-controls="pending-login" onClick={() => { setPendingAuthOpen(value => !value); setGrabAdminError('') }}>เข้าสู่ระบบเพื่อ ADD / DELETE</button>}</div>
             </div>
             {grabAdminUser && <div className="pe-admin-session"><span>เข้าสู่ระบบแล้ว: {grabAdminUser} · เพิ่ม/ลบ PENDING ได้</span><button className="pc-text-button" disabled={Boolean(engineBusy)} onClick={() => void signOutGrabManager()}>ออกจากระบบ</button></div>}
             {pendingAuthOpen && !grabAdminUser && <form id="pending-login" className="pe-admin-login" onSubmit={signInGrabManager}>
@@ -2372,11 +2428,13 @@ async function confirmUpdatePrices() {
             </form>}
             {pendingError && <p className="pe-error" role="alert">{pendingError} · ปิด ADD/DELETE เพื่อป้องกันเขียนทับข้อมูลเดิม กรุณาโหลดรายการใหม่</p>}
             {pendingSaveError && <p className="pe-error" role="alert">{pendingSaveError}</p>}
+            <p className="pc-pending-note">Export เฉพาะสาขาที่เปิดอยู่ รวมรายการเพิ่มเองและอัตโนมัติที่บันทึกใน Supabase · ใช้ราคา DB ล่าสุด</p>
+            {pendingExportNotice && <p className={pendingExportNotice.error ? 'pe-error' : 'pc-pending-note'} role={pendingExportNotice.error ? 'alert' : 'status'}>{pendingExportNotice.message}</p>}
             <section className="pn-auto-section" aria-labelledby="pending-auto-heading">
               <div className="pn-section-heading"><h3 id="pending-auto-heading">เพิ่มอัตโนมัติจากราคา GRAB ≠ Promaxx <span className="pc-count">{pendingAutoEntries.length} SKUs</span></h3><span className="pn-source-status">{engineBusy === 'pending-auto' ? 'กำลังตรวจราคา...' : pendingAutoStatus.loaded ? `ตรวจล่าสุด ${pendingAutoStatus.checkedAt}` : 'ยังไม่ได้ตรวจราคา'}</span></div>
               <p>ใช้ราคาจากหน้า “ตรวจและปรับราคาสินค้า” ทั้งหมด แยก GRAB SRC / SSS / KKL · นำออกเฉพาะสาขาที่ราคากลับมาตรงกัน · ถ้าราคาไม่ครบจะคงรายการไว้ · ไม่ลบรายการที่เพิ่มเอง</p>
               {!pendingAutoStatus.saved && pendingAutoStatus.loaded && <p className="pn-mismatch-note" role="status">ผลตรวจนี้ยังไม่บันทึกลงฐานข้อมูล เข้าสู่ระบบเพื่อบันทึกอัตโนมัติ · RUN จะตรวจราคาใหม่และใช้ผลตรวจล่าสุดระงับขายด้วย</p>}
-              <div className="pn-tabs" role="tablist" aria-label="สาขาของ PENDING อัตโนมัติ">{ENGINE_BRANCHES.map((branch, index) => <button key={branch} id={`pending-auto-tab-${branch}`} role="tab" aria-selected={pendingAutoTab === branch} aria-controls="pending-auto-panel" tabIndex={pendingAutoTab === branch ? 0 : -1} className={pendingAutoTab === branch ? 'is-active' : ''} onClick={() => setPendingAutoTab(branch)} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? ENGINE_BRANCHES[0] : event.key === 'End' ? ENGINE_BRANCHES[2] : ENGINE_BRANCHES[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; setPendingAutoTab(next); document.getElementById(`pending-auto-tab-${next}`)?.focus() } }}>{branch.toUpperCase()} <span>({pendingAutoEntries.filter(entry => entry.autoPriceBranches?.includes(branch.toUpperCase() as 'SRC' | 'SSS' | 'KKL')).length})</span></button>)}</div>
+              <div className="pn-tabs" role="tablist" aria-label="สาขาของ PENDING อัตโนมัติ">{ENGINE_BRANCHES.map((branch, index) => <button key={branch} id={`pending-auto-tab-${branch}`} role="tab" aria-selected={pendingAutoTab === branch} aria-controls="pending-auto-panel" tabIndex={pendingAutoTab === branch ? 0 : -1} className={pendingAutoTab === branch ? 'is-active' : ''} onClick={() => selectPendingBranch(branch)} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? ENGINE_BRANCHES[0] : event.key === 'End' ? ENGINE_BRANCHES[2] : ENGINE_BRANCHES[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; selectPendingBranch(next); document.getElementById(`pending-auto-tab-${next}`)?.focus() } }}>{branch.toUpperCase()} <span>({pendingAutoEntries.filter(entry => entry.autoPriceBranches?.includes(branch.toUpperCase() as 'SRC' | 'SSS' | 'KKL')).length})</span></button>)}</div>
               <div id="pending-auto-panel" role="tabpanel" aria-labelledby={`pending-auto-tab-${pendingAutoTab}`} className="pn-table-scroll"><table className="pn-table"><thead><tr><th>SKU</th><th>ITEM NAME</th><th>GRAB {pendingAutoTab.toUpperCase()}</th><th>PROMAXX</th><th>สถานะ</th></tr></thead><tbody>
                 {pendingAutoRows.map(entry => {
                   const check = pendingAutoPrices.get(entry.sku), mismatch = check?.states[pendingAutoTab] === 'diff'
@@ -2393,7 +2451,7 @@ async function confirmUpdatePrices() {
             </div>
             <p className="pn-price-note">ใช้ราคา GRAB / PROMAXX ที่บันทึกจากเมนู “เครื่องมือทั้งหมด” · DATABASE ใช้ราคาสินค้าปัจจุบัน</p>
             {pendingDbPrices.error && <p className="pe-error" role="alert">{pendingDbPrices.error}</p>}
-            <div className="pn-tabs" role="tablist" aria-label="สาขาของ PENDING">{ENGINE_BRANCHES.map((branch, index) => <button key={branch} id={`pending-tab-${branch}`} role="tab" type="button" aria-selected={pendingTab === branch} aria-controls="pending-table-panel" tabIndex={pendingTab === branch ? 0 : -1} className={pendingTab === branch ? 'is-active' : ''} onClick={() => setPendingTab(branch)} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? ENGINE_BRANCHES[0] : event.key === 'End' ? ENGINE_BRANCHES[2] : ENGINE_BRANCHES[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; setPendingTab(next); document.getElementById(`pending-tab-${next}`)?.focus() } }}>{branch.toUpperCase()} <span>({pendingCounts[index]})</span></button>)}</div>
+            <div className="pn-tabs" role="tablist" aria-label="สาขาของ PENDING">{ENGINE_BRANCHES.map((branch, index) => <button key={branch} id={`pending-tab-${branch}`} role="tab" type="button" aria-selected={pendingTab === branch} aria-controls="pending-table-panel" tabIndex={pendingTab === branch ? 0 : -1} className={pendingTab === branch ? 'is-active' : ''} onClick={() => selectPendingBranch(branch)} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? ENGINE_BRANCHES[0] : event.key === 'End' ? ENGINE_BRANCHES[2] : ENGINE_BRANCHES[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; selectPendingBranch(next); document.getElementById(`pending-tab-${next}`)?.focus() } }}>{branch.toUpperCase()} <span>({pendingCounts[index]})</span></button>)}</div>
             <div id="pending-table-panel" role="tabpanel" aria-labelledby={`pending-tab-${pendingTab}`}>
               <h3 className="pn-manual-heading">รายการที่เพิ่มเอง · {pendingTab.toUpperCase()}</h3>
               <p className="pn-legend">· ยังไม่ได้โหลดราคา · — ไม่มีราคาที่บันทึกไว้สำหรับ SKU/สาขานี้ · ≠ ราคา GRAB ต่างจากราคาอ้างอิง</p>

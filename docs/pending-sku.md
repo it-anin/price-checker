@@ -14,6 +14,14 @@ Select SRC, SSS and/or KKL (all selected initially), then paste SKUs separated b
 
 New manual entries save before optional name lookup. Names come from approved stock templates, using their actual headers (C=ITEMNAME in current stock exports, SKU D). Lookup stops when all missing names are found and caches each file by name/updated_at. Name lookup never changes persisted prices.
 
+## Export GM MME by branch
+
+The card's **Export GM MME · SRC/SSS/KKL** button exports the active branch; the manual and automatic tabs switch together. Each click re-reads the saved `pending_skus` snapshot and looks up current `products` details through the existing read-only SKU API, in batches of 300 with at most four concurrent requests. It includes both saved membership sources, once per SKU, independently of product search/category/pagination. Anonymous automatic previews that have not been saved are excluded.
+
+The workbook uses the sample's visible `TEMPLATE` layout: `*ประเภทสินค้า`, `*ชื่อสินค้า`, `*เลขที่ใบอนุญาตโฆษณา`, `*ราคาสินค้า`, `รหัสสินค้า`, `*รูปภาพสินค้า`, `หมวดหมู่รายการสินค้า`. Rows contain Supabase product data, base DB prices as numbers (including zero), text SKUs with leading zeroes, and original image links. Column widths, row heights and the two-decimal price format follow the sample. Instruction/example cells and unrelated hidden helper sheets are not exported as product data. The filename identifies the branch and Bangkok date.
+
+Export does not write to Supabase or alter PENDING. Empty branches produce no file. Missing product records are excluded with a visible exported/total count and missing SKU warning; a failed snapshot or product batch prevents any partial download and permits retry. Export shares the Engine busy lock with edits and RUN.
+
 ## Automatic GRAB / Promaxx pending
 
 The separate automatic section compares persisted `src_price`, `sss_price` and `kkl_price` against `promaxx_price`, only for branches where the product is offered. It uses the same parser and rounded cents as the price-checking screen. Zero is valid. Missing or invalid prices do not create a new pending item and do not release an existing automatic pending item. An automatic branch is released only after both valid prices match; missing products or branches also retain existing suppression until prices can be verified.
@@ -43,7 +51,7 @@ RUN always reads current pending data, applies suppression only to the SKU's bra
 ## Verification
 
 ```sh
-node --test tests/process-engine.test.cjs tests/pending-sku.test.cjs tests/pending-price-api.test.cjs
+node --test tests/process-engine.test.cjs tests/pending-sku.test.cjs tests/pending-price-api.test.cjs tests/pending-export.test.mjs
 npm run build
 ```
 
