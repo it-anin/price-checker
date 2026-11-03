@@ -574,6 +574,45 @@ body {
   .pc-catalog-footer { font-size: 11px; }
 }
 .pe-workspace { display: grid; gap: 20px; padding-bottom: 24px; }
+.pe-entry-shell { position: relative; isolation: isolate; }
+.pe-entry-shell .pe-workspace[inert] { opacity: .45; filter: blur(2px); pointer-events: none; }
+.pe-entry-overlay { position: absolute; inset: 0; z-index: 5; border-radius: 12px; background: #f7f4efe8; backdrop-filter: blur(3px); }
+.pe-entry-panel-wrap { position: sticky; top: 22px; min-height: min(560px, calc(100dvh - 90px)); display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 24px; }
+.pe-entry-card { width: 340px; max-width: 100%; padding: 27px 32px; border: 1px solid #e4dfd3; border-radius: 18px; background: white; box-shadow: 0 18px 55px #4e3a2110; text-align: center; }
+.pe-entry-card h2 { margin: 10px 0 5px; font-size: 16px; line-height: 1.6; font-weight: 600; }
+.pe-entry-caption { min-height: 20px; color: #858d77; font-size: 11px; line-height: 1.9; overflow-wrap: anywhere; }
+.pe-entry-count { margin-top: 13px; font-size: 10px; color: #989e8b; }
+.pe-entry-count strong { margin-left: 4px; color: var(--pc-accent); font: 600 11px Arial,sans-serif; }
+.pe-entry-orbit { position: relative; width: 174px; height: 174px; margin: 4px auto 16px; display: grid; place-items: center; }
+.pe-entry-ring { position: absolute; inset: 22px; border: 1px solid #e7d6bd; border-radius: 50%; }
+.pe-entry-ring.outer { inset: 0; border-style: dashed; border-color: #e8e8df; animation: pe-entry-spin 32s linear infinite; }
+.pe-entry-core { display: grid; place-items: center; width: 62px; height: 62px; border: 1px solid #e7c9a7; border-radius: 18px; background: #fff6e9; box-shadow: 0 0 0 12px #fffaf2; color: var(--pc-accent); }
+.pe-entry-core .pc-icon { width: 30px; height: 30px; }
+.pe-entry-track { position: absolute; inset: 15px; animation: pe-entry-spin 7s linear infinite; }
+.pe-entry-node { position: absolute; top: -2px; left: 50%; display: grid; place-items: center; width: 34px; height: 25px; border: 1px solid #dce4d3; border-radius: 15px; background: white; color: #829473; font: 8px Arial,sans-serif; animation: pe-entry-counter-spin 7s linear infinite; }
+.pe-entry-track.track-1 { transform: rotate(120deg); animation-delay: -2.333s; }
+.pe-entry-track.track-1 .pe-entry-node { transform: rotate(-120deg); animation-delay: -2.333s; }
+.pe-entry-track.track-2 { transform: rotate(240deg); animation-delay: -4.666s; }
+.pe-entry-track.track-2 .pe-entry-node { transform: rotate(-240deg); animation-delay: -4.666s; }
+.pe-entry-ticks { display: flex; justify-content: center; gap: 5px; margin-top: 13px; }
+.pe-entry-ticks i { width: 20px; height: 3px; border-radius: 3px; background: #ebeee5; }
+.pe-entry-ticks i.is-done { background: #9aa98b; }
+.pe-entry-error-icon { display: grid; place-items: center; width: 43px; height: 43px; margin: 0 auto 13px; border-radius: 13px; background: #fbede7; color: var(--pc-danger); }
+.pe-entry-card.is-error { padding: 28px; border-color: #ead6c9; }
+.pe-entry-card.is-error .pc-button { margin-top: 18px; }
+@keyframes pe-entry-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@keyframes pe-entry-counter-spin { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
+@media (max-width: 619px) {
+  .pe-entry-panel-wrap { top: 14px; min-height: min(560px, calc(100dvh - 110px)); padding: 16px; }
+  .pe-entry-card { width: 300px; padding: 24px 18px; }
+  .pe-entry-card h2 { font-size: 15px; }
+  .pe-entry-orbit { width: 155px; height: 155px; }
+  .pe-entry-core { width: 55px; height: 55px; border-radius: 15px; }
+  .pe-entry-node { width: 30px; font-size: 7px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pe-entry-ring.outer, .pe-entry-track, .pe-entry-node { animation: none; }
+}
 .pe-notice { display: flex; align-items: start; gap: 12px; color: #795731; background: #fff0dc; border: 1px solid #ead7ba; border-radius: 10px; padding: 14px 18px; font-size: 12px; }
 .pe-notice .pc-icon { margin-top: 2px; }
 .pe-card { background: white; border: 1px solid var(--pc-line); border-radius: 12px; padding: 22px; min-width: 0; }

@@ -31,6 +31,7 @@ const PRODUCT_PAGE_SIZE = 12
 type PriceState = 'mismatch' | 'matched' | 'unpriced' | 'absent'
 type EngineOutput = { name: string; content: string; branch: EngineBranch; total: number; updated: number; matched: number }
 type GrabFileInfo = { name: string; updated_at: string }
+type EngineEntryState = { id: number; status: 'idle' | 'loading' | 'error'; pending: boolean; prices: boolean; templates: boolean; error: string }
 type WorkspaceTool = { name: string; detail: string; action: () => void; disabled?: boolean; busy?: boolean }
 
 function WorkspaceIcon({ name, className = '' }: { name: string; className?: string }) {
@@ -197,6 +198,9 @@ export default function Home() {
   const [savingPrice, setSavingPrice] = useState(false)
   const [inspectorError, setInspectorError] = useState('')
   const [engineOpen, setEngineOpen] = useState(false)
+  const [engineEntry, setEngineEntry] = useState<EngineEntryState>({ id: 0, status: 'idle', pending: false, prices: false, templates: false, error: '' })
+  const engineEntryRequest = useRef(0)
+  const engineNavRef = useRef<HTMLButtonElement>(null)
   const [engineReports, setEngineReports] = useState<Partial<Record<EngineBranch, StockReport>>>({})
   const [engineSubtract, setEngineSubtract] = useState<Record<EngineBranch, string>>({ src: '5', sss: '2', kkl: '2' })
   const [engineBusy, setEngineBusy] = useState('')
@@ -210,6 +214,7 @@ export default function Home() {
   const [enginePendingCounts, setEnginePendingCounts] = useState<Record<EngineBranch, number> | null>(null)
   const [grabFiles, setGrabFiles] = useState<GrabFileInfo[]>([])
   const [grabFilesLoading, setGrabFilesLoading] = useState(false)
+  const grabFilesRequest = useRef(0)
   const [grabFilesError, setGrabFilesError] = useState('')
   const [grabUploadProblems, setGrabUploadProblems] = useState<string[]>([])
   const [grabUploadNotice, setGrabUploadNotice] = useState('')
@@ -279,17 +284,22 @@ export default function Home() {
 
   useEffect(() => {
     if (!engineOpen && !toolsOpen) return
-    void refreshGrabFiles()
-    if (engineOpen) setPendingPriceRevision(value => value + 1)
-  }, [engineOpen, toolsOpen])
+    const entryId = engineOpen ? engineEntry.id : null
+    void refreshGrabFiles().then(files => {
+      if (entryId !== null) markEngineEntry(entryId, files !== null ? { templates: true } : { status: 'error', error: 'โหลดรายการ Template ไม่สำเร็จ' })
+    })
+  }, [engineOpen, toolsOpen, engineEntry.id])
 
   useEffect(() => {
     if ((catalogOpen && !engineOpen && !toolsOpen) || engineBusy || engineBusyRef.current || !pendingPriceRevision) return
     const request = `${pendingPriceRevision}:${grabAdminUser ?? 'anonymous'}`
     if (pendingAutoRequest.current === request) return
     pendingAutoRequest.current = request
-    void refreshPendingCard()
-  }, [pendingPriceRevision, grabAdminUser, engineBusy, catalogOpen, engineOpen, toolsOpen])
+    const entryId = engineOpen ? engineEntry.id : null
+    void refreshPendingCard(entryId === null ? undefined : () => markEngineEntry(entryId, { pending: true })).then(ready => {
+      if (entryId !== null) markEngineEntry(entryId, ready ? { pending: true, prices: true } : { status: 'error', error: 'โหลดรายการ PENDING หรือราคาสินค้าไม่สำเร็จ' })
+    })
+  }, [pendingPriceRevision, grabAdminUser, engineBusy, catalogOpen, engineOpen, toolsOpen, engineEntry.id])
 
   const onSearchCriteriaChange = useEffectEvent(() => {
     if (search.trim().length >= 3) searchProducts(search.trim())
@@ -352,22 +362,44 @@ export default function Home() {
     setEnginePendingCounts({ src: sets.src.size, sss: sets.sss.size, kkl: sets.kkl.size })
   }
 
-  async function refreshPendingCard() {
-    if (engineBusyRef.current) return
+  function beginEngineEntry() {
+    const id = ++engineEntryRequest.current
+    setEngineEntry({ id, status: 'loading', pending: false, prices: false, templates: false, error: '' })
+    setPendingPriceRevision(value => value + 1)
+    setEngineOpen(true)
+    setToolsOpen(false)
+  }
+
+  function openProcessEngine() {
+    if (!engineOpen) beginEngineEntry()
+  }
+
+  function markEngineEntry(id: number, update: Partial<Omit<EngineEntryState, 'id'>>) {
+    setEngineEntry(previous => {
+      if (previous.id !== id || previous.status !== 'loading') return previous
+      const next = { ...previous, ...update }
+      return next.pending && next.prices && next.templates ? { ...next, status: 'idle' } : next
+    })
+  }
+
+  async function refreshPendingCard(onPrepared?: () => void) {
+    if (engineBusyRef.current) return false
     engineBusyRef.current = true; setEngineBusy('pending-auto')
     const request = ++pendingLoadRequest.current
     pendingReadyRef.current = false
     setPendingLoading(true); setPendingError(''); setPendingSaveError(''); setPendingActionNotice('')
     try {
       const snapshot = await resolvePendingPrices()
-      if (request !== pendingLoadRequest.current) return
-      void refreshPendingDatabase(snapshot.entries)
+      if (request !== pendingLoadRequest.current) return false
+      onPrepared?.()
+      return await refreshPendingDatabase(snapshot.entries)
     } catch (error) {
-      if (request !== pendingLoadRequest.current) return
+      if (request !== pendingLoadRequest.current) return false
       invalidateEngineResults()
       setPendingError(engineMessage(error)); setPendingLoading(false)
       setPendingAutoStatus(previous => ({ ...previous, error: engineMessage(error) }))
       logEngine(`PENDING LOAD ERROR · ${engineMessage(error)}`)
+      return false
     } finally { engineBusyRef.current = false; setEngineBusy('') }
   }
 
@@ -413,9 +445,12 @@ export default function Home() {
         const price = parsePriceRobust(String(product['*ราคาสินค้า'] ?? ''))
         if (sku && price !== null && Number.isFinite(price)) prices.set(sku, price)
       }
-      if (request === pendingDbRequest.current) setPendingDbPrices({ prices, loaded: true, loading: false, error: '' })
+      if (request !== pendingDbRequest.current) return false
+      setPendingDbPrices({ prices, loaded: true, loading: false, error: '' })
+      return true
     } catch (error) {
       if (request === pendingDbRequest.current) setPendingDbPrices(previous => ({ ...previous, loading: false, error: `${engineMessage(error)}${previous.loaded ? ' · แสดงราคาที่โหลดสำเร็จครั้งก่อน' : ''}` }))
+      return false
     }
   }
 
@@ -550,18 +585,20 @@ export default function Home() {
   }
 
   async function refreshGrabFiles() {
+    const request = ++grabFilesRequest.current
     setGrabFilesLoading(true)
     setGrabFilesError('')
     try {
       const { data, error } = await supabase.from('grab_files').select('name,updated_at').order('name')
       if (error) throw new Error(error.message)
       const files = (data ?? []) as GrabFileInfo[]
+      if (request !== grabFilesRequest.current) return null
       setGrabFiles(files)
       return files
     } catch (error) {
-      setGrabFilesError(`อ่านรายการ Template ไม่สำเร็จ: ${engineMessage(error)}`)
+      if (request === grabFilesRequest.current) setGrabFilesError(`อ่านรายการ Template ไม่สำเร็จ: ${engineMessage(error)}`)
       return null
-    } finally { setGrabFilesLoading(false) }
+    } finally { if (request === grabFilesRequest.current) setGrabFilesLoading(false) }
   }
 
   // Reads the stock already stored in Supabase (the agent's last run). No busy handling here:
@@ -2358,7 +2395,7 @@ async function confirmUpdatePrices() {
           <button className={!engineOpen && !toolsOpen && !catalogOpen ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setEngineOpen(false); setToolsOpen(false); setCatalogOpen(false); setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="nav-price-check" /><span className="pc-nav-label">ตรวจสอบราคา</span></button>
           <button title="เปรียบเทียบ 3 สาขา" aria-label="เปรียบเทียบ 3 สาขา" onClick={handleMasterBranchCompare}><WorkspaceIcon name="nav-branches" /><span className="pc-nav-label">เปรียบเทียบ 3 สาขา</span></button>
           <button title="นำเข้าสินค้า" aria-label="นำเข้าสินค้า" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="nav-import" /><span className="pc-nav-label">นำเข้าสินค้า</span></button>
-          <button className={engineOpen ? 'is-active' : ''} title="PROCESS ENGINE" aria-label="PROCESS ENGINE" aria-pressed={engineOpen} onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="nav-engine" /><span className="pc-nav-label">PROCESS ENGINE</span></button>
+          <button className={engineOpen ? 'is-active' : ''} ref={engineNavRef} title="PROCESS ENGINE" aria-label="PROCESS ENGINE" aria-pressed={engineOpen} onClick={openProcessEngine}><WorkspaceIcon name="nav-engine" /><span className="pc-nav-label">PROCESS ENGINE</span></button>
           <button className={!engineOpen && toolsOpen ? 'is-active' : ''} title="เครื่องมือทั้งหมด" aria-label="เครื่องมือทั้งหมด" aria-expanded={!engineOpen && toolsOpen} aria-controls="workflow-tools" onClick={() => { setEngineOpen(false); setToolsOpen(value => !value) }}><WorkspaceIcon name="nav-tools" /><span className="pc-nav-label">เครื่องมือทั้งหมด</span></button>
         </nav>
         <div className="pc-rail-bottom"><span className="pc-rail-divider" /><span className="pc-workspace-avatar" title="ANIN Workspace">AN</span></div>
@@ -2369,14 +2406,32 @@ async function confirmUpdatePrices() {
           <div><div className="pc-eyebrow">PRICE CHECKER / {engineOpen ? 'STOCK OPERATIONS' : toolsOpen ? 'TOOLS' : 'PRODUCT OPERATIONS'}</div><h1>{engineOpen ? 'PROCESS ENGINE' : toolsOpen ? 'เครื่องมือทั้งหมด' : catalogOpen ? 'รายการสินค้า' : 'ตรวจและปรับราคาสินค้า'}<span className="pc-heading-dot">.</span></h1>{(engineOpen || toolsOpen) && <p>{engineOpen ? 'เติมสต็อก R01.102 ลงใน Template ที่ Grab อนุมัติ แยกตามสาขา' : 'เลือกหมวดที่ต้องการ แล้วเริ่มงานได้ทันที'}</p>}</div>
           <div className="pc-header-actions">
             <span className="pc-workspace-label">ANIN <i /> WORKSPACE</span>
-            {engineOpen ? <button className="pc-button" onClick={() => { setEngineOpen(false); setToolsOpen(false); setCatalogOpen(true); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" />รายการสินค้า</button> : <><button className="pc-button pc-button-subtle" onClick={openAddProduct}><WorkspaceIcon name="plus" />เพิ่มสินค้า</button><button className="pc-button" onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="engine" />PROCESS ENGINE</button><button className="pc-button" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="settings" />เครื่องมือ</button></>}
+            {engineOpen ? <button className="pc-button" onClick={() => { setEngineOpen(false); setToolsOpen(false); setCatalogOpen(true); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" />รายการสินค้า</button> : <><button className="pc-button pc-button-subtle" onClick={openAddProduct}><WorkspaceIcon name="plus" />เพิ่มสินค้า</button><button className="pc-button" onClick={openProcessEngine}><WorkspaceIcon name="engine" />PROCESS ENGINE</button><button className="pc-button" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="settings" />เครื่องมือ</button></>}
           </div>
         </header>
 
 
 
 
-        {engineOpen && <section className="pe-workspace" aria-label="PROCESS ENGINE workspace" aria-busy={Boolean(engineBusy)}>
+        {engineOpen && <div className="pe-entry-shell">
+          {engineEntry.status !== 'idle' && <div className="pe-entry-overlay" data-state={engineEntry.status}>
+            <div className="pe-entry-panel-wrap">
+              <div className={`pe-entry-card${engineEntry.status === 'error' ? ' is-error' : ''}`} role={engineEntry.status === 'error' ? 'alert' : 'status'} aria-live={engineEntry.status === 'error' ? 'assertive' : 'polite'} aria-atomic="true">
+                {engineEntry.status === 'loading' ? <>
+                  <div className="pe-entry-orbit" aria-hidden="true"><i className="pe-entry-ring outer" /><i className="pe-entry-ring" /><div className="pe-entry-core"><WorkspaceIcon name="database" /></div>{ENGINE_BRANCHES.map((branch, index) => <div className={`pe-entry-track track-${index}`} key={branch}><span className="pe-entry-node">{branch.toUpperCase()}</span></div>)}</div>
+                  <h2>กำลังเชื่อมข้อมูลให้พร้อม</h2>
+                  <p className="pe-entry-caption">{!engineEntry.pending ? 'กำลังโหลด PENDING และตรวจราคา GRAB / Promaxx' : !engineEntry.prices ? 'กำลังอ่านราคา DB ของสินค้า' : 'กำลังอ่านรายการ Template'}</p>
+                  <p className="pe-entry-count">เตรียมข้อมูลพร้อมแล้ว <strong>{Number(engineEntry.pending) + Number(engineEntry.prices) + Number(engineEntry.templates)} / 3</strong></p>
+                  <div className="pe-entry-ticks" aria-hidden="true"><i className={engineEntry.pending ? 'is-done' : ''} /><i className={engineEntry.prices ? 'is-done' : ''} /><i className={engineEntry.templates ? 'is-done' : ''} /></div>
+                </> : <>
+                  <span className="pe-entry-error-icon"><WorkspaceIcon name="alert" /></span>
+                  <h2>โหลดข้อมูลไม่สำเร็จ</h2><p className="pe-entry-caption">{engineEntry.error} กรุณาลองอีกครั้ง</p>
+                  <button className="pc-button pc-button-primary" onClick={() => { engineNavRef.current?.focus(); beginEngineEntry() }}><WorkspaceIcon name="refresh" />ลองอีกครั้ง</button>
+                </>}
+              </div>
+            </div>
+          </div>}
+          <section className="pe-workspace" aria-label="PROCESS ENGINE workspace" aria-busy={Boolean(engineBusy) || engineEntry.status === 'loading'} inert={engineEntry.status !== 'idle'}>
           <div className="pe-notice"><WorkspaceIcon name="clock" /><p>R01.102 และผลลัพธ์เก็บในหน่วยความจำของหน้านี้เท่านั้น <strong>ดาวน์โหลดก่อนรีเฟรชหรือปิดหน้า</strong> · Template เก็บไว้ใน Supabase และใช้ซ้ำได้ทุกวัน</p></div>
           <section className="pe-card" aria-labelledby="pe-reports-heading">
             <div className="pe-card-heading"><div><span className="pc-eyebrow">01 / PREPARE</span><h2 id="pe-reports-heading">ดึงจำนวนสินค้าในระบบ</h2><p>เข้าสู่ระบบก่อนดึงข้อมูล</p></div><button className={`pc-button pe-mssql-button${engineBusy === 'mssql' ? ' is-loading' : ''}`} disabled={Boolean(engineBusy)} aria-busy={engineBusy === 'mssql'} onClick={() => void handleEngineLoadLive()}>
@@ -2450,7 +2505,7 @@ async function confirmUpdatePrices() {
           </section>
 
           <section className="pe-card pe-log-card" aria-labelledby="pe-log-heading"><div className="pe-card-heading"><div><span className="pc-eyebrow">SYSTEM LOG</span><h2 id="pe-log-heading">สถานะการทำงาน</h2></div><button className="pc-button" disabled={Boolean(engineBusy)} onClick={() => { setEngineLog([]); setEngineProgress({ current: 0, total: 0, label: 'รอเริ่มงาน' }) }}>✕ CLEAR</button></div><div className="pe-progress"><label htmlFor="engine-progress" role="status">{engineProgress.label}<span>{engineProgress.current}/{engineProgress.total}</span></label><progress id="engine-progress" value={engineProgress.current} max={engineProgress.total || 1} /></div><div className="pe-log" ref={engineLogRef} role="log" aria-live="polite" aria-relevant="additions"><pre>{engineLog.length ? engineLog.join('\n') : 'พร้อมทำงาน · อัปโหลด R01.102 แล้วกด CHECK'}</pre></div></section>
-        </section>}
+        </section></div>}
 
 
         <dialog className="gc-drawer" ref={grabChangeDialogRef} aria-labelledby="grab-change-title" aria-describedby="grab-change-description" onClose={() => { setGrabChangeOpen(false); grabChangeOpenerRef.current?.focus() }} onCancel={() => setGrabChangeOpen(false)}>
