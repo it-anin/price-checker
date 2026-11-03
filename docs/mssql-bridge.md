@@ -9,7 +9,7 @@ tables. UI strings are Thai and stay Thai; everything else is English.
 
 Contents: 1 When to use · 2 Architecture · 3 Request lifecycle · 4 File map · 5 Security · 6 Data contract ·
 7 Add a new job · 8 Generalizing · 9 Pitfalls learned · 10 Windows runbook · 11 Environment facts · 12 Verification ·
-Appendix A generalized SQL
+Appendix A generalized SQL · Appendix B reading ProMaxx `.REP` files · Appendix C language-neutral agent contract
 
 ---
 
@@ -128,7 +128,9 @@ On start the agent closes requests left `pending/running` by a crash with `error
 Assume small–medium tables and the **same Supabase project** as an existing agent. Order matters.
 
 1. **Define the contract.** Which MSSQL tables/columns, filters, key column, expected row count. If an ERP report already produces
-   this data, read its SQL (PowerBuilder `.REP`/`.FRM` files contain it) and treat that report as the source of truth.
+   this data, read its SQL (PowerBuilder `.REP`/`.FRM` files contain it, see Appendix B) and treat that report as the source of truth.
+   Note that ProMaxx **injects the user's filters at run time** (warehouse, until-date, item): the SQL you read is a template, so decide
+   every filter explicitly (a fixed value, or an allowlisted parameter) and check the result against an export made with the same filters.
 2. **Grant read access.** The DBA grants `SELECT` on exactly the new tables to the agent's login (or creates a separate login per
    project). The current `web_readonly` user can read only `BRANCH, ITEMS, TRANDETAILITEM, TRANEXTRAINFO, TRANS, VOUCHER, WAREHOUSE`.
 3. **Write the fixed query** in a pure module (`buildXQuery(params)`) with **parameters for ids, never string concatenation** of
@@ -171,7 +173,8 @@ The agent still handles one request at a time; different jobs queue naturally. A
 | Symptom / trap | Cause and fix |
 |---|---|
 | Cannot connect to `BigyaMainPC\SQLSERVER` although the port setting looks right | tedious rejects `port` together with `instanceName`. `buildConnectionConfig` sends only `instanceName` when `MSSQL_INSTANCE` is set. A named instance also needs the **SQL Server Browser** service (UDP 1434) or a fixed TCP port. Running the agent on the SQL Server PC with `MSSQL_SERVER=localhost` avoids the firewall. |
-| Totals about 4.5× larger than the ERP report for one branch (242,472.65 vs 54,398.65) | The branch has several warehouses (SRC: 0 `Warehouse`, 1 `Front Store`); the report was exported for one. Set `warehouseIds` per branch and **pin them for every branch**, so a new warehouse cannot silently change numbers. |
+| Totals about 4.5× larger than the ERP report for one branch (242,472.65 vs 54,398.65) | The branch has several warehouses (SRC: 0 `Warehouse`, 1 `Front Store`); the report was exported for one. The `.REP` explains why: its `<fsql>` block ends with `<filter>AND!<warehouse><item></filter>`, i.e. ProMaxx appends the warehouse/item the user picked. Set `warehouseIds` per branch and **pin them for every branch**, so a new warehouse cannot silently change numbers. |
+| Report offers an "until date" filter but our SQL has none | In R01.102 the stock subquery contains `<filter>and!<untildateexcol>H.TRANDATE!…</filter>`. Our fixed query has no `H.TRANDATE` condition, so it returns stock **as of now**, including future-dated documents. It matched the real exports on 2026-11-02; if users ever export "until a past date" it will not. Decide this on purpose (fixed "now", or an allowlisted date parameter) and record it. |
 | `Invalid supabaseUrl: Must be a valid HTTP or HTTPS URL` | `SUPABASE_URL` was missing `https://`, or a key was pasted into it. Format: `https://<project-ref>.supabase.co`, no quotes, no `/rest/v1`. |
 | `Cannot find module …\sync.mjs` | Command run from the wrong folder (repo root instead of `tools\stock-sync`). `--env-file=.env` is also relative to the **current folder**; `run-serve.cmd` does `cd /d "%~dp0"` first. |
 | `Register-ScheduledTask` / `schtasks`: **Access is denied** (0x80070005) | Registering a task as `SYSTEM` needs an **elevated** (Run as administrator) PowerShell. |
@@ -210,6 +213,7 @@ The agent still handles one request at a time; different jobs queue naturally. A
   `FEFFECTSTOCK=1, FSHOWONREPORT=1, FUSED=1, ITEMID NOT IN ('DEPOSIT','DEPOSIT-NV')`; rows with NULL quantity are dropped (zero is kept).
   The rewritten `GROUP BY` query in `tools/stock-sync/query.mjs` matches the exported CSV on every SKU for all three branches.
 - Verified totals on 2026-11-02 for orientation only (stock moves): SRC 5,461 SKUs / 54,398.65 · SSS 3,287 / 25,650 · KKL 4,007 / 20,156.
+- The R01.102 `.REP` header says `<filter>wh-ud-it</filter>`: the report's filter dialog offers **w**are**h**ouse, **u**ntil-**d**ate and **it**em (our reading; not confirmed against the ProMaxx screen). That is why the real exports were restricted to one warehouse per branch.
 - Grab template store ids and file names are in `docs/process-engine.md`.
 
 ## 12. Verification recipe
@@ -342,3 +346,76 @@ commit;
 
 Seed one row per job in `bridge_jobs`, e.g. `insert into public.bridge_jobs (job, cooldown_seconds, expiry_seconds) values ('products', 10, 120);`.
 Call from the browser: `supabase.rpc('request_bridge_job', { p_job: 'products' })`; error codes: `28000` not signed in, `22023` unknown/disabled job.
+
+
+---
+
+## Appendix B: reading a ProMaxx `.REP` file
+
+A `.REP` is a PowerBuilder DataWindow export. It holds the **real SQL** of a ProMaxx report, so it is the best specification for a new
+job. Facts below were checked against `R01.102.REP` (report "R01.102 Onhand inventory by warehouse", DataWindow `d_01102_classic_p22112018`).
+Keep `.REP` files in a **private** repository: they expose internal table and column names.
+
+| Part of the file | What it is |
+|---|---|
+| encoding | UTF-8 **with BOM**, CRLF line endings, Thai text. Strip the BOM, accept CR/LF. |
+| `<SYNTAX>` … `</SYNTAX>` | outer wrapper; starts with `<Header><Vertion>9</Vertion></Header>` |
+| `<fconfig>` | metadata: `<type>REPORT</type>`, titles in three languages (`<langth>`, `<langen>`, `<langch>`) for the group and the report, `<datawindow>` name, `<filter>wh-ud-it</filter>`, page margins |
+| `<dw>` … `</dw>` | the DataWindow source: first line `$PBExportHeader$<name>.srd`, then `release 12.5;` |
+| `datawindow(…)`, `header(…)`, `summary(…)`, `footer(…)`, `detail(…)` | layout bands (ignore for data work) |
+| `table(column=(type=… name=… dbname=…) … retrieve="SELECT …" filter="…" sort="…")` | **column list with types** (e.g. `decimal(4)`, `char(1020)`, `long`) and the **`retrieve` SQL** (a double-quoted string over many lines) |
+| `group(level=n … by=(…))`, `compute(… expression="sum( x for group n )" …)`, `text(…)`, `column(…)`, `line(…)` | grouping, **client-side calculations**, labels, fields. Totals and sums here are computed by ProMaxx, **not by SQL** |
+| `<fsql>` … `</fsql>` (after `</dw>`) | a second copy of the SQL that is **identical except for ProMaxx filter hooks** such as `<filter>and!<untildateexcol>H.TRANDATE!<PLANNO>1</PLANNO></filter>` and `<filter>AND!<warehouse><item></filter>` |
+
+How to use it:
+
+1. Prefer the `<fsql>` copy to see **which filters the user can apply** and where they are injected; use `retrieve=` plus the `column=(…)` list for
+   **column names and types** (`dbname="CF_QUANTITY"` is the alias, `dbname="WAREHOUSE.SYSBRANCHID"` is table-qualified).
+2. Remove PowerBuilder comments that start with `//` (they appear inside the SQL, e.g. `//( V.VOUCHERTYPE <> 'TW' ) AND`). T-SQL does not accept them.
+3. The `filter="not isnull( cf_quantity )"` and `sort="…"` after `retrieve` run **in the client after the query**. Reproduce them yourself
+   (here: an inner join/`GROUP BY` drops items with no movement; zero stays; sort is up to you).
+4. Replace each filter hook with an explicit decision (see Section 9). Never splice user text into the SQL: bind typed parameters for ids and dates.
+5. Rewrite correlated subqueries that run per item × warehouse as one `GROUP BY` join, then prove equivalence with an export (Section 12).
+6. **Stop and tell the owner** if a `.REP` contains a password or connection string. Do not copy it anywhere.
+
+Confirmed in this file: every row of the table above. **Not present in this file** (general PowerBuilder behaviour, check when you meet it):
+retrieval arguments (`arguments=(…)` with `:name` placeholders in the SQL) and `~` escape characters inside the SQL string.
+Our interpretation of the `<untildateexcol>`, `<warehouse>`, `<item>` hooks and of `wh-ud-it` comes from their names and from the exports that matched;
+it is not documented by the vendor, so confirm it on the report's filter screen.
+
+---
+
+## Appendix C: language-neutral agent contract
+
+The web app and the agent only meet in Supabase (Appendix A or the `stock_*` tables), so the agent can be written in any language. The reference
+is Node (`tools/stock-sync`). An agent in another language (for example Go) must behave exactly like this. Items 1-8 mirror `serve.mjs` and `sync.mjs`;
+the REST notes at the end come from the PostgREST documentation and were **not run** in this project.
+
+1. **Start-up recovery.** Close every request still `pending` or `running` as `error` with the message `agent รีสตาร์ทระหว่างดึงข้อมูล`.
+2. **Heartbeat.** Upsert the single row `id = 1` (`last_seen = now()`, `info`) once at start and then every 30 s from a timer that does **not** wait for
+   the request loop, so a long request still looks online. The web app treats the agent as offline after 90 s.
+3. **Poll every 2 s.** Select the oldest `pending` request (`order by requested_at limit 1`).
+4. **Claim atomically.** `update … set status='running', started_at=now() where id=<id> and status='pending'` and read how many rows changed.
+   Zero rows means another process claimed it: do nothing. Never read-then-write.
+5. **Run the job** from a registry of fixed jobs compiled into the agent. The request carries **no SQL and no parameters**; an unknown job is closed as `error`.
+   Run the units of a job (for example branches) concurrently. Each unit returns `{ ok, count | error }` and **never throws**.
+   Per unit: run the fixed read-only query → map (trim, upper-case keys, merge duplicate keys, round to 4 decimals, skip null/non-finite) →
+   **empty result = error, never delete** → upsert in chunks of 1000 (up to 4 at once) on the natural key with one `synced_at` for the whole run →
+   only after all chunks succeeded `delete where <scope> and synced_at < <this run's synced_at>` → write the status row
+   (`synced_at`, `row_count`, `ok=true`, `message=null`). On failure write `ok=false`, `row_count=0`, the reason (≤ 200 chars) and delete nothing.
+6. **Close the request.** `done` with a short summary such as `src 5461, sss 3287, kkl 4007`, or `error` with the reasons joined by ` | ` (≤ 300 chars),
+   and set `finished_at`. Any error status must reach the web app: it shows the message in Thai.
+7. **MSSQL connection failure.** Close the request as `error` (`เชื่อมต่อ MSSQL ไม่สำเร็จ: …`), drop the connection, and reconnect on the next request.
+8. **Never die.** Wrap every loop iteration; log and continue after Supabase or network errors; sleep 2 s between iterations.
+9. **Secrets.** MSSQL password and the service-role key come from `.env` or the environment; never log them.
+10. **Tests.** Cover the mapper, the claim/close logic with a fake Supabase, the empty-result guard, chunking, and the connection-config builder
+    (named instance = no port). Then run the equivalence check against a real ERP export (Section 12).
+
+PostgREST notes (service-role key in both `apikey` and `Authorization: Bearer` headers; **untested here**):
+
+| Need | Request |
+|---|---|
+| Upsert rows | `POST /rest/v1/<table>?on_conflict=<key columns>` with header `Prefer: resolution=merge-duplicates` and a JSON array body |
+| Atomic claim | `PATCH /rest/v1/<requests>?id=eq.<id>&status=eq.pending` with `Prefer: return=representation`; an empty array means "not claimed" |
+| Delete vanished rows | `DELETE /rest/v1/<table>?<scope>=eq.<x>&synced_at=lt.<timestamp>` |
+| Call the web-side function (not needed by the agent) | `POST /rest/v1/rpc/<function>` |
