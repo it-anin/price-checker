@@ -28,6 +28,7 @@ Repository: `it-anin/price-checker`, branch `main`. Next.js 16, React 19, TypeSc
 | Tools, Studio Cards, navigation | `toolGroups` in `app/page.tsx`; [tools guide](docs/tools-studio-cards.md) |
 | Popups, product/image editor | `StudioModal`, `notifyPopup` in `app/page.tsx`; [popup guide](docs/popup-theme.md) |
 | Stock engine and CSV validation | `lib/process-engine.ts`; [engine guide](docs/process-engine.md) |
+| Live MSSQL stock (button, request mailbox, office agent) | `lib/stock-source.ts`, `lib/stock-live.ts`, `tools/stock-sync/`; [bridge guide](docs/mssql-bridge.md), [starter prompt for new projects](docs/mssql-bridge-prompt.md) |
 | GRAB template saves and change review | `lib/grab-template-source.ts`, `lib/grab-template-review.ts`; engine guide |
 | Pending membership, automatic price checks, product Pending column | `lib/pending-sku.ts`, `lib/process-engine-source.ts`; [pending guide](docs/pending-sku.md) |
 | Archived design studies | [archive instructions](design-previews/README.md) |
@@ -58,7 +59,7 @@ Repository: `it-anin/price-checker`, branch `main`. Next.js 16, React 19, TypeSc
 |---|---|
 | GRAB Menu prices | C=price, I=SKU, data from record 3. |
 | Approved GRAB stock template | A=StoreID, C=ITEMNAME, D=ITEMCODE/SKU, E=CURRENTSTOCK, F=MAXSTOCK, P=ITEMSTATUS. No selling price. |
-| R01.102 stock report | E=SKU, G=quantity; skip leading G=`CF_QUANTITY` header. Names `src.csv` / `sss.csv` / `kkl.csv`, case-insensitive. |
+| R01.102 stock report | E=SKU, G=quantity; skip leading G=`CF_QUANTITY` header. Names `src.csv` / `sss.csv` / `kkl.csv`, case-insensitive. Alternative source: live MSSQL via `stockReportFromRows()` (same `StockReport`). |
 | R05.103 Promaxx prices | B=SKU, E=`5` filter, G=price. |
 | R05.105 calculation upload | `handlePriceCalcUpload()` reads raw CF headers: **B=CF_ITEMID (SKU), G=CF_ITEMPRICELEVEL_PRICE**, filtered by **D=CF_BASEMULTIPLE=1, F=CF_LEVELNO=0**. Detect columns by header name, not position. Also accepts the explicit compact A=SKU / E=`0` layout. Regression checks: `tests/price-calc-upload.test.mjs`. |
 | GM MME Excel | A=type, B=name, C=license, D=price, E=SKU, F=image, G=category. |
@@ -75,6 +76,13 @@ Repository: `it-anin/price-checker`, branch `main`. Next.js 16, React 19, TypeSc
 - RUN refreshes prices and PENDING, then reads templates. Invalid/unreadable sources stop processing. PENDING suppresses only its branch; membership changes invalidate previous outputs.
 - R01.102 duplicate quantities sum; reserve defaults: SRC=5, SSS=2, KKL=2. Nonpositive/missing stock is empty. Change only raw E/F/P, preserving all other cells, headers and line endings. Export uses UTF-8 BOM and Bangkok date; DOWNLOAD ALL produces one ZIP.
 - Keep retired `tools` and `grab-popups` previews outside `public` with no live links. Parser changes require regenerating preview modules with `node scripts/build-grab-manager-previews.mjs` and `node scripts/build-grab-popup-previews.mjs`; these must not republish retired galleries.
+
+## Live MSSQL stock
+
+- **ดึงสดจาก MSSQL** (PROCESS ENGINE, `handleEngineLoadLive()`) needs a **signed-in** user. It calls RPC `request_stock_sync()`; the office agent (`node sync.mjs --serve` on BigyaMainPC, Task `Stock Listener`) queries MSSQL at that moment, writes `stock_onhand` / `stock_sync_status`, and closes the `stock_requests` row; the page polls it (`waitForStockRequest`) then `loadStockFromDb()` -> `loadMssqlStock()` -> `stockReportFromRows()`. No timer, no API route.
+- Protection: one open request, 10 s reuse, 2 min expiry, heartbeat (`stock_agent_status`, offline after 90 s -> offer stored data). A failed request keeps loaded reports untouched. CSV upload stays as fallback.
+- Branch mapping SRC=0 (warehouse 1 only), SSS=5, KKL=4 lives in the agent's `.env` (`STOCK_BRANCH_MAP`). Secrets (MSSQL password, service-role key) exist only on the office PC; never commit `.env*`.
+- Migrations `202611020001_stock_onhand.sql` and `202611030001_stock_requests.sql` must be run in Supabase before the button works. Tests: `tests/stock-sync.test.mjs`, `tests/stock-live.test.cjs`, `tests/process-engine.test.cjs`. Agent usage, `--compare` equivalence check and Task Scheduler: `tools/stock-sync/README.md`; architecture and reuse for other tables: [bridge guide](docs/mssql-bridge.md).
 
 ## Commands and environment
 
