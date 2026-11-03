@@ -48,6 +48,8 @@ lib/
 | `branches` | ข้อมูลสาขา (ไม่ได้ใช้ใน main flow) | `id`, `name` |
 | `stock_onhand` | สต็อก R01.102 (CF_QUANTITY) ที่ sync จาก MSSQL | `branch`, `sku`, `qty`, `synced_at` |
 | `stock_sync_status` | สถานะ sync ล่าสุดต่อสาขา | `branch`, `synced_at`, `ok`, `message` |
+| `stock_requests` | คำขอดึงสต็อกสด (1 คำขอเปิดได้ครั้งละ 1) | `id`, `status` (pending/running/done/error), `message`, `finished_at` |
+| `stock_agent_status` | heartbeat ของ agent (แถวเดียว id=1) | `last_seen` |
 
 **Branch field:** ใช้ค่า comma-separated เช่น `"src,kkl,sss"` แทน boolean per branch
 
@@ -177,10 +179,12 @@ D = Math.ceil(B × 1.07)   ← ราคาขาย Grab
 
 ## Stock จาก MSSQL (PROCESS ENGINE)
 
-ปุ่ม **ดึงจาก MSSQL** แทนการอัปโหลด R01.102 CSV (CSV ยังใช้เป็นทางสำรองได้)
+ปุ่ม **ดึงสดจาก MSSQL** ดึงสต็อก R01.102 (`CF_QUANTITY`) สด ๆ ทุกครั้งที่กด แทนการอัปโหลด CSV (CSV ยังใช้เป็นทางสำรองได้) — **ไม่มีการ sync เป็นรอบ**
 
-- Vercel เข้า MSSQL ในออฟฟิศไม่ได้ → `tools/stock-sync/` (Node, รันในออฟฟิศ) อ่าน `CF_QUANTITY` จาก MSSQL แล้ว upsert ลง `stock_onhand`
-- แอปอ่านผ่าน `lib/stock-source.ts` (`loadMssqlStock`, แบ่งหน้า 1,000 แถว) → `stockReportFromRows()` ใน `lib/process-engine.ts` ได้ `StockReport` เหมือนไฟล์ CSV
-- เตือนเมื่อ sync ล่าสุดเกิน 60 นาที หรือ `ok=false` (`stockSyncWarning`)
-- Migration: `supabase/migrations/202611020001_stock_onhand.sql` (anon อ่านได้อย่างเดียว; เขียนด้วย service-role key ที่เครื่อง agent เท่านั้น)
-- ตั้งค่า/วิธีรัน: `tools/stock-sync/README.md`
+- Vercel เข้า MSSQL ในออฟฟิศไม่ได้ → `tools/stock-sync/` (Node, รันบน BigyaMainPC ด้วย `--serve`) รอคำขอจาก Supabase แล้ว query MSSQL ตอนนั้น
+- Flow: ผู้ใช้ที่ **ล็อกอินแล้ว** กดปุ่ม → `handleEngineLoadLive()` → RPC `request_stock_sync()` (`lib/stock-source.ts` `requestLiveStock`) สร้างแถว `stock_requests` → agent claim, query 3 สาขา, เขียน `stock_onhand`/`stock_sync_status`, ปิดคำขอ → เว็บ poll (`waitForStockRequest`, `lib/stock-live.ts`) → `loadStockFromDb()` → `loadMssqlStock()` → `stockReportFromRows()` ได้ `StockReport` เหมือนไฟล์ CSV
+- ยังไม่ล็อกอิน → เปิดฟอร์มเข้าสู่ระบบ (บัญชีเดียวกับ GRAB CSV MANAGER) ไม่เรียก RPC; agent ไม่มี heartbeat เกิน 90 วินาที (`agentOnline`) → ถามว่าจะใช้ข้อมูลที่เก็บไว้ล่าสุดแทนหรือไม่
+- กันกดรัว: RPC ให้คำขอเปิดได้ครั้งละ 1 (คนอื่นกดพร้อมกันใช้ผลเดียวกัน), คำขอที่เพิ่งเสร็จภายใน 10 วินาทีใช้ซ้ำ, คำขอที่ agent ไม่ตอบเกิน 2 นาทีหมดอายุเป็น `error`
+- เตือนเมื่อข้อมูลที่เก็บไว้เก่ากว่า 60 นาที หรือ `ok=false` (`stockSyncWarning`) — ใช้เฉพาะตอนอ่านข้อมูลที่เก็บไว้
+- Migration: `202611020001_stock_onhand.sql`, `202611030001_stock_requests.sql` (anon เขียนไม่ได้; agent เขียนด้วย service-role key ที่เครื่อง agent เท่านั้น)
+- ตั้งค่า/วิธีรัน/Task Scheduler: `tools/stock-sync/README.md`

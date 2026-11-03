@@ -7,7 +7,7 @@
   "scripts": {
     "sync": "node sync.mjs",
     "dry-run": "node sync.mjs --dry-run",
-    "watch": "node sync.mjs --watch"
+    "serve": "node sync.mjs --serve"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.99.0",
