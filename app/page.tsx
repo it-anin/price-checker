@@ -4,7 +4,7 @@ import { useState, useEffect, useEffectEvent, useRef } from 'react'
 import Link from 'next/link'
 import NextImage from 'next/image'
 import { supabase } from '../lib/supabase'
-import { ENGINE_BRANCHES, createResultsZip, decodeCsv, engineDate, normalizeStockSku, parseEngineCsv, pendingSkuSets, processGrabTemplate, readStockReport, templateName, validateGrabTemplateUpload, type EngineBranch, type StockReport } from '../lib/process-engine'
+import { ENGINE_BRANCHES, createResultsZip, decodeCsv, engineDate, normalizeStockSku, parseEngineCsv, pendingSkuSets, processGrabTemplate, templateName, validateGrabTemplateUpload, type EngineBranch, type StockReport } from '../lib/process-engine'
 import { loadPendingSnapshot, savePendingMutation } from '../lib/process-engine-source'
 import { loadAgentLastSeen, loadMssqlStock, requestLiveStock, waitForStockRequest } from '../lib/stock-source'
 import { agentOnline, requestStatusText } from '../lib/stock-live'
@@ -562,34 +562,6 @@ export default function Home() {
       setGrabFilesError(`อ่านรายการ Template ไม่สำเร็จ: ${engineMessage(error)}`)
       return null
     } finally { setGrabFilesLoading(false) }
-  }
-
-  async function handleEngineReports(files: File[]) {
-    if (!files.length || engineBusyRef.current) return
-    engineBusyRef.current = true
-    setEngineBusy('reports')
-    invalidateEngineResults()
-    setEngineChecks(null)
-    const next: Partial<Record<EngineBranch, StockReport>> = {}, problems: string[] = []
-    try {
-      for (const file of files) {
-        try {
-          const decoded = decodeCsv(await file.arrayBuffer())
-          const report = readStockReport(file.name, decoded.text, decoded.encoding)
-          if (next[report.branch]) throw new Error('เลือก R01.102 ของสาขาเดียวกันซ้ำในชุดนี้')
-          next[report.branch] = report
-          logEngine(`UPLOAD ${file.name} · ${report.stock.size} SKUs · ${report.rowCount} แถว · ${decoded.encoding}`)
-        } catch (error) {
-          const problem = `${file.name}: ${engineMessage(error)}`
-          problems.push(problem); logEngine(`BLOCKED ${problem}`)
-          // A rejected replacement must not leave an older report selected.
-          const branch = /^(src|sss|kkl)\.csv$/i.exec(file.name)?.[1].toLowerCase() as EngineBranch | undefined
-          if (branch) setEngineReports(previous => { const copy = { ...previous }; delete copy[branch]; return copy })
-        }
-      }
-      setEngineReports(previous => ({ ...previous, ...next }))
-      if (problems.length) await notifyPopup(`ตรวจไฟล์ R01.102\n\n${problems.join('\n')}`)
-    } finally { engineBusyRef.current = false; setEngineBusy('') }
   }
 
   // Reads the stock already stored in Supabase (the agent's last run). No busy handling here:
@@ -2407,13 +2379,13 @@ async function confirmUpdatePrices() {
         {engineOpen && <section className="pe-workspace" aria-label="PROCESS ENGINE workspace" aria-busy={Boolean(engineBusy)}>
           <div className="pe-notice"><WorkspaceIcon name="clock" /><p>R01.102 และผลลัพธ์เก็บในหน่วยความจำของหน้านี้เท่านั้น <strong>ดาวน์โหลดก่อนรีเฟรชหรือปิดหน้า</strong> · Template เก็บไว้ใน Supabase และใช้ซ้ำได้ทุกวัน</p></div>
           <section className="pe-card" aria-labelledby="pe-reports-heading">
-            <div className="pe-card-heading"><div><span className="pc-eyebrow">01 / PREPARE</span><h2 id="pe-reports-heading">UPLOAD REPORT R01.102</h2><p>ส่งออกสาขาละไฟล์ ตั้งชื่อ src.csv, sss.csv, kkl.csv · รองรับ UTF-8 และ TIS-620 อัตโนมัติ · หรือดึงจากฐานข้อมูล (ต้องเข้าสู่ระบบ)</p></div><button className="pc-button pc-button-primary" disabled={Boolean(engineBusy)} onClick={() => document.getElementById('engineReportInput')?.click()}><WorkspaceIcon name="upload" />UPLOAD R01.102</button><button className={`pc-button pe-mssql-button${engineBusy === 'mssql' ? ' is-loading' : ''}`} disabled={Boolean(engineBusy)} aria-busy={engineBusy === 'mssql'} onClick={() => void handleEngineLoadLive()}>
+            <div className="pe-card-heading"><div><span className="pc-eyebrow">01 / PREPARE</span><h2 id="pe-reports-heading">ดึงจำนวนสินค้าในระบบ</h2><p>เข้าสู่ระบบก่อนดึงข้อมูล</p></div><button className={`pc-button pe-mssql-button${engineBusy === 'mssql' ? ' is-loading' : ''}`} disabled={Boolean(engineBusy)} aria-busy={engineBusy === 'mssql'} onClick={() => void handleEngineLoadLive()}>
                 <span className="pe-mssql-button-icon" aria-hidden="true">{engineBusy === 'mssql' ? <span className="pe-mssql-orbit"><WorkspaceIcon name="database" /></span> : <WorkspaceIcon name="refresh" />}</span>
                 <span>{engineBusy === 'mssql' ? 'กำลังดึงข้อมูล...' : 'ดึงจากฐานข้อมูล'}</span>
-              </button><input hidden id="engineReportInput" type="file" accept=".csv" multiple disabled={Boolean(engineBusy)} onChange={event => { const files = Array.from(event.target.files ?? []); event.target.value = ''; void handleEngineReports(files) }} /></div>
+              </button></div>
             <div className="pe-branch-grid">{ENGINE_BRANCHES.map(branch => {
               const report = engineReports[branch]
-              return <div className={`pe-branch-report ${report ? 'is-ready' : ''}`} key={branch}><div><strong>{branch.toUpperCase()}</strong><span className={`pc-status ${report ? 'pc-status-matched' : 'pc-status-unpriced'}`}>{report ? (report.source === 'mssql' ? 'MSSQL' : 'อัปโหลดแล้ว') : 'รอข้อมูล'}</span></div>{report ? <><b>{report.name}</b><p>{report.stock.size.toLocaleString('th-TH')} SKUs · {report.source === 'mssql' && report.syncedAt ? `ข้อมูล ณ ${new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(report.syncedAt))}` : report.encoding}</p><button className="pc-text-button" disabled={Boolean(engineBusy)} aria-label={`นำรายงาน ${branch.toUpperCase()} ออก`} onClick={() => { setEngineReports(previous => { const next = { ...previous }; delete next[branch]; return next }); setEngineChecks(null); invalidateEngineResults() }}><WorkspaceIcon name="close" />นำไฟล์ออก</button></> : <p>เลือก {branch}.csv หรือกด “ดึงจากฐานข้อมูล”</p>}</div>
+              return <div className={`pe-branch-report ${report ? 'is-ready' : ''}`} key={branch}><div><strong>{branch.toUpperCase()}</strong><span className={`pc-status ${report ? 'pc-status-matched' : 'pc-status-unpriced'}`}>{report ? (report.source === 'mssql' ? 'MSSQL' : 'อัปโหลดแล้ว') : 'รอข้อมูล'}</span></div>{report ? <><b>{report.name}</b><p>{report.stock.size.toLocaleString('th-TH')} SKUs · {report.source === 'mssql' && report.syncedAt ? `ข้อมูล ณ ${new Intl.DateTimeFormat('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(report.syncedAt))}` : report.encoding}</p><button className="pc-text-button" disabled={Boolean(engineBusy)} aria-label={`นำรายงาน ${branch.toUpperCase()} ออก`} onClick={() => { setEngineReports(previous => { const next = { ...previous }; delete next[branch]; return next }); setEngineChecks(null); invalidateEngineResults() }}><WorkspaceIcon name="close" />นำไฟล์ออก</button></> : <p>ดึงจากฐานข้อมูล</p>}</div>
             })}</div>
           </section>
 
