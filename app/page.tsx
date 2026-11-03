@@ -184,6 +184,7 @@ export default function Home() {
   const [inspectionBranch, setInspectionBranch] = useState<BranchKey>('src')
   const [branchFilter, setBranchFilter] = useState<'all' | BranchKey>('all')
   const [priceFilter, setPriceFilter] = useState<'all' | PriceState>('all')
+  const [catalogOpen, setCatalogOpen] = useState(true)
   const [toolsOpen, setToolsOpen] = useState(false)
   const [toolSearch, setToolSearch] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -2179,8 +2180,8 @@ async function confirmUpdatePrices() {
   const normalizedSearch = search.trim().toLowerCase()
   const filteredProducts = products.filter(product =>
     (selectedSheet === 'all' || product['หมวดหมู่สินค้า (CATEGORIES)'] === selectedSheet) &&
-    (branchFilter === 'all' || hasProductBranch(product, branchFilter)) &&
-    (priceFilter === 'all' || priceState(product) === priceFilter) &&
+    (catalogOpen || branchFilter === 'all' || hasProductBranch(product, branchFilter)) &&
+    (catalogOpen || priceFilter === 'all' || priceState(product) === priceFilter) &&
     (!normalizedSearch || String(product['รหัสสินค้า (SKU NUMBER)'] ?? '').toLowerCase().includes(normalizedSearch) || String(product['*ชื่อสินค้า (NAME)'] ?? '').toLowerCase().includes(normalizedSearch))
   )
   const pageSize = 12
@@ -2313,8 +2314,8 @@ async function confirmUpdatePrices() {
       <aside className="pc-rail" aria-label="เมนูหลัก">
         <Link href="/" className="pc-brand" aria-label="Price Checker หน้าหลัก"><WorkspaceIcon name="tag" /></Link>
         <nav>
-          <button className={!engineOpen && !toolsOpen && priceFilter === 'all' ? 'is-active' : ''} title="รายการสินค้า" aria-label="รายการสินค้า" onClick={() => { setEngineOpen(false); setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="nav-products" /><span className="pc-nav-label">รายการสินค้า</span></button>
-          <button className={!engineOpen && !toolsOpen && priceFilter === 'mismatch' ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setEngineOpen(false); setToolsOpen(false); setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="nav-price-check" /><span className="pc-nav-label">ตรวจสอบราคา</span></button>
+          <button className={!engineOpen && !toolsOpen && catalogOpen ? 'is-active' : ''} title="รายการสินค้า" aria-label="รายการสินค้า" onClick={() => { setEngineOpen(false); setToolsOpen(false); setCatalogOpen(true); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="nav-products" /><span className="pc-nav-label">รายการสินค้า</span></button>
+          <button className={!engineOpen && !toolsOpen && !catalogOpen ? 'is-active' : ''} title="ตรวจสอบราคา" aria-label="ตรวจสอบราคา" onClick={() => { setEngineOpen(false); setToolsOpen(false); setCatalogOpen(false); setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}><WorkspaceIcon name="nav-price-check" /><span className="pc-nav-label">ตรวจสอบราคา</span></button>
           <button title="เปรียบเทียบ 3 สาขา" aria-label="เปรียบเทียบ 3 สาขา" onClick={handleMasterBranchCompare}><WorkspaceIcon name="nav-branches" /><span className="pc-nav-label">เปรียบเทียบ 3 สาขา</span></button>
           <button title="นำเข้าสินค้า" aria-label="นำเข้าสินค้า" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="nav-import" /><span className="pc-nav-label">นำเข้าสินค้า</span></button>
           <button className={engineOpen ? 'is-active' : ''} title="PROCESS ENGINE" aria-label="PROCESS ENGINE" aria-pressed={engineOpen} onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="nav-engine" /><span className="pc-nav-label">PROCESS ENGINE</span></button>
@@ -2325,10 +2326,10 @@ async function confirmUpdatePrices() {
 
       <main className="pc-workspace" id="product-workspace">
         <header className="pc-page-header">
-          <div><div className="pc-eyebrow">PRICE CHECKER / {engineOpen ? 'STOCK OPERATIONS' : toolsOpen ? 'TOOLS' : 'PRODUCT OPERATIONS'}</div><h1>{engineOpen ? 'PROCESS ENGINE' : toolsOpen ? 'เครื่องมือทั้งหมด' : 'ตรวจและปรับราคาสินค้า'}<span className="pc-heading-dot">.</span></h1>{(engineOpen || toolsOpen) && <p>{engineOpen ? 'เติมสต็อก R01.102 ลงใน Template ที่ Grab อนุมัติ แยกตามสาขา' : 'เลือกหมวดที่ต้องการ แล้วเริ่มงานได้ทันที'}</p>}</div>
+          <div><div className="pc-eyebrow">PRICE CHECKER / {engineOpen ? 'STOCK OPERATIONS' : toolsOpen ? 'TOOLS' : 'PRODUCT OPERATIONS'}</div><h1>{engineOpen ? 'PROCESS ENGINE' : toolsOpen ? 'เครื่องมือทั้งหมด' : catalogOpen ? 'รายการสินค้า' : 'ตรวจและปรับราคาสินค้า'}<span className="pc-heading-dot">.</span></h1>{(engineOpen || toolsOpen) && <p>{engineOpen ? 'เติมสต็อก R01.102 ลงใน Template ที่ Grab อนุมัติ แยกตามสาขา' : 'เลือกหมวดที่ต้องการ แล้วเริ่มงานได้ทันที'}</p>}</div>
           <div className="pc-header-actions">
             <span className="pc-workspace-label">ANIN <i /> WORKSPACE</span>
-            {engineOpen ? <button className="pc-button" onClick={() => { setEngineOpen(false); setToolsOpen(false); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" />รายการสินค้า</button> : <><button className="pc-button pc-button-subtle" onClick={openAddProduct}><WorkspaceIcon name="plus" />เพิ่มสินค้า</button><button className="pc-button" onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="engine" />PROCESS ENGINE</button><button className="pc-button" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="settings" />เครื่องมือ</button></>}
+            {engineOpen ? <button className="pc-button" onClick={() => { setEngineOpen(false); setToolsOpen(false); setCatalogOpen(true); setPriceFilter('all'); setPageNumber(1) }}><WorkspaceIcon name="box" />รายการสินค้า</button> : <><button className="pc-button pc-button-subtle" onClick={openAddProduct}><WorkspaceIcon name="plus" />เพิ่มสินค้า</button><button className="pc-button" onClick={() => { setEngineOpen(true); setToolsOpen(false) }}><WorkspaceIcon name="engine" />PROCESS ENGINE</button><button className="pc-button" aria-expanded={toolsOpen} aria-controls="workflow-tools" onClick={() => setToolsOpen(value => !value)}><WorkspaceIcon name="settings" />เครื่องมือ</button></>}
           </div>
         </header>
 
@@ -2484,7 +2485,39 @@ async function confirmUpdatePrices() {
           <div className="pc-tools-bottom"><div className="pc-tools-category"><label htmlFor="tools-category">หมวดหมู่สำหรับส่งออกหรือจัดการ</label><select id="tools-category" value={selectedSheet} disabled={loading || savingPrice} onChange={event => { setSelectedSheet(event.target.value); setPageNumber(1) }}><option value="all">เลือกหมวดหมู่</option>{stats.sheets.map(sheet => <option key={sheet.name} value={sheet.name}>{sheet.name} ({sheet.count})</option>)}</select></div><button className="pc-danger-link" disabled={selectedSheet === 'all'} onClick={deleteSelectedCategory}>ลบหมวดหมู่ที่เลือกทุกสาขา</button></div>
         </section>}
 
-        <div className="pc-inspection-grid" hidden={engineOpen || toolsOpen}>
+        {catalogOpen && <section className="pc-catalog" aria-label="รายการสินค้าแบบการ์ด" hidden={engineOpen || toolsOpen}>
+          <h2 className="pc-sr-only">Image Catalogue · รายการสินค้า</h2>
+          <div className="pc-catalog-toolbar">
+            <label className="pc-search pc-catalog-search"><WorkspaceIcon name="search" /><input ref={searchInputRef} type="search" aria-label="ค้นหาสินค้า" placeholder="ค้นหาชื่อสินค้า หรือรหัส SKU..." value={search} disabled={savingPrice} onChange={event => { setSearch(event.target.value); setPageNumber(1) }} /><kbd>⌘ K</kbd></label>
+            <select className="pc-catalog-category" aria-label="หมวดหมู่สินค้า" value={selectedSheet} disabled={savingPrice} onChange={event => { setSelectedSheet(event.target.value); setPageNumber(1) }}><option value="all">ทุกหมวดหมู่</option>{stats.sheets.map(sheet => <option key={sheet.name} value={sheet.name}>{sheet.name} ({sheet.count})</option>)}</select>
+            <button className="pc-icon-button" title="รีเฟรชสินค้า" aria-label="รีเฟรชสินค้า" disabled={loading || savingPrice} onClick={() => search.trim().length >= 3 ? searchProducts(search.trim()) : loadProducts(selectedSheet)}><WorkspaceIcon name="refresh" /></button>
+          </div>
+          <div className="pc-catalog-summary">
+            <label><input type="checkbox" aria-label="เลือกสินค้าทั้งหมดในหน้านี้" disabled={loading || !pageProducts.length} checked={pageProducts.length > 0 && pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)']))} ref={input => { if (input) input.indeterminate = pageProducts.some(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) && !pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) }} onChange={event => setSelectedSkus(previous => { const next = new Set(previous); pageProducts.forEach(product => event.target.checked ? next.add(product['รหัสสินค้า (SKU NUMBER)']) : next.delete(product['รหัสสินค้า (SKU NUMBER)'])); return next })} />เลือกสินค้าในหน้านี้</label>
+            <span>{filteredProducts.length.toLocaleString('th-TH')} รายการ</span>
+          </div>
+          {loadError && <div className="pc-load-error" role="alert"><WorkspaceIcon name="refresh" /><div><strong>โหลดสินค้าไม่สำเร็จ</strong><p>{loadError}</p></div><button className="pc-button" onClick={() => search.trim().length >= 3 ? searchProducts(search.trim()) : loadProducts(selectedSheet)}>ลองใหม่</button></div>}
+          {loading ? <div className="pc-catalog-grid" role="status" aria-label="กำลังโหลดสินค้า">{Array.from({ length: 8 }, (_, index) => <div className="pc-catalog-skeleton" aria-hidden="true" key={index}><i /><span /><span /><b /></div>)}</div> : !loadError && !filteredProducts.length ? <div className="pc-empty"><WorkspaceIcon name="search" /><h3>{search || selectedSheet !== 'all' ? 'ไม่พบสินค้าที่ตรงกับเงื่อนไข' : 'ยังไม่มีรายการสินค้า'}</h3><p>{search || selectedSheet !== 'all' ? 'ลองเปลี่ยนคำค้นหา หรือหมวดหมู่สินค้า' : 'เริ่มต้นด้วยการนำเข้าไฟล์ Excel หรือเพิ่มสินค้าใหม่'}</p>{(search || selectedSheet !== 'all') && <button className="pc-button" onClick={() => { setSearch(''); setSelectedSheet('all'); setPageNumber(1) }}>แสดงสินค้าทั้งหมด</button>}</div> : !loadError && <div className="pc-catalog-grid" role="list" aria-label="สินค้า">
+            {pageProducts.map(product => {
+              const sku = String(product['รหัสสินค้า (SKU NUMBER)'])
+              const name = String(product['*ชื่อสินค้า (NAME)'] || 'ยังไม่ระบุชื่อสินค้า')
+              const category = String(product['หมวดหมู่สินค้า (CATEGORIES)'] || 'ยังไม่ระบุหมวดหมู่')
+              const image = convertDriveLink(product['*รูปภาพสินค้า'] || '')
+              return <article className={`pc-catalog-card${selectedSkus.has(sku) ? ' is-selected' : ''}`} key={sku} role="listitem" data-sku={sku} aria-label={`ข้อมูลสินค้า ${name}`}>
+                <div className="pc-catalog-media">
+                  <span className="pc-catalog-placeholder" aria-hidden="true"><WorkspaceIcon name="box" /><span>รูปสินค้า</span></span>
+                  {image && <NextImage key={image} className="pc-catalog-photo" src={image} alt={name} fill sizes="(max-width: 619px) 90vw, (max-width: 900px) 44vw, (max-width: 1200px) 27vw, 22vw" unoptimized onError={event => { event.currentTarget.hidden = true }} />}
+                  <label className="pc-catalog-selection"><input type="checkbox" aria-label={`เลือก ${name}`} checked={selectedSkus.has(sku)} onChange={event => setSelectedSkus(previous => { const next = new Set(previous); if (event.target.checked) next.add(sku); else next.delete(sku); return next })} /></label>
+                </div>
+                <div className="pc-catalog-body"><span className="pc-catalog-category-tag" title={category}>{category}</span><h3>{name}</h3><p className="pc-catalog-sku"><span>SKU</span> {sku}</p><div className="pc-catalog-price"><span>ราคา DB</span><strong>{formatMoney(product['*ราคาสินค้า'])}</strong></div></div>
+                <footer className="pc-catalog-card-footer"><button className="pc-catalog-edit" aria-label={`แก้ไขสินค้า ${name}`} disabled={savingPrice} onClick={() => { setIsAdding(false); setEditProduct({ ...product, _originalSku: sku }) }}>แก้ไขสินค้า<WorkspaceIcon name="chevron" /></button></footer>
+              </article>
+            })}
+          </div>}
+          <div className="pc-catalog-footer"><span>{selectedSkus.size ? <button className="pc-selected-export" onClick={exportSelectedSkusXlsx}><WorkspaceIcon name="download" />ส่งออกที่เลือก ({selectedSkus.size.toLocaleString('th-TH')})</button> : `${filteredProducts.length ? (currentPage - 1) * pageSize + 1 : 0}–${Math.min(currentPage * pageSize, filteredProducts.length)} จาก ${filteredProducts.length.toLocaleString('th-TH')} รายการที่โหลด`}</span><div className="pc-pagination"><button aria-label="หน้าก่อนหน้า" disabled={currentPage === 1 || loading} onClick={() => setPageNumber(currentPage - 1)}>‹</button><span><b>{currentPage}</b> / {pageCount}</span><button aria-label="หน้าถัดไป" disabled={currentPage === pageCount || loading} onClick={() => setPageNumber(currentPage + 1)}>›</button></div></div>
+        </section>}
+
+        {!catalogOpen && <div className="pc-inspection-grid" hidden={engineOpen || toolsOpen}>
           <section className="pc-list-column" aria-label="รายการสินค้า">
             <div className="pc-search-toolbar"><label className="pc-search"><WorkspaceIcon name="search" /><input ref={searchInputRef} type="search" aria-label="ค้นหาสินค้า" placeholder="ค้นหาชื่อสินค้า หรือรหัส SKU..." value={search} disabled={savingPrice} onChange={event => { setSearch(event.target.value); setPageNumber(1); resetPriceReview() }} /><kbd>⌘ K</kbd></label><button className={`pc-button ${filtersOpen ? 'is-selected' : ''}`} aria-expanded={filtersOpen} aria-controls="product-filters" onClick={() => setFiltersOpen(value => !value)}><WorkspaceIcon name="filter" />ตัวกรอง{(branchFilter !== 'all' || selectedSheet !== 'all') && <span className="pc-count">{Number(branchFilter !== 'all') + Number(selectedSheet !== 'all')}</span>}</button><button className="pc-icon-button pc-refresh" title="รีเฟรชสินค้า" aria-label="รีเฟรชสินค้า" disabled={loading || savingPrice} onClick={() => search.trim().length >= 3 ? searchProducts(search.trim()) : loadProducts(selectedSheet)}><WorkspaceIcon name="refresh" /></button></div>
 
@@ -2533,8 +2566,8 @@ async function confirmUpdatePrices() {
               <button className="pc-edit-details" disabled={savingPrice} onClick={() => { setIsAdding(false); setEditProduct({ ...inspectedProduct, _originalSku: inspectedSku }) }}>แก้ไขรายละเอียดและรูปสินค้า<WorkspaceIcon name="chevron" /></button>
             </> : <div className="pc-inspector-empty"><WorkspaceIcon name="box" /><h2>เลือกสินค้าที่ต้องการตรวจ</h2><p>เลือกสินค้าจากตารางเพื่อดูราคา สาขา และปรับข้อมูลในพื้นที่นี้</p><div className="pc-empty-guide"><span><b>01</b>เลือกสินค้าจากรายการ</span><span><b>02</b>ตรวจราคาและผลต่าง</span><span><b>03</b>ตรวจทานก่อนบันทึก</span></div></div>}
           </aside>
-        </div>
-        <footer className="pc-statusbar"><span role="status" aria-live="polite"><i className={loadError || inspectorError ? 'has-error' : ''} />{status}</span><span>PRICE CHECKER <b>/</b> SPLIT INSPECTOR</span></footer>
+        </div>}
+        <footer className="pc-statusbar"><span role="status" aria-live="polite"><i className={loadError || inspectorError ? 'has-error' : ''} />{status}</span><span>PRICE CHECKER <b>/</b> {engineOpen ? 'PROCESS ENGINE' : toolsOpen ? 'TOOLS' : catalogOpen ? 'IMAGE CATALOGUE' : 'SPLIT INSPECTOR'}</span></footer>
       </main>
 
       {pendingProduct && <StudioModal label="สถานะ Pending แยกสาขา" width={440} onClose={() => setPendingProduct(null)}>
