@@ -1,5 +1,7 @@
 # Starter prompt: build a new "live MSSQL" feature with the bridge pattern
 
+> Building a **search page over ProMaxx data driven by `.REP` report files**? Use the ready-made version: [mssql-bridge-prompt-search.md](mssql-bridge-prompt-search.md).
+
 Use this in a **new project/repository** whose agent cannot read `it-anin/price-checker`. Steps:
 
 1. Copy these files from the `price-checker` repository into the new project (keep paths, or tell the agent where you put them) and
