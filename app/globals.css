@@ -509,6 +509,17 @@ body {
 }
 
 /* Process Engine uses the existing workspace palette and controls. */
+.pe-mssql-button { min-inline-size: 170px; }
+.pe-mssql-button-icon { display: grid; place-items: center; width: 20px; height: 20px; flex-shrink: 0; }
+.pe-mssql-button.is-loading:disabled { opacity: 1; cursor: wait; border-color: #dbb995; background: #fffaf3; color: #a45d24; }
+.pe-mssql-orbit { position: relative; display: grid; place-items: center; width: 20px; height: 20px; }
+.pe-mssql-orbit .pc-icon { width: 12px; height: 12px; opacity: .8; }
+.pe-mssql-orbit::before { content: ''; position: absolute; inset: 0; border: 1px solid currentColor; border-radius: 50%; opacity: .15; }
+.pe-mssql-orbit::after { content: ''; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px; border-radius: 50%; background: currentColor; animation: pe-mssql-orbit 1.5s linear infinite; }
+@keyframes pe-mssql-orbit { from { transform: rotate(0deg) translateX(9px); } to { transform: rotate(360deg) translateX(9px); } }
+@media (prefers-reduced-motion: reduce) {
+  .pe-mssql-orbit::after { animation: none; transform: translateX(9px); }
+}
 .pc-inspection-grid[hidden] { display: none; }
 .pe-workspace { display: grid; gap: 20px; padding-bottom: 24px; }
 .pe-notice { display: flex; align-items: start; gap: 12px; color: #795731; background: #fff0dc; border: 1px solid #ead7ba; border-radius: 10px; padding: 14px 18px; font-size: 12px; }
