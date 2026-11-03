@@ -133,3 +133,72 @@ test('compare CSV reader gives the same stock as the web app readStockReport', (
     assert.deepEqual([...readStockCsv(text)], [...holder.exports.readStockReport('src.csv', text, 'UTF-8').stock])
   }
 })
+
+// ---- serve mode helpers ----
+import { chunkRows } from '../tools/stock-sync/query.mjs'
+import { claimNextRequest, finishRequest, recoverStuckRequests, summarizeResults } from '../tools/stock-sync/serve.mjs'
+
+test('chunkRows splits evenly and rejects bad sizes', () => {
+  assert.deepEqual(chunkRows([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]])
+  assert.deepEqual(chunkRows([], 3), [])
+  assert.throws(() => chunkRows([1], 0), /chunk size/)
+})
+
+test('summarizeResults closes the request as done or error with a short message', () => {
+  assert.deepEqual(
+    summarizeResults([{ branch: 'src', ok: true, count: 5461 }, { branch: 'sss', ok: true, count: 3287 }]),
+    { status: 'done', message: 'src 5461, sss 3287' })
+  const failed = summarizeResults([{ branch: 'src', ok: true, count: 1 }, { branch: 'kkl', ok: false, error: 'timeout' }])
+  assert.equal(failed.status, 'error')
+  assert.equal(failed.message, 'kkl: timeout')
+  assert.equal(summarizeResults([]).status, 'error')
+  assert.ok(summarizeResults([{ branch: 'x', ok: false, error: 'e'.repeat(1000) }]).message.length <= 300)
+})
+
+// Minimal in-memory stand-in for the supabase-js calls serve.mjs makes on stock_requests.
+function fakeSupabase(rows) {
+  const builder = (filters = [], patch = null, order = null, max = Infinity) => {
+    const matching = () => rows.filter(r => filters.every(f => f(r)))
+      .sort((a, b) => (order ? String(a[order]).localeCompare(String(b[order])) : 0)).slice(0, max)
+    const self = {
+      select: () => self,
+      eq: (key, value) => builder([...filters, r => r[key] === value], patch, order, max),
+      in: (key, values) => builder([...filters, r => values.includes(r[key])], patch, order, max),
+      order: key => builder(filters, patch, key, max),
+      limit: n => builder(filters, patch, order, n),
+      update: p => builder(filters, p, order, max),
+      maybeSingle: async () => { const hit = matching()[0]; if (hit && patch) Object.assign(hit, patch); return { data: hit ? { id: hit.id } : null, error: null } },
+      then: (resolve) => {
+        const hits = matching()
+        if (patch) hits.forEach(h => Object.assign(h, patch))
+        return Promise.resolve({ data: hits.map(h => ({ id: h.id })), error: null }).then(resolve)
+      },
+    }
+    return self
+  }
+  return { from: () => builder() }
+}
+
+test('claimNextRequest takes the oldest pending request exactly once', async () => {
+  const rows = [
+    { id: 'b', status: 'pending', requested_at: '2026-11-03T00:00:02Z' },
+    { id: 'a', status: 'pending', requested_at: '2026-11-03T00:00:01Z' },
+    { id: 'c', status: 'done', requested_at: '2026-11-03T00:00:00Z' },
+  ]
+  const db = fakeSupabase(rows)
+  assert.deepEqual(await claimNextRequest(db), { id: 'a' })
+  assert.equal(rows.find(r => r.id === 'a').status, 'running')
+  assert.deepEqual(await claimNextRequest(db), { id: 'b' })
+  assert.equal(await claimNextRequest(db), null)
+})
+
+test('finishRequest and recoverStuckRequests update the right rows', async () => {
+  const rows = [{ id: 'x', status: 'running' }, { id: 'y', status: 'pending' }, { id: 'z', status: 'done' }]
+  const db = fakeSupabase(rows)
+  await finishRequest(db, 'x', { status: 'done', message: 'src 1' })
+  assert.deepEqual([rows[0].status, rows[0].message], ['done', 'src 1'])
+  assert.ok(rows[0].finished_at)
+  await recoverStuckRequests(db)
+  assert.equal(rows[1].status, 'error')
+  assert.equal(rows[2].status, 'done')
+})

@@ -42,3 +42,4 @@ next-env.d.ts
 
 tools/stock-sync/node_modules
 compare-*.csv
+tools/stock-sync/*.log

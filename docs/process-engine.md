@@ -51,6 +51,8 @@ npm run build
 
 The migration snapshot contains 320 pending SKUs (SRC=54, SSS=187, KKL=60) and three approved templates, validated locally before packaging. No legacy database configuration or credentials are embedded in the app or migration bundle.
 
-## Stock from MSSQL
+## Stock from MSSQL (live)
 
-PROCESS ENGINE can load R01.102 stock without a CSV: the **ดึงจาก MSSQL** button reads `stock_onhand` / `stock_sync_status` from Supabase, filled by `tools/stock-sync` (runs in the office, reads `CF_QUANTITY` from MSSQL). The result is the same `StockReport` as a CSV upload, so subtract, PENDING and GRAB output are unchanged. Data older than 60 minutes, or a failed last sync, triggers a warning. CSV upload remains available as a fallback.
+PROCESS ENGINE can load R01.102 stock without a CSV. **ดึงสดจาก MSSQL** is for signed-in users (the same account as GRAB CSV MANAGER); anonymous visitors get the login form instead. Pressing it calls the database function `request_stock_sync()`, which creates a `stock_requests` row. The office agent (`tools/stock-sync --serve`) claims it, queries MSSQL at that moment (`CF_QUANTITY`), writes `stock_onhand` / `stock_sync_status` and closes the request; the page polls the request and then reads the fresh rows. The result is the same `StockReport` as a CSV upload, so subtract, PENDING and GRAB output are unchanged.
+
+There is no timer: MSSQL is queried only when someone presses the button. One request runs at a time and a run that finished within 10 seconds is reused, so repeated presses cannot overload ProMaxx. If the agent has sent no heartbeat for 90 seconds the page says it is offline and offers the last stored data (with its age). If the request fails or times out (90 s) the reports already loaded are left untouched and the reason is shown. CSV upload remains available as a fallback.

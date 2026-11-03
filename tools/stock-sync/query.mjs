@@ -77,3 +77,11 @@ export function buildConnectionConfig(env) {
   else config.port = Number(env.MSSQL_PORT || 1433)
   return config
 }
+
+// Split rows into fixed-size chunks (PostgREST accepts ~1000 rows per upsert comfortably).
+export function chunkRows(rows, size) {
+  if (!Number.isInteger(size) || size < 1) throw new Error('chunk size ต้องเป็นจำนวนเต็มตั้งแต่ 1')
+  const chunks = []
+  for (let i = 0; i < rows.length; i += size) chunks.push(rows.slice(i, i + size))
+  return chunks
+}
