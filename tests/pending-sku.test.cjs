@@ -278,6 +278,118 @@ test('automatic pending suppresses only mismatched branches and manual suppressi
   assert.equal(stock('src'), '8')
 })
 
+test('closing a branch removes both sources, keeps other branches/metadata and survives saved reloads and identical price scans', async () => {
+  const checks = pending.buildPendingPriceChecks([product('00001', { src_price: 110, sss_price: 120 })], parsePrice)
+  const initial = pending.mutatePendingEntries(normalize([{ sku: '00001', name: 'keep', branches: ['SRC', 'WRD'], note: true }]), { kind: 'syncPrices', checks }).entries
+  const { state, source } = store(initial)
+  const closed = await source.savePendingMutation({ kind: 'resolveBranch', sku: '00001', branch: 'src', prices: pending.pendingPricePair(checks.get('00001'), 'src') })
+  assert.deepEqual(closed.entries[0].branches, ['SSS', 'WRD'])
+  assert.deepEqual(closed.entries[0].manualBranches, ['WRD'])
+  assert.deepEqual(closed.entries[0].autoPriceBranches, ['SSS'])
+  assert.deepEqual(closed.entries[0].resolvedPrices.src, { grabCents: 11000, promaxxCents: 10000 })
+  assert.equal(closed.entries[0].note, true)
+  const writes = state.writes
+  await source.savePendingMutation({ kind: 'syncPrices', checks })
+  assert.equal(state.writes, writes)
+  const sets = await source.loadPendingSkuSets()
+  assert.equal(sets.src.has('00001'), false)
+  assert.equal(sets.sss.has('00001'), true)
+  assert.equal(initial[0].branches.includes('SRC'), true)
+  assert.equal(initial[0].resolvedPrices, undefined)
+})
+
+test('a fully closed SKU remains outside stock suppression after JSON reload, while legacy empty branches still mean all branches', () => {
+  let entries = syncPrices([], [product('00001', { src_price: 110 })]).entries
+  const check = pending.buildPendingPriceChecks([product('00001', { src_price: 110 })], parsePrice).get('00001')
+  entries = pending.mutatePendingEntries(entries, { kind: 'resolveBranch', sku: '00001', branch: 'src', prices: pending.pendingPricePair(check, 'src') }).entries
+  assert.deepEqual(entries[0].branches, [])
+  const reloaded = normalize(JSON.stringify(entries))
+  const sets = engine.pendingSkuSets(reloaded)
+  assert.ok(Object.values(sets).every(set => set.size === 0))
+  assert.equal(pending.samePendingStockMembership(entries, reloaded), true)
+  assert.equal(engine.pendingSkuSets([{ sku: 'LEGACY', branches: [] }]).src.has('LEGACY'), true)
+  assert.equal(syncPrices(reloaded, [product('00001', { src_price: 110 })]).changed, false)
+})
+
+test('changed GRAB or Promaxx prices reopen only differing branches; a verified match clears the old resolution', () => {
+  const check = pending.buildPendingPriceChecks([product('001', { src_price: 110 })], parsePrice).get('001')
+  const initial = syncPrices([], [product('001', { src_price: 110 })]).entries
+  const closed = pending.mutatePendingEntries(initial, { kind: 'resolveBranch', sku: '001', branch: 'src', prices: pending.pendingPricePair(check, 'src') }).entries
+  for (const prices of [{ src_price: 111 }, { src_price: 110, promaxx_price: 101 }]) {
+    const reopened = syncPrices(closed, [product('001', prices)]).entries[0]
+    assert.ok(reopened.branches.includes('SRC'))
+    assert.equal(reopened.resolvedPrices?.src, undefined)
+  }
+  const matched = syncPrices(closed, [product('001')])
+  assert.deepEqual(matched.entries, [])
+  assert.ok(syncPrices(matched.entries, [product('001', { src_price: 110 })]).entries[0].branches.includes('SRC'))
+})
+
+test('closing uses rounded cents, preserves valid zero and handles missing price pairs until prices become available', () => {
+  const check = pending.buildPendingPriceChecks([product('001', { src_price: 0, promaxx_price: 0.1 })], parsePrice).get('001')
+  let entries = syncPrices([], [product('001', { src_price: 0, promaxx_price: 0.1 })]).entries
+  entries = pending.mutatePendingEntries(entries, { kind: 'resolveBranch', sku: '001', branch: 'src', prices: pending.pendingPricePair(check, 'src') }).entries
+  assert.deepEqual(entries[0].resolvedPrices.src, { grabCents: 0, promaxxCents: 10 })
+  assert.equal(syncPrices(entries, [product('001', { src_price: 0.001, promaxx_price: 0.1001 })]).changed, false)
+  let missing = normalize([{ sku: 'UNKNOWN', branches: ['SRC'] }])
+  missing = pending.mutatePendingEntries(missing, { kind: 'resolveBranch', sku: 'UNKNOWN', branch: 'src', prices: pending.pendingPricePair(undefined, 'src') }).entries
+  assert.equal(syncPrices(missing, []).changed, false)
+  assert.equal(engine.pendingSkuSets(missing).src.size, 0)
+  assert.ok(syncPrices(missing, [product('UNKNOWN', { src_price: 110 })]).entries[0].branches.includes('SRC'))
+})
+
+test('explicit ADD reopens a closed branch and clears only its acknowledged price pair', () => {
+  let entries = normalize([{ sku: '001', branches: [], manualBranches: [], autoPriceBranches: [], resolvedPrices: { src: { grabCents: 11000, promaxxCents: 10000 }, sss: { grabCents: 12000, promaxxCents: 10000 } } }])
+  entries = pending.mutatePendingEntries(entries, { kind: 'add', skus: ['001'], branches: ['src'] }).entries
+  assert.deepEqual(entries[0].branches, ['SRC'])
+  assert.equal(entries[0].resolvedPrices.src, undefined)
+  assert.ok(entries[0].resolvedPrices.sss)
+  entries = syncPrices(entries, [product('001', { src_price: 110, sss_price: 120 })]).entries
+  assert.deepEqual(entries[0].branches, ['SRC'])
+})
+
+test('malformed resolution metadata and contradictory active/closed branches block writes', () => {
+  for (const resolvedPrices of [[], null, { invalid: {} }, { src: {} }, { src: { grabCents: NaN, promaxxCents: 0 } }, { src: { grabCents: '100', promaxxCents: 0 } }]) {
+    assert.throws(() => normalize([{ sku: '001', branches: [], resolvedPrices }]), /ปิดงาน/)
+  }
+  assert.throws(() => normalize([{ sku: '001', branches: ['SRC'], resolvedPrices: { src: { grabCents: 100, promaxxCents: 0 } } }]), /ปิดงาน/)
+})
+
+test('a CAS retry after a peer closes a price mismatch cannot resurrect it from the identical scan', async () => {
+  const checks = pending.buildPendingPriceChecks([product('001', { src_price: 110 })], parsePrice)
+  const { state, source } = store([])
+  state.onWrite = s => {
+    if (s.writes !== 1) return
+    s.entries = [{ sku: '001', name: 'peer', branches: [], manualBranches: [], autoPriceBranches: [], resolvedPrices: { src: { grabCents: 11000, promaxxCents: 10000 } } }]
+    s.updatedAt = '2026-10-30T00:00:00.001Z'
+  }
+  const snapshot = await source.savePendingMutation({ kind: 'syncPrices', checks })
+  assert.deepEqual(snapshot.entries[0].branches, [])
+  assert.ok(snapshot.entries[0].resolvedPrices.src)
+  assert.equal(state.writes, 1)
+})
+
+test('closing retries preserve peer branches and metadata, and failed writes leave pending active', async () => {
+  const { state, source } = store([{ sku: '001', branches: ['SRC'], note: 'keep' }])
+  state.onWrite = s => {
+    if (s.writes !== 1) return
+    s.entries[0].branches.push('SSS', 'WRD')
+    s.updatedAt = '2026-10-30T00:00:00.001Z'
+  }
+  const mutation = { kind: 'resolveBranch', sku: '001', branch: 'src', prices: { grabCents: 11000, promaxxCents: 10000 } }
+  const snapshot = await source.savePendingMutation(mutation)
+  assert.deepEqual(snapshot.entries[0].branches, ['SSS', 'WRD'])
+  assert.equal(snapshot.entries[0].note, 'keep')
+  assert.equal(state.writes, 2)
+  await source.savePendingMutation(mutation)
+  assert.equal(state.writes, 2, 'repeating a close is idempotent')
+  const failed = store([{ sku: '001', branches: ['SRC'] }])
+  failed.state.failWrite = true
+  await assert.rejects(failed.source.savePendingMutation(mutation), /write denied/)
+  assert.deepEqual(failed.state.entries[0].branches, ['SRC'])
+  assert.equal(failed.state.entries[0].resolvedPrices, undefined)
+})
+
 test('product Pending coverage follows the union of manual and automatic branches after edits and price resolution', () => {
   let entries = syncPrices(normalize([{ sku: '001', branches: ['SRC', 'WRD'] }]), [product('001', { src_price: 110, sss_price: 110, kkl_price: 110 })]).entries
   const coverage = () => pending.pendingBranchCoverage('001', engine.pendingSkuSets(entries))

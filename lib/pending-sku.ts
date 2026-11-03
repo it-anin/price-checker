@@ -2,6 +2,7 @@ import { ENGINE_BRANCHES, ENGINE_STORES, normalizeStockSku, parseEngineCsv, vali
 
 export const PENDING_BRANCHES = ['SRC', 'SSS', 'KKL', 'WRD', 'ONN'] as const
 export type PendingBranch = typeof PENDING_BRANCHES[number]
+export interface PendingPricePair { grabCents: number | null; promaxxCents: number | null }
 export interface PendingSkuEntry {
   [key: string]: unknown
   sku: string
@@ -9,6 +10,7 @@ export interface PendingSkuEntry {
   branches: PendingBranch[]
   manualBranches?: PendingBranch[]
   autoPriceBranches?: PendingBranch[]
+  resolvedPrices?: Partial<Record<EngineBranch, PendingPricePair>>
 }
 export interface PendingSnapshot { entries: PendingSkuEntry[]; updatedAt: string }
 export interface PendingPriceCheck {
@@ -21,6 +23,7 @@ export interface PendingPriceCheck {
 export type PendingMutation =
   | { kind: 'add'; skus: string[]; branches: EngineBranch[] }
   | { kind: 'removeBranch'; sku: string; branch: EngineBranch }
+  | { kind: 'resolveBranch'; sku: string; branch: EngineBranch; prices: PendingPricePair }
   | { kind: 'enrichNames'; names: Map<string, string> }
   | { kind: 'syncPrices'; checks: Map<string, PendingPriceCheck> }
 export type PendingPriceParser = (value: string) => number | null
@@ -28,6 +31,19 @@ export interface PendingPriceFile { name: string; prices: Map<string, number>; n
 
 export function parsePendingInput(text: string): string[] {
   return [...new Set(text.split(/[\n\r,;|\t]+/).map(normalizeStockSku).filter(Boolean))]
+}
+
+function validPricePair(value: unknown): value is PendingPricePair {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const pair = value as Record<string, unknown>
+  return ['grabCents', 'promaxxCents'].every(key => pair[key] === null || Number.isSafeInteger(pair[key]))
+}
+
+export function pendingPricePair(check: PendingPriceCheck | undefined, branch: EngineBranch): PendingPricePair {
+  return {
+    grabCents: check?.prices[branch] === undefined ? null : Math.round(check.prices[branch]! * 100),
+    promaxxCents: check?.promaxx === undefined ? null : Math.round(check.promaxx * 100),
+  }
 }
 
 export function normalizePendingEntries(value: unknown): PendingSkuEntry[] {
@@ -43,12 +59,24 @@ export function normalizePendingEntries(value: unknown): PendingSkuEntry[] {
     if (!sku || seen.has(sku)) throw new Error('pending_skus มี SKU ว่างหรือซ้ำ กรุณาตรวจข้อมูลก่อนบันทึก')
     seen.add(sku)
     if (item.branches !== undefined && !Array.isArray(item.branches)) throw new Error(`branches ของ ${sku} ต้องเป็น array`)
+    const resolvedPrices: NonNullable<PendingSkuEntry['resolvedPrices']> = {}
+    if (item.resolvedPrices !== undefined) {
+      if (!item.resolvedPrices || typeof item.resolvedPrices !== 'object' || Array.isArray(item.resolvedPrices)) throw new Error(`สถานะปิดงานของ ${sku} ไม่ถูกต้อง`)
+      for (const [branch, pair] of Object.entries(item.resolvedPrices)) {
+        if (!ENGINE_BRANCHES.includes(branch as EngineBranch) || !validPricePair(pair)) throw new Error(`คู่ราคาที่ปิดงานของ ${sku} ไม่ถูกต้อง`)
+        resolvedPrices[branch as EngineBranch] = { ...pair }
+      }
+    }
     const branches: PendingBranch[] = item.branches?.length
       ? [...new Set<string>(item.branches.map((branch: unknown) => String(branch).trim().toUpperCase()))].map(branch => {
         if (!PENDING_BRANCHES.includes(branch as PendingBranch)) throw new Error(`สาขาของ ${sku} ไม่ถูกต้อง`)
         return branch as PendingBranch
-      }) : ['SRC', 'SSS', 'KKL']
+      }) : Array.isArray(item.branches) && Object.keys(resolvedPrices).length ? [] : ['SRC', 'SSS', 'KKL']
     const entry: PendingSkuEntry = { ...item, sku, name: typeof item.name === 'string' ? item.name : '', branches }
+    if (Object.keys(resolvedPrices).length) {
+      if (Object.keys(resolvedPrices).some(branch => branches.includes(branch.toUpperCase() as PendingBranch))) throw new Error(`สาขาที่ปิดงานของ ${sku} ยังอยู่ใน PENDING`)
+      entry.resolvedPrices = resolvedPrices
+    } else delete entry.resolvedPrices
     if (item.autoPriceBranches !== undefined || item.manualBranches !== undefined) {
       const readSource = (value: unknown, activeOnly: boolean): PendingBranch[] => {
         if (!Array.isArray(value) || value.some(branch => !PENDING_BRANCHES.includes(branch) || (activeOnly && !ENGINE_BRANCHES.includes(String(branch).toLowerCase() as EngineBranch)))) throw new Error(`ที่มาของ PENDING ${sku} ไม่ถูกต้อง`)
@@ -95,7 +123,7 @@ export function buildPendingPriceChecks(products: Record<string, unknown>[], par
 
 export function mutatePendingEntries(entries: PendingSkuEntry[], mutation: PendingMutation) {
   let changed = false
-  let next = entries.map(entry => ({ ...entry, branches: [...entry.branches] }))
+  let next = entries.map(entry => ({ ...entry, branches: [...entry.branches], ...(entry.resolvedPrices ? { resolvedPrices: { ...entry.resolvedPrices } } : {}) }))
   if (mutation.kind === 'add') {
     if (!mutation.branches.length || mutation.branches.some(branch => !ENGINE_BRANCHES.includes(branch))) throw new Error('เลือกสาขาอย่างน้อย 1 สาขา')
     const skus = [...new Set(mutation.skus.map(normalizeStockSku).filter(Boolean))]
@@ -104,6 +132,10 @@ export function mutatePendingEntries(entries: PendingSkuEntry[], mutation: Pendi
       const entry = next.find(item => item.sku === sku)
       const selected = mutation.branches.map(branch => branch.toUpperCase() as PendingBranch)
       if (entry) {
+        for (const branch of mutation.branches) {
+          if (entry.resolvedPrices?.[branch]) { delete entry.resolvedPrices[branch]; changed = true }
+        }
+        if (entry.resolvedPrices && !Object.keys(entry.resolvedPrices).length) delete entry.resolvedPrices
         const manual = pendingManualBranches(entry)
         const combined = PENDING_BRANCHES.filter(branch => manual.includes(branch) || selected.includes(branch))
         if (combined.some(branch => !manual.includes(branch))) {
@@ -121,14 +153,35 @@ export function mutatePendingEntries(entries: PendingSkuEntry[], mutation: Pendi
       changed = true
       const manual = pendingManualBranches(entry).filter(value => value !== branch)
       const branches = PENDING_BRANCHES.filter(value => manual.includes(value) || entry.autoPriceBranches?.includes(value))
-      return branches.length ? [{ ...entry, branches, ...(entry.autoPriceBranches ? { manualBranches: manual } : {}) }] : []
+      return branches.length || Object.keys(entry.resolvedPrices ?? {}).length ? [{ ...entry, branches, ...(entry.autoPriceBranches ? { manualBranches: manual } : {}) }] : []
     })
+  } else if (mutation.kind === 'resolveBranch') {
+    if (!ENGINE_BRANCHES.includes(mutation.branch) || !validPricePair(mutation.prices)) throw new Error('สาขาหรือคู่ราคาสำหรับปิด PENDING ไม่ถูกต้อง')
+    const sku = normalizeStockSku(mutation.sku), branch = mutation.branch.toUpperCase() as PendingBranch
+    const entry = next.find(item => item.sku === sku)
+    if (entry?.branches.includes(branch)) {
+      entry.manualBranches = pendingManualBranches(entry).filter(value => value !== branch)
+      entry.autoPriceBranches = (entry.autoPriceBranches ?? []).filter(value => value !== branch)
+      entry.branches = PENDING_BRANCHES.filter(value => entry.manualBranches!.includes(value) || entry.autoPriceBranches!.includes(value))
+      entry.resolvedPrices = { ...entry.resolvedPrices, [mutation.branch]: { ...mutation.prices } }
+      changed = true
+    }
   } else if (mutation.kind === 'syncPrices') {
     const bySku = new Map(next.map(entry => [entry.sku, entry]))
     for (const check of mutation.checks.values()) {
       let entry = bySku.get(check.sku)
       const before = entry?.autoPriceBranches ?? []
-      const automatic = ENGINE_BRANCHES.filter(branch => check.states[branch] === 'diff' || (check.states[branch] === 'na' && before.includes(branch.toUpperCase() as PendingBranch))).map(branch => branch.toUpperCase() as PendingBranch)
+      const automatic = ENGINE_BRANCHES.filter(branch => {
+        const pair = pendingPricePair(check, branch)
+        const resolved = entry?.resolvedPrices?.[branch]
+        if (resolved) {
+          if (resolved.grabCents === pair.grabCents && resolved.promaxxCents === pair.promaxxCents) return false
+          delete entry!.resolvedPrices![branch]
+          changed = true
+        }
+        return check.states[branch] === 'diff' || (check.states[branch] === 'na' && before.includes(branch.toUpperCase() as PendingBranch))
+      }).map(branch => branch.toUpperCase() as PendingBranch)
+      if (entry?.resolvedPrices && !Object.keys(entry.resolvedPrices).length) delete entry.resolvedPrices
       if (automatic.length === before.length && automatic.every(branch => before.includes(branch))) continue
       changed = true
       if (!entry) {
@@ -140,7 +193,7 @@ export function mutatePendingEntries(entries: PendingSkuEntry[], mutation: Pendi
       entry.branches = PENDING_BRANCHES.filter(branch => entry!.manualBranches!.includes(branch) || automatic.includes(branch))
       if (!entry.name.trim() && check.name) entry.name = check.name
     }
-    next = next.filter(entry => entry.branches.length)
+    next = next.filter(entry => entry.branches.length || Object.keys(entry.resolvedPrices ?? {}).length)
   } else {
     next = next.map(entry => {
       const name = mutation.names.get(entry.sku)?.trim()

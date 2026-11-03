@@ -143,6 +143,19 @@ test('empty branches and absent product data never download an empty or misleadi
   }
 })
 
+test('closed price acknowledgements are excluded from exports without excluding remaining active branches', async () => {
+  const saved = [
+    { ...entry('CLOSED', []), manualBranches: [], autoPriceBranches: [], resolvedPrices: { src: { grabCents: 100, promaxxCents: 0 } } },
+    { ...entry('OTHER', ['SSS']), resolvedPrices: { src: { grabCents: 100, promaxxCents: 0 } } },
+  ]
+  const h = harness(saved, [product('CLOSED'), product('OTHER')])
+  await h.run('src')
+  assert.equal(h.state.files.length, 0)
+  assert.equal(h.state.calls.length, 0)
+  await h.run('sss')
+  assert.deepEqual(XLSX.utils.sheet_to_json(h.state.files[0].wb.Sheets.TEMPLATE).map(row => row['รหัสสินค้า']), ['OTHER'])
+})
+
 test('snapshot errors, failed product batches and malformed replies prevent partial downloads and allow retry', async () => {
   const entries = Array.from({ length: 301 }, (_, index) => entry(String(index)))
   for (const options of [{ snapshotError: true }, { failSku: '300' }, { badBody: true }]) {

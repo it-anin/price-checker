@@ -783,6 +783,8 @@ body {
 .pn-row-mismatch td { background: #fff4f0; }
 .pn-price-diff { color: #aa3c2d; font-weight: 700; }
 .pn-difference { color: #aa3c2d; font-weight: 700; margin-left: 8px; }
+.pn-reason { display: inline-block; padding: 4px 8px; border-radius: 5px; background: #edf2e7; color: #647453; font-size: 11px; }
+.pn-reason.is-automatic { background: #fff0e4; color: #9b5526; }
 .pn-delete { border: 1px solid #e1c9c0; border-radius: 6px; color: #a15039; padding: 6px 10px; min-height: 34px; font: 700 10px Arial,sans-serif !important; background: white; }
 .pn-delete:hover:not(:disabled) { background: #fff1e9; border-color: #bd7c65; }
 .pn-no-name { color: #949985; font-size: 11px; }

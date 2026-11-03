@@ -320,7 +320,8 @@ export function pendingSkuSets(raw: unknown): Record<EngineBranch, Set<string>> 
     if (item.branches !== undefined && !Array.isArray(item.branches)) throw new Error(`pending_skus: branches ของ ${sku} ต้องเป็น array`)
     // Legacy records without branches apply to all three active branches.
     // Preserve WRD/ONN membership without making those records active elsewhere.
-    const branches: string[] = item.branches?.length ? item.branches.map((branch: unknown) => String(branch).trim().toLowerCase()) : [...ENGINE_BRANCHES]
+    const closed = Array.isArray(item.branches) && !item.branches.length && item.resolvedPrices && typeof item.resolvedPrices === 'object' && !Array.isArray(item.resolvedPrices) && Object.keys(item.resolvedPrices).length > 0
+    const branches: string[] = closed ? [] : item.branches?.length ? item.branches.map((branch: unknown) => String(branch).trim().toLowerCase()) : [...ENGINE_BRANCHES]
     if (branches.some(branch => ![...ENGINE_BRANCHES, 'wrd', 'onn'].includes(branch))) throw new Error(`pending_skus: สาขาของ ${sku} ไม่ถูกต้อง`)
     for (const branch of ENGINE_BRANCHES) if (branches.includes(branch)) result[branch].add(sku)
   }
