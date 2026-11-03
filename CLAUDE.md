@@ -188,3 +188,4 @@ D = Math.ceil(B × 1.07)   ← ราคาขาย Grab
 - เตือนเมื่อข้อมูลที่เก็บไว้เก่ากว่า 60 นาที หรือ `ok=false` (`stockSyncWarning`) — ใช้เฉพาะตอนอ่านข้อมูลที่เก็บไว้
 - Migration: `202611020001_stock_onhand.sql`, `202611030001_stock_requests.sql` (anon เขียนไม่ได้; agent เขียนด้วย service-role key ที่เครื่อง agent เท่านั้น)
 - ตั้งค่า/วิธีรัน/Task Scheduler: `tools/stock-sync/README.md`
+- สถาปัตยกรรมทั้งหมด บทเรียนที่เจอจริง และวิธีนำไปใช้กับตารางอื่น: `docs/mssql-bridge.md`; Prompt สำหรับโปรเจกต์ใหม่: `docs/mssql-bridge-prompt.md`
