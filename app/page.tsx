@@ -27,6 +27,7 @@ interface Stats {
 }
 
 type BranchKey = 'src' | 'kkl' | 'sss'
+const PRODUCT_PAGE_SIZE = 12
 type PriceState = 'mismatch' | 'matched' | 'unpriced' | 'absent'
 type EngineOutput = { name: string; content: string; branch: EngineBranch; total: number; updated: number; matched: number }
 type GrabFileInfo = { name: string; updated_at: string }
@@ -178,6 +179,7 @@ export default function Home() {
   const [cleaningImage, setCleaningImage] = useState(false)
   const editCanvasRef = useRef<HTMLCanvasElement | null>(null)
   const searchReqId = useRef(0)
+  const productRequestAbort = useRef<AbortController | null>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const inspectorRef = useRef<HTMLElement>(null)
   const [activeSku, setActiveSku] = useState<string | null>(null)
@@ -275,17 +277,18 @@ export default function Home() {
   }, [grabChangeOpen])
 
   useEffect(() => {
+    if (!engineOpen && !toolsOpen) return
     void refreshGrabFiles()
     if (engineOpen) setPendingPriceRevision(value => value + 1)
-  }, [engineOpen])
+  }, [engineOpen, toolsOpen])
 
   useEffect(() => {
-    if (engineBusy || engineBusyRef.current || !pendingPriceRevision) return
+    if ((catalogOpen && !engineOpen && !toolsOpen) || engineBusy || engineBusyRef.current || !pendingPriceRevision) return
     const request = `${pendingPriceRevision}:${grabAdminUser ?? 'anonymous'}`
     if (pendingAutoRequest.current === request) return
     pendingAutoRequest.current = request
     void refreshPendingCard()
-  }, [pendingPriceRevision, grabAdminUser, engineBusy])
+  }, [pendingPriceRevision, grabAdminUser, engineBusy, catalogOpen, engineOpen, toolsOpen])
 
   const onSearchCriteriaChange = useEffectEvent(() => {
     if (search.trim().length >= 3) searchProducts(search.trim())
@@ -294,16 +297,20 @@ export default function Home() {
 
   useEffect(() => {
     loadStats()
-    loadMasterCount()
   }, [])
+
+  useEffect(() => {
+    if (toolsOpen) void loadMasterCount()
+  }, [toolsOpen])
 
   useEffect(() => {
     // Invalidate an older request immediately, including during the debounce window.
     searchReqId.current += 1
+    productRequestAbort.current?.abort()
     const timeout = setTimeout(() => {
       onSearchCriteriaChange()
     }, search.trim().length >= 3 ? 250 : 0)
-    return () => { clearTimeout(timeout); searchReqId.current += 1 }
+    return () => { clearTimeout(timeout); searchReqId.current += 1; productRequestAbort.current?.abort() }
   }, [search, selectedSheet])
 
   useEffect(() => {
@@ -824,12 +831,15 @@ export default function Home() {
 
   async function fetchProductList(url: string) {
     const reqId = ++searchReqId.current
+    productRequestAbort.current?.abort()
+    const controller = new AbortController()
+    productRequestAbort.current = controller
     setLoading(true)
     setLoadError('')
     setPriceReview(null)
     setStatus('กำลังโหลดสินค้า...')
     try {
-      const res = await fetch(url)
+      const res = await fetch(url, { signal: controller.signal })
       if (!res.ok) throw new Error('โหลดข้อมูลไม่สำเร็จ')
       const data = await res.json()
       if (!data.success || !Array.isArray(data.products)) throw new Error('โหลดข้อมูลไม่สำเร็จ')
@@ -839,7 +849,7 @@ export default function Home() {
       preloadImages(data.products)
       setStatus(`โหลดสินค้าแล้ว ${data.products.length.toLocaleString('th-TH')} รายการ`)
     } catch {
-      if (reqId !== searchReqId.current) return
+      if (controller.signal.aborted || reqId !== searchReqId.current) return
       setLoadError('ไม่สามารถโหลดสินค้าได้ กรุณาตรวจสอบการเชื่อมต่อแล้วลองอีกครั้ง')
       setStatus('โหลดข้อมูลสินค้าไม่สำเร็จ')
     } finally {
@@ -1255,7 +1265,7 @@ export default function Home() {
   }
 
   function preloadImages(productList: Product[]) {
-    productList.forEach(p => {
+    productList.slice(0, PRODUCT_PAGE_SIZE).forEach(p => {
       const url = convertDriveLink(p['*รูปภาพสินค้า'] || '')
       if (url) {
         const img = new Image()
@@ -2184,7 +2194,7 @@ async function confirmUpdatePrices() {
     (catalogOpen || priceFilter === 'all' || priceState(product) === priceFilter) &&
     (!normalizedSearch || String(product['รหัสสินค้า (SKU NUMBER)'] ?? '').toLowerCase().includes(normalizedSearch) || String(product['*ชื่อสินค้า (NAME)'] ?? '').toLowerCase().includes(normalizedSearch))
   )
-  const pageSize = 12
+  const pageSize = PRODUCT_PAGE_SIZE
   const pageCount = Math.max(1, Math.ceil(filteredProducts.length / pageSize))
   const currentPage = Math.min(pageNumber, pageCount)
   const pageProducts = filteredProducts.slice((currentPage - 1) * pageSize, currentPage * pageSize)
