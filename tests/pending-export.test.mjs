@@ -73,6 +73,7 @@ test('exports only the active branch, unions saved sources once per SKU and uses
   assert.equal(ws.B2.v, 'ชื่อสินค้า 00001')
   assert.equal(ws.C2.v, '000123')
   assert.equal(ws.F2.v, product('00001')['*รูปภาพสินค้า'])
+  assert.equal(ws.F2.l.Target, product('00001')['*รูปภาพสินค้า'])
   assert.equal(ws.A2.v, 'อัปเดตรายการสินค้า')
   assert.equal(ws.D2.z, '#,##0.00')
   assert.equal(ws['!cols'].length, 7)
@@ -80,8 +81,26 @@ test('exports only the active branch, unions saved sources once per SKU and uses
   const reloaded = XLSX.read(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }))
   assert.equal(reloaded.Sheets.TEMPLATE.E2.v, '00001')
   assert.equal(reloaded.Sheets.TEMPLATE.D2.v, 0)
+  assert.equal(reloaded.Sheets.TEMPLATE.F2.l.Target, product('00001')['*รูปภาพสินค้า'])
   assert.equal(h.state.notice.error, false)
   assert.equal(h.state.busy, ''); assert.equal(h.busyRef.current, false)
+})
+
+test('column F preserves full Google Drive URLs as clickable hyperlinks and leaves missing URLs unlinked', async () => {
+  const link = 'https://drive.google.com/file/d/example-id/view?usp=sharing&resourcekey=0-keep-this'
+  const h = harness([entry('LINK'), entry('EMPTY')], [{ ...product('LINK'), '*รูปภาพสินค้า': link }, { ...product('EMPTY'), '*รูปภาพสินค้า': '' }])
+  await h.run('src')
+  const bytes = XLSX.write(h.state.files[0].wb, { type: 'buffer', bookType: 'xlsx' })
+  const reloaded = XLSX.read(bytes)
+  assert.equal(reloaded.Sheets.TEMPLATE.F2.v, link)
+  // SheetJS 0.18 leaves XML entities in parsed hyperlink targets; verify the stored relationship.
+  const zip = XLSX.CFB.read(bytes, { type: 'buffer' })
+  const index = zip.FullPaths.findIndex(path => path.endsWith('worksheets/_rels/sheet1.xml.rels'))
+  assert.ok(index >= 0)
+  const relationships = Buffer.from(zip.FileIndex[index].content).toString('utf8')
+  assert.ok(relationships.includes(`Target="${link.replace(/&/g, '&amp;')}"`))
+  assert.equal(reloaded.Sheets.TEMPLATE.F2.f, undefined)
+  assert.equal(reloaded.Sheets.TEMPLATE.F3?.l, undefined)
 })
 
 test('each export re-reads saved PENDING, and changing branches does not reuse stale membership', async () => {

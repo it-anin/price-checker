@@ -529,7 +529,11 @@ export default function Home() {
       const ws = XLSX.utils.json_to_sheet(rows)
       ws['!cols'] = [16.5, 24.5, 24.5, 24.5, 24.5, 24.5, 33.64].map(wch => ({ wch }))
       ws['!rows'] = [{ hpt: 21 }, ...rows.map(() => ({ hpt: 141 }))]
-      rows.forEach((_, index) => { ws[`D${index + 2}`].z = '#,##0.00' })
+      rows.forEach((row, index) => {
+        ws[`D${index + 2}`].z = '#,##0.00'
+        const imageUrl = String(row['*รูปภาพสินค้า']).trim()
+        if (/^https?:\/\//i.test(imageUrl)) ws[`F${index + 2}`].l = { Target: imageUrl, Tooltip: 'เปิดรูปภาพสินค้า' }
+      })
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'TEMPLATE')
       XLSX.writeFile(wb, `GM MME PENDING ${branchName} ${engineDate()}.xlsx`)
