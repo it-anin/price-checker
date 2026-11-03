@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="th" data-paused="false">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>MSSQL — 10 Loading Button Designs</title>
+<style>
+:root{--paper:#f6f3ed;--ink:#3d3329;--muted:#74786b;--line:#dfdfd3;--accent:#b86721;--accent-dark:#955018;--soft:#fcf0df;--green:#4d7657;--green-soft:#edf5eb;--font:"Noto Sans Thai","Leelawadee UI",Tahoma,system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.7 var(--font);-webkit-font-smoothing:antialiased}button{font:inherit;cursor:pointer}button:disabled{cursor:wait}button:focus-visible,a:focus-visible{outline:3px solid #bd783b;outline-offset:4px}button svg{width:16px;height:16px;flex-shrink:0}svg{fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}.svg-library{position:absolute;width:0;height:0;overflow:hidden}.shell{width:min(1380px,100%);margin:auto;padding:26px 32px 28px}.masthead{display:flex;align-items:center;justify-content:space-between;padding-bottom:24px;border-bottom:1px solid var(--line);gap:20px}.brand{display:flex;align-items:center;gap:12px;font:600 11px/1.4 Arial,sans-serif;letter-spacing:1.6px}.brand-mark{width:34px;height:34px;background:var(--accent);color:white;border-radius:10px;display:grid;place-items:center}.brand-mark svg{width:19px;height:19px}.brand-sub{display:block;font-size:9px;letter-spacing:1.3px;color:var(--muted);margin-top:5px}.top-actions{display:flex;align-items:center;gap:16px}.edition{font:10px Arial,sans-serif;letter-spacing:1.2px;color:var(--muted)}.ghost{display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid var(--line);border-radius:8px;background:#ffffffa8;color:var(--ink);padding:8px 12px;font-size:11px;min-height:36px}.ghost:hover{border-color:#c4aa8a;background:#fff}.hero{display:flex;align-items:center;justify-content:space-between;gap:40px;padding:29px 0 27px}.eyebrow{font:600 9px Arial,sans-serif;letter-spacing:1.7px;text-transform:uppercase;color:var(--accent);margin-bottom:9px}h1{margin:0 0 8px;font-size:clamp(25px,2.8vw,37px);line-height:1.45;letter-spacing:-.7px;font-weight:700}h1 .dot{color:var(--accent)}.hero-copy p{margin:0;color:var(--muted);font-size:12px}.original{display:flex;align-items:center;gap:17px;flex-shrink:0;padding:17px 19px;border:1px dashed #d6d3c6;border-radius:12px}.original>div>span{display:block;color:var(--muted);font-size:10px}.original-label{font:600 9px Arial,sans-serif;letter-spacing:1.1px;margin-bottom:3px}.original-button{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;min-height:40px;padding:9px 13px;border:1px solid #dce1d6;background:white;border-radius:8px;font-size:11px;font-weight:700}.original-button svg{width:14px;height:14px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;background:#eceadf;border:1px solid #e3e0d4;padding:10px 12px;border-radius:12px;margin-bottom:21px}.state-controls{display:flex;align-items:center;gap:4px;flex-wrap:wrap}.control-label{font-size:10px;color:var(--muted);margin:0 9px 0 4px}.state-choice{border:0;border-radius:7px;padding:8px 11px;background:transparent;color:#79796e;font-size:11px;min-height:35px;white-space:nowrap}.state-choice[aria-pressed="true"]{background:white;color:var(--accent-dark);box-shadow:0 1px 4px #3d33290a;font-weight:700}.toolbar-actions{display:flex;align-items:center;gap:8px}.toolbar .ghost{background:transparent;font-size:10px;min-height:34px;padding:6px 10px;border-color:#d9d6c9}.toolbar .ghost:hover{background:#fff}.toolbar .ghost svg{width:13px;height:13px}.section-head{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:13px}.section-head h2{font-size:12px;margin:0;font-weight:600}.section-head p{font-size:10px;margin:0;color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:15px}.design-card{display:flex;flex-direction:column;min-width:0;border:1px solid #dddfd3;border-radius:13px;background:#fff;overflow:hidden;transition:border-color .2s,box-shadow .2s}.design-card.is-selected{border-color:var(--accent);box-shadow:0 0 0 2px #b867211a}.card-top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:15px 16px 0}.design-number{font:600 10px Arial,sans-serif;letter-spacing:.7px;color:#737b68}.card-state{font-size:10px;color:#897454;display:inline-flex;align-items:center;gap:5px}.card-state:before{content:"";width:4px;height:4px;border-radius:50%;background:var(--accent)}.card-state[data-phase="idle"]{color:#8a8e80}.card-state[data-phase="idle"]:before{background:#b2b7aa}.card-state[data-phase="success"]{color:var(--green)}.card-state[data-phase="success"]:before{background:var(--green)}.stage{min-height:101px;display:flex;align-items:center;justify-content:center;position:relative;padding:18px 14px 12px;background:radial-gradient(ellipse at center,#f8f7f0 0%,#fff 72%)}.card-copy{padding:0 16px 14px}.title-row{display:flex;align-items:center;justify-content:space-between;gap:6px}.card-copy h3{margin:0;font:600 15px/1.5 Arial,sans-serif;letter-spacing:-.2px}.recommend{font-size:9px;color:var(--accent-dark);background:#fff0dc;border:1px solid #f3dfc6;padding:1px 5px;border-radius:4px;white-space:nowrap}.card-copy p{margin:5px 0 0;color:var(--muted);font-size:12px;line-height:1.8;min-height:44px}.card-actions{margin-top:auto;display:flex;justify-content:space-between;gap:6px;border-top:1px solid #efefe8;padding:9px 11px;background:#fdfdfa}.card-actions button{font-size:11px;background:none;border:0;padding:4px 5px;color:#737969;min-height:28px;border-radius:4px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}.card-actions button:hover{color:var(--accent-dark);background:#f6f1e6}.card-actions svg{width:11px;height:11px}.card-actions .choose{margin-left:auto;color:#66705a}.card-actions .choose[aria-pressed="true"]{color:var(--accent);font-weight:700;background:var(--soft)}.footer{display:flex;justify-content:space-between;align-items:center;gap:16px;padding-top:21px;color:var(--muted);font-size:10px}.footer p{margin:0}.selection-status{color:var(--accent-dark)}.legend{display:flex;align-items:center;gap:8px;white-space:nowrap}.legend-dot{width:5px;height:5px;border-radius:50%;background:#abb49d}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+/* The button keeps the same footprint in every request state. */
+.demo-button{--tempo:1s;position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:center;gap:9px;width:184px;max-width:100%;height:43px;padding:8px 12px;border:1px solid #dce1d6;border-radius:8px;background:#fff;color:#4b4237;font:700 11px/1.5 var(--font);white-space:nowrap;overflow:hidden;transition:background .2s,border-color .2s,color .2s,box-shadow .2s}.demo-button:not(:disabled):hover{border-color:#c3ae94;background:#fffaf2}.demo-button[data-state="loading"]{border-color:#dbb995;background:#fffaf3;color:#a45d24}.demo-button[data-state="waiting"]{--tempo:1.7s;border-color:#dfcfb5;background:#fdfaf4;color:#907044}.demo-button[data-state="success"]{border-color:#c6dbc8;background:var(--green-soft);color:var(--green)}.button-visual{position:relative;display:grid;place-items:center;width:20px;height:20px;flex-shrink:0;z-index:2}.button-visual svg{width:17px;height:17px;stroke-width:1.6}.glyph-default,.glyph-motion,.glyph-success{position:absolute;inset:0;display:grid;place-items:center}.glyph-motion,.glyph-success{display:none}.demo-button:is([data-state="loading"],[data-state="waiting"]) .glyph-default{display:none}.demo-button:is([data-state="loading"],[data-state="waiting"]) .glyph-motion{display:grid}.demo-button[data-state="success"] .glyph-default{display:none}.demo-button[data-state="success"] .glyph-success{display:grid}.button-copy{position:relative;z-index:2;display:flex;flex-direction:column;align-items:flex-start;justify-content:center}.button-label{display:block}.fx{display:none;position:absolute;pointer-events:none;z-index:0}.demo-button:is([data-state="loading"],[data-state="waiting"]) .fx{display:block}.branch-tags{display:none}.demo-button[data-state="success"] .glyph-success svg{animation:arrive .25s ease-out both}
+/* 01 — familiar sync icon, continuous rotation. */
+.motion-01:is([data-state="loading"],[data-state="waiting"]) .glyph-motion svg{animation:spin calc(var(--tempo)*1.35) linear infinite}
+/* 02 — three dots, each with its own beat. */
+.motion-02 .glyph-motion .dot-group{display:flex;gap:3px;align-items:center;height:20px}.dot-group i{width:4px;height:4px;border-radius:50%;background:currentColor;animation:dotbeat calc(var(--tempo)*1.2) ease-in-out infinite}.dot-group i:nth-child(2){animation-delay:.15s}.dot-group i:nth-child(3){animation-delay:.3s}
+/* 03 — a quiet light sweep, clipped inside the original button. */
+.motion-03 .sheen{inset:-30% -80%;background:linear-gradient(110deg,transparent 37%,#e9b9762b 46%,#f3d19e70 50%,#e9b9762b 54%,transparent 63%);animation:sweep calc(var(--tempo)*2.4) ease-in-out infinite}.motion-03 .glyph-motion svg{animation:gentle-turn calc(var(--tempo)*2.4) ease-in-out infinite}
+/* 04 — an indeterminate loading rail along the bottom edge. */
+.motion-04 .rail{left:0;right:0;height:2px;bottom:0;background:#eedcc5}.motion-04 .rail:after{content:"";display:block;width:42%;height:100%;background:currentColor;border-radius:5px;animation:rail calc(var(--tempo)*1.65) cubic-bezier(.45,0,.25,1) infinite}
+/* 05 — a dot travels around a small database symbol. */
+.orbit{position:relative;width:20px;height:20px;display:grid;place-items:center}.orbit svg{width:12px;height:12px;opacity:.8}.orbit:after{content:"";position:absolute;left:50%;top:50%;margin:-2px;width:4px;height:4px;border-radius:50%;background:currentColor;animation:orbit calc(var(--tempo)*1.5) linear infinite}.orbit:before{content:"";position:absolute;inset:0;border:1px solid currentColor;border-radius:50%;opacity:.15}
+/* 06 — small data packets move through a receiving channel. */
+.packet-window{position:relative;width:19px;height:21px;border-bottom:1.5px solid currentColor;overflow:hidden}.packet-window:before,.packet-window:after{content:"";position:absolute;bottom:1px;height:5px;width:1.5px;background:currentColor}.packet-window:before{left:0}.packet-window:after{right:0}.packet-window i{position:absolute;left:7px;top:-5px;width:5px;height:4px;background:currentColor;border-radius:1px;animation:packet calc(var(--tempo)*1.6) cubic-bezier(.3,.1,.65,.85) infinite}.packet-window i:nth-child(2){animation-delay:.45s}.packet-window i:nth-child(3){animation-delay:.9s}
+/* 07 — the three branch labels pass the activity cue along. */
+.motion-07:is([data-state="loading"],[data-state="waiting"]) .branch-tags{display:flex;gap:3px;margin-top:2px}.branch-tags i{font:600 7px/1.2 Arial,sans-serif;font-style:normal;letter-spacing:.3px;padding:1px 3px;border-radius:2px;color:#adab99;background:#edece3;animation:branch calc(var(--tempo)*3) ease-in-out infinite}.branch-tags i:nth-child(2){animation-delay:1s}.branch-tags i:nth-child(3){animation-delay:2s}.motion-07 .button-visual svg{width:18px;height:18px}
+/* 08 — low-frequency breathing, without moving the label. */
+.motion-08:is([data-state="loading"],[data-state="waiting"]){animation:breathe calc(var(--tempo)*2.5) ease-in-out infinite}.motion-08 .glyph-motion .breathing-dot{height:7px;width:7px;border-radius:50%;background:currentColor;position:relative}.breathing-dot:after{content:"";position:absolute;inset:-4px;border:1px solid currentColor;border-radius:50%;animation:ripple calc(var(--tempo)*2.5) ease-out infinite}
+/* 09 — five compact signal bars. */
+.signal{height:18px;display:flex;gap:2px;align-items:center}.signal i{height:17px;width:2.5px;border-radius:2px;background:currentColor;transform-origin:center;animation:signal calc(var(--tempo)*1.2) ease-in-out infinite}.signal i:nth-child(2){animation-delay:.15s}.signal i:nth-child(3){animation-delay:.3s}.signal i:nth-child(4){animation-delay:.45s}.signal i:nth-child(5){animation-delay:.6s}
+/* 10 — draw the two sync paths instead of rotating them. */
+.motion-10 .glyph-motion svg{width:19px;height:19px}.motion-10 .glyph-motion path{stroke-dasharray:24 40;animation:draw calc(var(--tempo)*1.8) linear infinite}.motion-10 .glyph-motion path:nth-child(2){animation-delay:.4s}
+@keyframes spin{to{transform:rotate(360deg)}}@keyframes dotbeat{0%,70%,100%{transform:translateY(0);opacity:.3}35%{transform:translateY(-3px);opacity:1}}@keyframes sweep{0%,12%{transform:translateX(-45%)}75%,100%{transform:translateX(45%)}}@keyframes gentle-turn{0%,30%{transform:rotate(0)}75%,100%{transform:rotate(180deg)}}@keyframes rail{0%{transform:translateX(-105%)}100%{transform:translateX(345%)}}@keyframes orbit{from{transform:rotate(0) translateX(9px)}to{transform:rotate(360deg) translateX(9px)}}@keyframes packet{0%{transform:translateY(0);opacity:0}15%{opacity:1}80%{opacity:1}100%{transform:translateY(24px);opacity:0}}@keyframes branch{0%,30%,100%{background:#edece3;color:#adab99}10%,23%{background:#f2d2a8;color:#9b581d}}@keyframes breathe{0%,100%{border-color:#e0cbb4;box-shadow:0 0 0 0 #b8672100}50%{border-color:#be824a;box-shadow:0 0 0 4px #b867210c}}@keyframes ripple{0%{transform:scale(.5);opacity:.7}90%,100%{transform:scale(1.5);opacity:0}}@keyframes signal{0%,100%{transform:scaleY(.3);opacity:.45}45%{transform:scaleY(1);opacity:1}}@keyframes draw{from{stroke-dashoffset:64}to{stroke-dashoffset:0}}@keyframes arrive{from{opacity:0;transform:scale(.65)}to{opacity:1;transform:scale(1)}}
+html[data-paused="true"] .demo-button,html[data-paused="true"] .demo-button *,html[data-paused="true"] .demo-button:before,html[data-paused="true"] .demo-button:after,html[data-paused="true"] .demo-button *:before,html[data-paused="true"] .demo-button *:after{animation-play-state:paused!important}
+@media(min-width:960px) and (max-width:1240px){.grid{grid-template-columns:repeat(3,minmax(0,1fr))}.design-card:last-child{grid-column:2}.hero{gap:22px}.original{padding:14px}.original>div{display:none}}
+@media(min-width:620px) and (max-width:959px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.hero{align-items:flex-start}.original{display:none}.toolbar{align-items:flex-start;flex-direction:column}.toolbar-actions{align-self:flex-end}.hero-copy p{max-width:500px}}
+@media(max-width:619px){.shell{padding:18px 17px 25px}.masthead{padding-bottom:18px}.brand{font-size:9px;gap:9px;letter-spacing:1px}.brand-sub{font-size:8px;letter-spacing:.8px}.brand-mark{height:30px;width:30px}.top-actions .edition{display:none}.top-actions .ghost{font-size:10px;padding:7px 9px}.hero{padding:23px 0}.hero-copy p{font-size:11px}.original{display:none}h1{font-size:26px;letter-spacing:-.5px}.toolbar{flex-direction:column;align-items:stretch;gap:8px;padding:9px}.control-label{display:none}.state-controls{justify-content:space-between;gap:2px}.state-choice{flex:1;font-size:11px;padding:7px 6px}.toolbar-actions{justify-content:space-between}.toolbar-actions .ghost{flex:1}.section-head{align-items:flex-start}.section-head p{max-width:140px;text-align:right;line-height:1.6;font-size:9px}.grid{grid-template-columns:1fr;gap:14px}.card-top{padding:16px 18px 0}.stage{min-height:113px}.demo-button{width:199px;height:45px}.card-copy{padding:0 18px 15px}.card-copy h3{font-size:15px}.card-copy p{font-size:12px;min-height:0}.card-actions{padding:9px 13px}.card-actions button{font-size:11px;min-height:34px}.footer{flex-direction:column;align-items:flex-start;font-size:10px;gap:9px}}
+body.is-solo .shell{max-width:780px}body.is-solo .edition,body.is-solo .original,body.is-solo .section-head,body.is-solo .card-actions .choose,body.is-solo .footer{display:none}body.is-solo .hero{padding:29px 0 24px}body.is-solo .grid{grid-template-columns:1fr;max-width:430px;margin:28px auto}body.is-solo .design-card:last-child{grid-column:auto}body.is-solo .stage{min-height:180px}body.is-solo .card-copy p{min-height:0}body.is-solo .toolbar{flex-direction:column;align-items:stretch}body.is-solo .toolbar-actions{justify-content:center}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<svg class="svg-library" aria-hidden="true"><defs>
+<symbol id="i-sync" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6 6a8 8 0 0 1 13 3M5 15a8 8 0 0 0 13 3"/></symbol>
+<symbol id="i-db" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-4-4 4 4 4-4M5 16v5h14v-5"/></symbol>
+<symbol id="i-code" viewBox="0 0 24 24"><path d="m8 6-6 6 6 6m8-12 6 6-6 6m-3-14-2 16"/></symbol>
+<symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 3h8l10 10-8 8L3 11V3Z"/><circle cx="7.5" cy="7.5" r="1"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="4" r="2"/><circle cx="18" cy="4" r="2"/><circle cx="6" cy="20" r="2"/><path d="M6 6v12m0-6h6a6 6 0 0 0 6-6"/></symbol>
+</defs></svg>
+<div class="shell">
+<header class="masthead">
+ <div class="brand"><span class="brand-mark"><svg aria-hidden="true"><use href="#i-tag"/></svg></span><span>ANIN / PROCESS ENGINE<span class="brand-sub">BUTTON MOTION STUDIES</span></span></div>
+ <div class="top-actions"><span class="edition">10 CONCEPTS · HTML</span><button class="ghost" id="download-gallery"><svg aria-hidden="true"><use href="#i-download"/></svg>บันทึก HTML</button></div>
+</header>
+<section class="hero" aria-labelledby="page-title">
+ <div class="hero-copy"><div class="eyebrow">MSSQL / LOADING & WAITING</div><h1 id="page-title">10 จังหวะสำหรับปุ่ม MSSQL<span class="dot">.</span></h1><p id="hero-description">เลือกแอนิเมชันระหว่างดึงข้อมูลและรอผล ในโทนเดียวกับปุ่มเดิม</p></div>
+ <div class="original"><div><span class="original-label">THE ORIGINAL</span><span>ปุ่มที่ใช้อยู่</span></div><span class="original-button"><svg aria-hidden="true"><use href="#i-sync"/></svg>ดึงสดจาก MSSQL</span></div>
+</section>
+<div class="toolbar" aria-label="ควบคุมตัวอย่าง">
+ <div class="state-controls" role="group" aria-label="เลือกสถานะตัวอย่าง"><span class="control-label">สถานะ</span><button class="state-choice" data-stage="idle" aria-pressed="false">พร้อมใช้งาน</button><button class="state-choice" data-stage="loading" aria-pressed="true">กำลังดึง</button><button class="state-choice" data-stage="waiting" aria-pressed="false">รอผล</button><button class="state-choice" data-stage="success" aria-pressed="false">สำเร็จ</button></div>
+ <div class="toolbar-actions"><button class="ghost" id="play-all"><svg aria-hidden="true"><use href="#i-play"/></svg>ลองครบทุกสถานะ</button><button class="ghost" id="pause-motion" aria-pressed="false"><svg aria-hidden="true"><use href="#i-pause"/></svg><span>พักการเคลื่อนไหว</span></button></div>
+</div>
+<div class="section-head"><h2>แบบที่อยากลองใช้</h2><p>กด “ลองเล่น” เพื่อดูหนึ่งรอบการทำงาน</p></div>
+<main class="grid" id="design-grid" aria-label="แอนิเมชันปุ่ม MSSQL 10 แบบ"></main>
+<footer class="footer"><p id="selection-status" class="selection-status">เลือกแบบที่ชอบ แล้วบอกหมายเลขเพื่อนำไปใช้กับปุ่มจริง</p><p class="legend"><span class="legend-dot"></span>เดโมจำลอง · เปิดดูแบบออฟไลน์ได้</p></footer>
+<div id="announcement" class="sr-only" role="status" aria-live="polite"></div>
+</div>
+<script>
+'use strict';
+const designs = [
+ {id:'01',name:'Sync Spin',slug:'sync-spin',note:'หมุนไอคอนเดิมอย่างต่อเนื่อง เรียบง่ายและคุ้นเคย',recommended:true,visual:'<svg><use href="#i-sync"/></svg>'},
+ {id:'02',name:'Dot Rhythm',slug:'dot-rhythm',note:'สามจุดขยับสลับจังหวะ เห็นการทำงานได้ชัดเจน',visual:'<span class="dot-group"><i></i><i></i><i></i></span>'},
+ {id:'03',name:'Soft Shimmer',slug:'soft-shimmer',note:'แสงอ่อนกวาดผ่านปุ่ม ให้ความรู้สึกเบาและต่อเนื่อง',visual:'<svg><use href="#i-sync"/></svg>',effect:'<span class="fx sheen"></span>'},
+ {id:'04',name:'Loading Rail',slug:'loading-rail',note:'เส้นวิ่งใต้ปุ่ม บอกสถานะโดยไม่ขยับข้อความ',visual:'<svg><use href="#i-sync"/></svg>',effect:'<span class="fx rail"></span>'},
+ {id:'05',name:'Data Orbit',slug:'data-orbit',note:'จุดโคจรรอบฐานข้อมูล สื่อถึงการเชื่อมต่อที่ยังทำงาน',visual:'<span class="orbit"><svg><use href="#i-db"/></svg></span>'},
+ {id:'06',name:'Packet Flow',slug:'packet-flow',note:'แพ็กเก็ตเล็กเลื่อนลงช่องรับ สื่อถึงข้อมูลที่กำลังเข้ามา',visual:'<span class="packet-window"><i></i><i></i><i></i></span>'},
+ {id:'07',name:'Branch Relay',slug:'branch-relay',note:'จังหวะส่งต่อระหว่าง SRC / KKL / SSS เหมาะกับงานหลายสาขา',visual:'<svg><use href="#i-branch"/></svg>',branches:true},
+ {id:'08',name:'Quiet Pulse',slug:'quiet-pulse',note:'กรอบและจุดค่อย ๆ เปล่งแสง นุ่มนวลสำหรับช่วงรอนาน',visual:'<span class="breathing-dot"></span>'},
+ {id:'09',name:'Signal Bars',slug:'signal-bars',note:'แท่งสัญญาณห้าระดับขยับต่อเนื่อง ดูกระฉับกระเฉง',visual:'<span class="signal"><i></i><i></i><i></i><i></i><i></i></span>'},
+ {id:'10',name:'Path Draw',slug:'path-draw',note:'วาดเส้นลูกศรทีละส่วน ได้จังหวะใหม่จากรูปทรงเดิม',visual:'<svg viewBox="0 0 24 24"><path d="M20 7v5h-5M6 6a8 8 0 0 1 13 3"/><path d="M4 17v-5h5M5 15a8 8 0 0 0 13 3"/></svg>'}
+];
+const phases = {
+ idle:{label:'ดึงสดจาก MSSQL',status:'พร้อมใช้งาน'},
+ loading:{label:'กำลังดึงสด...',status:'กำลังดึงข้อมูล'},
+ waiting:{label:'รอการตอบกลับ...',status:'รอผลจาก MSSQL'},
+ success:{label:'ดึงข้อมูลสำเร็จ',status:'สำเร็จแล้ว'}
+};
+const solo=designs.find(design=>design.id===document.documentElement.dataset.solo);
+const visibleDesigns=solo?[solo]:designs;
+const grid=document.getElementById('design-grid');
+const runs=new Map();
+let currentStage='loading',paused=false,pausedAt=0;
+function icon(name){return '<svg aria-hidden="true"><use href="#i-'+name+'"/></svg>'}
+function card(design){
+ return '<article class="design-card" id="design-'+design.id+'" aria-labelledby="title-'+design.id+'">'+
+  '<div class="card-top"><span class="design-number">'+design.id+' / 10</span><span class="card-state" id="phase-'+design.id+'" data-phase="loading">กำลังดึงข้อมูล</span></div>'+
+  '<div class="stage"><button class="demo-button motion-'+design.id+'" data-demo="'+design.id+'" data-state="loading" disabled aria-busy="true" aria-describedby="phase-'+design.id+'">'+
+  (design.effect||'')+'<span class="button-visual" aria-hidden="true"><span class="glyph-default">'+icon('sync')+'</span><span class="glyph-motion">'+design.visual+'</span><span class="glyph-success">'+icon('check')+'</span></span>'+
+  '<span class="button-copy"><span class="button-label">กำลังดึงสด...</span>'+(design.branches?'<span class="branch-tags" aria-hidden="true"><i>SRC</i><i>KKL</i><i>SSS</i></span>':'')+'</span></button></div>'+
+  '<div class="card-copy"><div class="title-row"><h3 id="title-'+design.id+'">'+design.name+'</h3>'+(design.recommended?'<span class="recommend">แนะนำ</span>':'')+'</div><p>'+design.note+'</p></div>'+
+  '<div class="card-actions"><button data-run="'+design.id+'" aria-label="ลองเล่นแบบ '+design.id+' '+design.name+'">'+icon('play')+'ลองเล่น</button><button data-export="'+design.id+'" aria-label="ดาวน์โหลด HTML แบบ '+design.id+' '+design.name+'">'+icon('code')+'HTML</button><button class="choose" data-choose="'+design.id+'" aria-pressed="false">เลือกแบบนี้</button></div></article>';
+}
+function setCard(id,stage){
+ const button=document.querySelector('[data-demo="'+id+'"]');
+ if(!button)return;
+ const busy=stage==='loading'||stage==='waiting';
+ button.dataset.state=stage;button.disabled=busy;button.setAttribute('aria-busy',String(busy));
+ button.querySelector('.button-label').textContent=phases[stage].label;
+ const status=document.getElementById('phase-'+id);status.dataset.phase=stage;status.textContent=phases[stage].status;
+}
+function setStage(stage){
+ runs.clear();currentStage=stage;
+ visibleDesigns.forEach(design=>setCard(design.id,stage));updateControls();
+ document.getElementById('announcement').textContent='ตัวอย่างทั้งหมด: '+phases[stage].status;
+}
+function updateControls(){
+ document.querySelectorAll('[data-stage]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.stage===currentStage)));
+}
+function runDemo(id){
+ currentStage=null;updateControls();runs.set(id,{started:paused?pausedAt:performance.now(),stage:'loading'});setCard(id,'loading');
+ const design=designs.find(item=>item.id===id);document.getElementById('announcement').textContent='กำลังเล่นตัวอย่าง '+design.name;
+}
+function setPaused(value){
+ const now=performance.now();
+ if(value!==paused){if(value)pausedAt=now;else for(const run of runs.values())run.started+=now-pausedAt;}
+ paused=value;document.documentElement.dataset.paused=String(value);
+ const button=document.getElementById('pause-motion');button.setAttribute('aria-pressed',String(value));
+ button.innerHTML=icon(value?'play':'pause')+'<span>'+(value?'เล่นการเคลื่อนไหว':'พักการเคลื่อนไหว')+'</span>';
+}
+function choose(id,announce=true){
+ visibleDesigns.forEach(design=>{
+  const element=document.getElementById('design-'+design.id),active=design.id===id;
+  element.classList.toggle('is-selected',active);
+  const button=element.querySelector('[data-choose]');button.setAttribute('aria-pressed',String(active));button.textContent=active?'เลือกแล้ว':'เลือกแบบนี้';
+ });
+ const design=designs.find(item=>item.id===id);
+ document.getElementById('selection-status').textContent='เลือกแบบ '+id+' — '+design.name;
+ if(announce){document.getElementById('announcement').textContent='เลือกแบบ '+id+' '+design.name;history.replaceState(null,'','#style-'+id)}
+}
+function exportHtml(id){
+ const design=id?designs.find(item=>item.id===id):null;
+ const copy=document.documentElement.cloneNode(true);
+ if(design)copy.dataset.solo=design.id;else delete copy.dataset.solo;
+ copy.dataset.paused='false';copy.querySelector('title').textContent=design?'MSSQL Loading '+design.id+' — '+design.name:'MSSQL — 10 Loading Button Designs';
+ const blob=new Blob(['<!doctype html>\n'+copy.outerHTML],{type:'text/html;charset=utf-8'});
+ const url=URL.createObjectURL(blob),anchor=document.createElement('a');
+ anchor.href=url;anchor.download=design?'mssql-loading-'+design.id+'-'+design.slug+'.html':'mssql-loading-10-designs.html';
+ document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+if(solo){document.body.classList.add('is-solo');document.getElementById('page-title').textContent=solo.id+' / '+solo.name;document.getElementById('hero-description').textContent=solo.note;grid.setAttribute('aria-label','แอนิเมชันปุ่ม MSSQL แบบ '+solo.id)}
+grid.innerHTML=visibleDesigns.map(card).join('');
+setStage('loading');setPaused(false);
+document.getElementById('selection-status').textContent='เลือกแบบที่ชอบ แล้วบอกหมายเลขเพื่อนำไปใช้กับปุ่มจริง';
+document.querySelectorAll('[data-stage]').forEach(button=>button.addEventListener('click',()=>setStage(button.dataset.stage)));
+document.getElementById('pause-motion').addEventListener('click',()=>setPaused(!paused));
+document.getElementById('play-all').addEventListener('click',()=>visibleDesigns.forEach(design=>runDemo(design.id)));
+document.getElementById('download-gallery').addEventListener('click',()=>exportHtml(solo?.id));
+grid.addEventListener('click',event=>{
+ const button=event.target.closest('button');if(!button)return;
+ if(button.dataset.run)runDemo(button.dataset.run);
+ else if(button.dataset.export)exportHtml(button.dataset.export);
+ else if(button.dataset.choose)choose(button.dataset.choose);
+ else if(button.dataset.demo)runDemo(button.dataset.demo);
+});
+setInterval(()=>{
+ if(paused)return;
+ const now=performance.now();
+ for(const [id,run]of runs){
+  const elapsed=now-run.started,stage=elapsed<2500?'loading':elapsed<5500?'waiting':elapsed<7300?'success':'idle';
+  if(stage!==run.stage){run.stage=stage;setCard(id,stage)}
+  if(stage==='idle')runs.delete(id);
+ }
+},100);
+const savedSelection=location.hash.match(/^#style-(\d{2})$/)?.[1];
+if(savedSelection&&visibleDesigns.some(design=>design.id===savedSelection))choose(savedSelection,false);
+</script>
+</body>
+</html>
