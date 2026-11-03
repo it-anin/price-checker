@@ -2502,11 +2502,12 @@ async function confirmUpdatePrices() {
               const sku = String(product['รหัสสินค้า (SKU NUMBER)'])
               const name = String(product['*ชื่อสินค้า (NAME)'] || 'ยังไม่ระบุชื่อสินค้า')
               const category = String(product['หมวดหมู่สินค้า (CATEGORIES)'] || 'ยังไม่ระบุหมวดหมู่')
-              const image = convertDriveLink(product['*รูปภาพสินค้า'] || '')
+              const imageSource = product['*รูปภาพสินค้า'] || ''
+              const image = convertDriveLink(imageSource)
               return <article className={`pc-catalog-card${selectedSkus.has(sku) ? ' is-selected' : ''}`} key={sku} role="listitem" data-sku={sku} aria-label={`ข้อมูลสินค้า ${name}`}>
                 <div className="pc-catalog-media">
                   <span className="pc-catalog-placeholder" aria-hidden="true"><WorkspaceIcon name="box" /><span>รูปสินค้า</span></span>
-                  {image && <NextImage key={image} className="pc-catalog-photo" src={image} alt={name} fill sizes="(max-width: 619px) 90vw, (max-width: 900px) 44vw, (max-width: 1200px) 27vw, 22vw" unoptimized onError={event => { event.currentTarget.hidden = true }} />}
+                  {image && <a className="pc-catalog-image-link" href={imageSource} target="_blank" rel="noopener noreferrer" aria-label={`เปิดรูปสินค้า ${name} ในแท็บใหม่`} title="เปิดรูปภาพในแท็บใหม่"><NextImage key={image} className="pc-catalog-photo" src={image} alt={name} fill sizes="(max-width: 619px) 90vw, (max-width: 900px) 44vw, (max-width: 1200px) 27vw, 22vw" unoptimized onError={event => { event.currentTarget.hidden = true }} /></a>}
                   <label className="pc-catalog-selection"><input type="checkbox" aria-label={`เลือก ${name}`} checked={selectedSkus.has(sku)} onChange={event => setSelectedSkus(previous => { const next = new Set(previous); if (event.target.checked) next.add(sku); else next.delete(sku); return next })} /></label>
                 </div>
                 <div className="pc-catalog-body"><span className="pc-catalog-category-tag" title={category}>{category}</span><h3>{name}</h3><p className="pc-catalog-sku"><span>SKU</span> {sku}</p><div className="pc-catalog-price"><span>ราคา DB</span><strong>{formatMoney(product['*ราคาสินค้า'])}</strong></div></div>

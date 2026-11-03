@@ -535,6 +535,8 @@ body {
 .pc-catalog-card { min-width: 0; display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--pc-line); border-radius: 12px; background: white; }
 .pc-catalog-card.is-selected { border-color: var(--pc-accent); box-shadow: 0 0 0 2px #b7682614; }
 .pc-catalog-media { position: relative; height: 190px; background: #f1f4ec; }
+.pc-catalog-image-link { position: absolute; inset: 0; display: block; cursor: zoom-in; }
+.pc-catalog-media .pc-catalog-image-link:focus-visible { outline-offset: -4px; }
 .pc-catalog-placeholder { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 9px; color: #9aaa8b; font-size: 11px; }
 .pc-catalog-placeholder .pc-icon { width: 36px; height: 36px; }
 .pc-catalog-photo { object-fit: contain; padding: 18px; background: white; }
