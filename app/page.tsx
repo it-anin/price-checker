@@ -32,6 +32,8 @@ type PriceState = 'mismatch' | 'matched' | 'unpriced' | 'absent'
 type EngineOutput = { name: string; content: string; branch: EngineBranch; total: number; updated: number; matched: number }
 type GrabFileInfo = { name: string; updated_at: string }
 type EngineEntryState = { id: number; status: 'idle' | 'loading' | 'error'; pending: boolean; prices: boolean; templates: boolean; error: string }
+type PendingPromaxxRow = { sku: string; product: Product | null; grab: number | null; promaxx: number | null; ready: boolean; reason: string }
+type PendingPromaxxReview = { branch: EngineBranch; rows: PendingPromaxxRow[]; loading: boolean; error: string }
 type WorkspaceTool = { name: string; detail: string; action: () => void; disabled?: boolean; busy?: boolean }
 
 function WorkspaceIcon({ name, className = '' }: { name: string; className?: string }) {
@@ -244,6 +246,8 @@ export default function Home() {
   const [pendingSaveError, setPendingSaveError] = useState('')
   const [pendingActionNotice, setPendingActionNotice] = useState('')
   const [pendingExportNotice, setPendingExportNotice] = useState<{ error: boolean; message: string } | null>(null)
+  const [pendingPromaxxReview, setPendingPromaxxReview] = useState<PendingPromaxxReview | null>(null)
+  const pendingPromaxxRequest = useRef(0)
   const [pendingProduct, setPendingProduct] = useState<{ sku: string; name: string } | null>(null)
   const [pendingInput, setPendingInput] = useState('')
   const [pendingSelectedBranches, setPendingSelectedBranches] = useState<Record<EngineBranch, boolean>>({ src: true, sss: true, kkl: true })
@@ -527,39 +531,87 @@ export default function Home() {
     setPendingExportNotice(null)
   }
 
-  async function exportPendingGmMmeXlsx(branch: EngineBranch) {
+  async function loadPendingExportProducts(branch: EngineBranch) {
+    const branchName = branch.toUpperCase() as 'SRC' | 'SSS' | 'KKL'
+    const snapshot = await loadPendingSnapshot()
+    const skus = snapshot.entries.filter(entry => entry.branches.includes(branchName)).map(entry => entry.sku)
+    const productsBySku = new Map<string, Product>()
+    for (let offset = 0; offset < skus.length; offset += 1200) {
+      const chunks = Array.from({ length: Math.min(4, Math.ceil((skus.length - offset) / 300)) }, (_, index) => skus.slice(offset + index * 300, offset + (index + 1) * 300))
+      const batches = await Promise.all(chunks.map(async chunk => {
+        const response = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus: chunk }) })
+        if (!response.ok) throw new Error('โหลดข้อมูลสินค้าสำหรับ Export ไม่สำเร็จ กรุณาลองใหม่')
+        const data = await response.json()
+        if (!data.success || !Array.isArray(data.products)) throw new Error('อ่านข้อมูลสินค้าสำหรับ Export ไม่สำเร็จ กรุณาลองใหม่')
+        return data.products as Product[]
+      }))
+      for (const product of batches.flat()) productsBySku.set(normalizeStockSku(product['รหัสสินค้า (SKU NUMBER)']), product)
+    }
+    return { skus, productsBySku }
+  }
+
+  function pendingPromaxxRows(branch: EngineBranch, skus: string[], productsBySku: Map<string, Product>): PendingPromaxxRow[] {
+    return skus.map(sku => {
+      const product = productsBySku.get(sku) ?? null
+      const grab = product ? productPrice(product[`${branch}_price`]) : null
+      const promaxx = product ? productPrice(product.promaxx_price) : null
+      const reason = !product ? 'ไม่พบข้อมูลสินค้า'
+        : !hasProductBranch(product, branch) ? 'ไม่มีสินค้าในสาขานี้'
+        : promaxx === null || promaxx < 0 ? 'ไม่มีราคา PROMAXX ที่ใช้ได้'
+        : grab === null || grab < 0 ? 'ไม่มีราคา GRAB ที่ใช้ได้'
+        : !pricesDiffer(grab, promaxx) ? 'ราคาตรงแล้ว' : ''
+      return { sku, product, grab, promaxx, ready: !reason, reason }
+    })
+  }
+
+  function closePendingPromaxxReview() {
+    pendingPromaxxRequest.current++
+    setPendingPromaxxReview(null)
+  }
+
+  async function reviewPendingPromaxxExport(branch: EngineBranch) {
     if (engineBusyRef.current) return
+    const request = ++pendingPromaxxRequest.current
+    engineBusyRef.current = true; setEngineBusy('pending-price-review'); setPendingExportNotice(null)
+    setPendingPromaxxReview({ branch, rows: [], loading: true, error: '' })
+    try {
+      const { skus, productsBySku } = await loadPendingExportProducts(branch)
+      if (request !== pendingPromaxxRequest.current) return
+      setPendingPromaxxReview({ branch, rows: pendingPromaxxRows(branch, skus, productsBySku), loading: false, error: '' })
+    } catch (error) {
+      if (request === pendingPromaxxRequest.current) setPendingPromaxxReview({ branch, rows: [], loading: false, error: engineMessage(error) })
+    } finally { engineBusyRef.current = false; setEngineBusy('') }
+  }
+
+  async function exportPendingGmMmeXlsx(branch: EngineBranch, review?: PendingPromaxxReview) {
+    if (engineBusyRef.current) return
+    const request = review ? pendingPromaxxRequest.current : null
     engineBusyRef.current = true; setEngineBusy('pending-export'); setPendingExportNotice(null)
+    if (review) setPendingPromaxxReview({ ...review, loading: true, error: '' })
     const branchName = branch.toUpperCase() as 'SRC' | 'SSS' | 'KKL'
     try {
-      const snapshot = await loadPendingSnapshot()
-      const skus = snapshot.entries.filter(entry => entry.branches.includes(branchName)).map(entry => entry.sku)
+      const { skus, productsBySku } = await loadPendingExportProducts(branch)
+      if (review) {
+        if (request !== pendingPromaxxRequest.current) return
+        const rows = pendingPromaxxRows(branch, skus, productsBySku)
+        if (JSON.stringify(rows) !== JSON.stringify(review.rows)) {
+          setPendingPromaxxReview({ branch, rows, loading: false, error: 'ข้อมูล PENDING หรือราคาเปลี่ยนแล้ว กรุณาตรวจทานรายการล่าสุดก่อน Export อีกครั้ง' })
+          return
+        }
+      }
       if (!skus.length) {
         setPendingExportNotice({ error: false, message: `ไม่มี PENDING ที่บันทึกไว้สำหรับ ${branchName}` })
         return
       }
-
-      const productsBySku = new Map<string, Product>()
-      for (let offset = 0; offset < skus.length; offset += 1200) {
-        const chunks = Array.from({ length: Math.min(4, Math.ceil((skus.length - offset) / 300)) }, (_, index) => skus.slice(offset + index * 300, offset + (index + 1) * 300))
-        const batches = await Promise.all(chunks.map(async chunk => {
-          const response = await fetch('/api/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ skus: chunk }) })
-          if (!response.ok) throw new Error('โหลดข้อมูลสินค้าสำหรับ Export ไม่สำเร็จ กรุณาลองใหม่')
-          const data = await response.json()
-          if (!data.success || !Array.isArray(data.products)) throw new Error('อ่านข้อมูลสินค้าสำหรับ Export ไม่สำเร็จ กรุณาลองใหม่')
-          return data.products as Product[]
-        }))
-        for (const product of batches.flat()) productsBySku.set(normalizeStockSku(product['รหัสสินค้า (SKU NUMBER)']), product)
-      }
-
       const missing = skus.filter(sku => !productsBySku.has(sku))
-      const selected = skus.flatMap(sku => {
+      const selected = review ? review.rows.filter(row => row.ready && row.product).map(row => ({ ...row.product!, '*ราคาสินค้า': row.promaxx! })) : skus.flatMap(sku => {
         const product = productsBySku.get(sku)
         return product ? [{ ...product, '*ราคาสินค้า': productPrice(product['*ราคาสินค้า']) ?? '' }] : []
       })
-      if (!selected.length) throw new Error(`ไม่พบข้อมูลสินค้าใน Supabase สำหรับ PENDING ${branchName} (${skus.length} SKU)`)
+      if (!selected.length) throw new Error(review ? 'ไม่มีรายการที่พร้อมปรับราคา GRAB ตาม PROMAXX' : `ไม่พบข้อมูลสินค้าใน Supabase สำหรับ PENDING ${branchName} (${skus.length} SKU)`)
 
       const XLSX = await import('xlsx')
+      if (review && request !== pendingPromaxxRequest.current) return
       const rows = toExportRows(selected)
       const ws = XLSX.utils.json_to_sheet(rows)
       ws['!cols'] = [16.5, 24.5, 24.5, 24.5, 24.5, 24.5, 33.64].map(wch => ({ wch }))
@@ -571,12 +623,16 @@ export default function Home() {
       })
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'TEMPLATE')
-      XLSX.writeFile(wb, `GM MME PENDING ${branchName} ${engineDate()}.xlsx`)
-      const message = `Export PENDING ${branchName} สำเร็จ ${selected.length.toLocaleString('th-TH')}/${skus.length.toLocaleString('th-TH')} รายการ${missing.length ? ` · ไม่พบข้อมูลสินค้า ${missing.length} SKU: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ' …' : ''}` : ''}`
+      const priceSource = review ? 'PROMAXX' : 'DB Cloud'
+      XLSX.writeFile(wb, `GM MME PENDING ${branchName} ${priceSource} ${engineDate()}.xlsx`)
+      const message = `Export PENDING ${branchName} · ราคา ${priceSource} สำเร็จ ${selected.length.toLocaleString('th-TH')}/${skus.length.toLocaleString('th-TH')} รายการ${missing.length ? ` · ไม่พบข้อมูลสินค้า ${missing.length} SKU: ${missing.slice(0, 10).join(', ')}${missing.length > 10 ? ' …' : ''}` : ''}${review ? ' · นำไฟล์ไปปรับราคาบน Grab แล้วนำเข้าราคา GRAB ล่าสุดเพื่อยืนยันผล' : ''}`
       setPendingExportNotice({ error: missing.length > 0, message })
       setStatus(message)
+      if (review) closePendingPromaxxReview()
     } catch (error) {
-      setPendingExportNotice({ error: true, message: `Export PENDING ${branchName} ไม่สำเร็จ: ${engineMessage(error)}` })
+      if (review) {
+        if (request === pendingPromaxxRequest.current) setPendingPromaxxReview({ ...review, loading: false, error: `Export ไม่สำเร็จ: ${engineMessage(error)}` })
+      } else setPendingExportNotice({ error: true, message: `Export PENDING ${branchName} ไม่สำเร็จ: ${engineMessage(error)}` })
     } finally { engineBusyRef.current = false; setEngineBusy('') }
   }
 
@@ -1652,7 +1708,7 @@ async function handleGrabCheck(file: File, branch: 'src' | 'kkl' | 'sss') {
     const dd = String(now.getDate()).padStart(2, '0')
     const mm = String(now.getMonth() + 1).padStart(2, '0')
     const yyyy = now.getFullYear()
-    XLSX.writeFile(wb, `GM MME ${dd}.${mm}.${yyyy}.xlsx`)
+    XLSX.writeFile(wb, `GM MME DB Cloud ${dd}.${mm}.${yyyy}.xlsx`)
   }
 
   function toExportRows(list: Product[]) {
@@ -2247,10 +2303,10 @@ async function confirmUpdatePrices() {
 
   function priceState(product: Product): PriceState {
     if (!hasProductBranch(product, inspectionBranch)) return 'absent'
-    const dbPrice = productPrice(product['*ราคาสินค้า'])
+    const referencePrice = productPrice(product.promaxx_price)
     const branchPrice = productPrice(product[`${inspectionBranch}_price`])
-    if (dbPrice === null || branchPrice === null) return 'unpriced'
-    return pricesDiffer(branchPrice, dbPrice) ? 'mismatch' : 'matched'
+    if (referencePrice === null || branchPrice === null) return 'unpriced'
+    return pricesDiffer(branchPrice, referencePrice) ? 'mismatch' : 'matched'
   }
 
   const priceLabels: Record<PriceState, string> = { mismatch: 'ต้องตรวจ', matched: 'ราคาตรง', unpriced: 'ยังไม่มีราคา', absent: 'ไม่มีในสาขา' }
@@ -2270,11 +2326,12 @@ async function confirmUpdatePrices() {
   const inspectedProduct = filteredProducts.find(product => product['รหัสสินค้า (SKU NUMBER)'] === activeSku) ?? pageProducts[0] ?? null
   const inspectedSku = inspectedProduct?.['รหัสสินค้า (SKU NUMBER)'] as string | undefined
   const originalPrice = productPrice(inspectedProduct?.['*ราคาสินค้า'])
+  const referencePrice = productPrice(inspectedProduct?.promaxx_price)
   const draftPrice = inspectedSku ? (Object.hasOwn(priceDrafts, inspectedSku) ? priceDrafts[inspectedSku] : (originalPrice === null ? '' : originalPrice.toFixed(2))) : ''
   const proposedPrice = productPrice(draftPrice)
   const hasPriceChange = draftPrice.trim() !== '' && proposedPrice !== null && proposedPrice !== originalPrice
   const comparisonPrice = inspectedProduct && hasProductBranch(inspectedProduct, inspectionBranch) ? productPrice(inspectedProduct[`${inspectionBranch}_price`]) : null
-  const priceDifference = comparisonPrice !== null && originalPrice !== null ? comparisonPrice - originalPrice : null
+  const priceDifference = comparisonPrice !== null && referencePrice !== null ? comparisonPrice - referencePrice : null
   const issueCount = products.filter(product => priceState(product) === 'mismatch').length
   const activeReview = priceReview && priceReview.sku === inspectedSku && priceReview.price === proposedPrice ? priceReview : null
 
@@ -2318,7 +2375,7 @@ async function confirmUpdatePrices() {
       setProducts(previous => previous.map(product => product['รหัสสินค้า (SKU NUMBER)'] === review.sku ? { ...product, '*ราคาสินค้า': review.price } : product))
       setPriceDrafts(previous => { const next = { ...previous }; delete next[review.sku]; return next })
       setPriceReview(null)
-      setStatus(`บันทึกราคา ${review.sku} สำเร็จ · ${formatMoney(review.price)}`)
+      setStatus(`บันทึกราคา DB / Cloud ${review.sku} สำเร็จ · ${formatMoney(review.price)}`)
     } catch {
       setInspectorError('บันทึกราคาไม่สำเร็จ ข้อมูลที่กรอกยังอยู่ กรุณาลองอีกครั้ง')
       setStatus('บันทึกราคาไม่สำเร็จ')
@@ -2378,12 +2435,10 @@ async function confirmUpdatePrices() {
   const pendingEntries = pendingSnapshot?.entries.filter(entry => entry.branches.length) ?? []
   const pendingRows = pendingEntries.filter(entry => entry.branches.includes(pendingTab.toUpperCase() as 'SRC' | 'SSS' | 'KKL'))
   const pendingCounts = ENGINE_BRANCHES.map(branch => pendingEntries.filter(entry => entry.branches.includes(branch.toUpperCase() as 'SRC' | 'SSS' | 'KKL')).length)
-  const pendingMismatchCounts = pendingRows.reduce((counts, entry) => {
-    const check = pendingAutoPrices.get(entry.sku), grab = check?.prices[pendingTab]
-    if (comparePendingPrices(grab, pendingDbPrices.loaded ? pendingDbPrices.prices.get(entry.sku) : undefined) === 'diff') counts.database++
-    if (comparePendingPrices(grab, check?.promaxx) === 'diff') counts.promax++
-    return counts
-  }, { database: 0, promax: 0 })
+  const pendingMismatchCount = pendingRows.filter(entry => {
+    const check = pendingAutoPrices.get(entry.sku)
+    return comparePendingPrices(check?.prices[pendingTab], check?.promaxx) === 'diff'
+  }).length
 
   return (
     <div className="pc-app">
@@ -2447,7 +2502,11 @@ async function confirmUpdatePrices() {
           <section className="pe-card pn-card" aria-labelledby="pending-heading" aria-busy={pendingLoading || engineBusy === 'pending' || engineBusy === 'pending-auto' || engineBusy === 'pending-export'}>
             <div className="pe-card-heading">
               <div><span className="pc-eyebrow">02 / PENDING APPROVAL</span><h2 id="pending-heading">PENDING SKU UPDATE <span className="pc-count">{pendingSnapshot ? pendingEntries.length : '—'} SKUs</span></h2><p>ระงับขายแยกสาขา ทั้งรายการราคาไม่ตรงที่เพิ่มอัตโนมัติ และรายการที่เพิ่มเองเพื่อรออนุมัติ</p></div>
-              <div className="pn-heading-actions"><button className="pc-button" disabled={Boolean(engineBusy) || pendingLoading} aria-busy={engineBusy === 'pending-export'} onClick={() => void exportPendingGmMmeXlsx(pendingTab)}><WorkspaceIcon name="download" />{engineBusy === 'pending-export' ? 'กำลัง Export...' : `Export GM MME · ${pendingTab.toUpperCase()}`}</button><button className="pc-button" disabled={Boolean(engineBusy) || pendingLoading} onClick={() => void refreshPendingCard()}><WorkspaceIcon name="refresh" />โหลดรายการใหม่</button>{!grabAdminUser && <button className="pc-button" disabled={Boolean(engineBusy)} aria-expanded={pendingAuthOpen} aria-controls="pending-login" onClick={() => { setPendingAuthOpen(value => !value); setGrabAdminError('') }}>เข้าสู่ระบบเพื่อจัดการ PENDING</button>}</div>
+              <div className="pn-heading-actions">
+                <button className="pc-button pc-button-primary" disabled={Boolean(engineBusy) || pendingLoading} aria-busy={engineBusy === 'pending-price-review'} onClick={() => void reviewPendingPromaxxExport(pendingTab)}><WorkspaceIcon name="download" />Export ปรับราคา GRAB ตาม PROMAXX · {pendingTab.toUpperCase()}</button>
+                <button className="pc-button" disabled={Boolean(engineBusy) || pendingLoading} aria-busy={engineBusy === 'pending-export'} onClick={() => void exportPendingGmMmeXlsx(pendingTab)}><WorkspaceIcon name="download" />{engineBusy === 'pending-export' ? 'กำลัง Export...' : `Export GM MME · DB / Cloud · ${pendingTab.toUpperCase()}`}</button>
+                <button className="pc-button" disabled={Boolean(engineBusy) || pendingLoading} onClick={() => void refreshPendingCard()}><WorkspaceIcon name="refresh" />โหลดรายการใหม่</button>{!grabAdminUser && <button className="pc-button" disabled={Boolean(engineBusy)} aria-expanded={pendingAuthOpen} aria-controls="pending-login" onClick={() => { setPendingAuthOpen(value => !value); setGrabAdminError('') }}>เข้าสู่ระบบเพื่อจัดการ PENDING</button>}
+              </div>
             </div>
             {grabAdminUser && <div className="pe-admin-session"><span>เข้าสู่ระบบแล้ว: {grabAdminUser} · จัดการ PENDING ได้</span><button className="pc-text-button" disabled={Boolean(engineBusy)} onClick={() => void signOutGrabManager()}>ออกจากระบบ</button></div>}
             {pendingAuthOpen && !grabAdminUser && <form id="pending-login" className="pe-admin-login" onSubmit={signInGrabManager}>
@@ -2457,7 +2516,7 @@ async function confirmUpdatePrices() {
             </form>}
             {pendingError && <p className="pe-error" role="alert">{pendingError} · ปิดการแก้ไขเพื่อป้องกันเขียนทับข้อมูลเดิม กรุณาโหลดรายการใหม่</p>}
             {pendingSaveError && <p className="pe-error" role="alert">{pendingSaveError}</p>}
-            <p className="pc-pending-note">Export เฉพาะสาขาที่เปิดอยู่ รวมรายการเพิ่มเองและอัตโนมัติที่บันทึกใน Supabase · ใช้ราคา DB ล่าสุด</p>
+            <p className="pc-pending-note">Export เฉพาะสาขาที่เปิดอยู่ · เลือก PROMAXX เพื่อปรับราคาขาย GRAB หรือ DB / Cloud เพื่อส่งออกราคาบน Cloud</p>
             {pendingActionNotice && <p className="pc-pending-note" role="status">{pendingActionNotice}</p>}
             {pendingExportNotice && <p className={pendingExportNotice.error ? 'pe-error' : 'pc-pending-note'} role={pendingExportNotice.error ? 'alert' : 'status'}>{pendingExportNotice.message}</p>}
             <p className="pn-source-status">{engineBusy === 'pending-auto' ? 'กำลังตรวจราคา GRAB / Promaxx...' : pendingAutoStatus.loaded ? `ตรวจราคาล่าสุด ${pendingAutoStatus.checkedAt}` : 'ยังไม่ได้ตรวจราคา'}</p>
@@ -2468,14 +2527,14 @@ async function confirmUpdatePrices() {
               <label className="pn-input-label" htmlFor="pending-sku-input">SKU ที่ต้องการเพิ่ม<span>ขึ้นบรรทัดใหม่ หรือคั่นด้วย , ; | และ Tab · Enter เพิ่ม · Shift+Enter ขึ้นบรรทัดใหม่</span></label>
               <div className="pn-add-input"><textarea id="pending-sku-input" rows={3} disabled={!pendingCanEdit} placeholder={grabAdminUser ? 'กรอกหรือวาง SKU หลายรายการ...' : 'เข้าสู่ระบบเพื่อเพิ่มรายการ PENDING'} value={pendingInput} onChange={event => setPendingInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); addPendingSkus() } }} /><button className="pc-button pc-button-primary" disabled={!pendingCanEdit || !pendingInput.trim()} onClick={addPendingSkus}>{engineBusy === 'pending' ? 'กำลังบันทึก...' : '+ ADD'}</button></div>
             </div>
-            <p className="pn-price-note">ราคา GRAB / Promaxx ใช้ค่าที่บันทึกจาก “เครื่องมือทั้งหมด” · ราคา DB ใช้ราคาสินค้าปัจจุบัน</p>
+            <p className="pn-price-note">ราคา GRAB ใช้ข้อมูลที่นำเข้าจากแต่ละสาขา · PROMAXX เป็นราคาขายอ้างอิง · DB / Cloud เป็นราคาสำหรับตรวจสอบบน Cloud</p>
             {pendingDbPrices.error && <p className="pe-error" role="alert">{pendingDbPrices.error}</p>}
             <div className="pn-tabs" role="tablist" aria-label="สาขาของ PENDING">{ENGINE_BRANCHES.map((branch, index) => <button key={branch} id={`pending-tab-${branch}`} role="tab" type="button" aria-selected={pendingTab === branch} aria-controls="pending-table-panel" tabIndex={pendingTab === branch ? 0 : -1} className={pendingTab === branch ? 'is-active' : ''} onClick={() => selectPendingBranch(branch)} onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = event.key === 'Home' ? ENGINE_BRANCHES[0] : event.key === 'End' ? ENGINE_BRANCHES[2] : ENGINE_BRANCHES[(index + (event.key === 'ArrowRight' ? 1 : 2)) % 3]; selectPendingBranch(next); document.getElementById(`pending-tab-${next}`)?.focus() } }}>{branch.toUpperCase()} <span>({pendingCounts[index]})</span></button>)}</div>
             <div id="pending-table-panel" role="tabpanel" aria-labelledby={`pending-tab-${pendingTab}`}>
               <h3 className="pn-manual-heading">PENDING · {pendingTab.toUpperCase()} <span className="pc-count">{pendingRows.length} SKUs</span></h3>
               <p className="pn-legend">สาเหตุแสดงที่มาของรายการ · SKU เดียวรวมเป็นหนึ่งแถวต่อสาขา · นำออกจาก PENDING เพื่อยกเลิกพักขายเฉพาะสาขานี้</p>
-              {(pendingMismatchCounts.database > 0 || pendingMismatchCounts.promax > 0) && <p className="pn-mismatch-note" role="status">≠ {pendingTab.toUpperCase()}: ราคา GRAB ไม่ตรงกับ DB {pendingMismatchCounts.database} SKU · ไม่ตรงกับ Promaxx {pendingMismatchCounts.promax} SKU</p>}
-              <div className="pn-table-scroll"><table className="pn-table" aria-label={`รายการ PENDING ${pendingTab.toUpperCase()}`}><thead><tr><th>SKU</th><th>ชื่อสินค้า</th><th>ราคา DB</th><th>GRAB {pendingTab.toUpperCase()}</th><th>Promaxx</th><th>สาเหตุ</th><th>จัดการ</th></tr></thead><tbody>
+              {pendingMismatchCount > 0 && <p className="pn-mismatch-note" role="status">≠ {pendingTab.toUpperCase()}: ราคา GRAB ไม่ตรงกับ PROMAXX {pendingMismatchCount} SKU</p>}
+              <div className="pn-table-scroll"><table className="pn-table" aria-label={`รายการ PENDING ${pendingTab.toUpperCase()}`}><thead><tr><th>SKU</th><th>ชื่อสินค้า</th><th>ราคา DB / Cloud</th><th>GRAB {pendingTab.toUpperCase()}</th><th>PROMAXX</th><th>สาเหตุ</th><th>จัดการ</th></tr></thead><tbody>
                 {pendingRows.map(entry => {
                   const branch = pendingTab.toUpperCase() as 'SRC' | 'SSS' | 'KKL'
                   const check = pendingAutoPrices.get(entry.sku)
@@ -2483,8 +2542,8 @@ async function confirmUpdatePrices() {
                   const manual = pendingManualBranches(entry).includes(branch)
                   const reason = automatic ? `${check?.states[pendingTab] === 'diff' ? 'ราคาไม่ตรง' : 'รอตรวจราคา'}${manual ? ' + เพิ่มเอง' : ''}` : 'เพิ่มเอง'
                   const grab = check?.prices[pendingTab], database = pendingDbPrices.loaded ? pendingDbPrices.prices.get(entry.sku) : undefined, promax = check?.promaxx
-                  const dbDiff = comparePendingPrices(grab, database) === 'diff', promaxDiff = comparePendingPrices(grab, promax) === 'diff'
-                  return <tr key={entry.sku} data-pending-sku={entry.sku} className={dbDiff || promaxDiff ? 'pn-row-mismatch' : ''}><td><code>{entry.sku}</code></td><td>{entry.name || check?.name || <span className="pn-no-name">ยังไม่พบชื่อสินค้า</span>}</td><td className={dbDiff ? 'pn-price-diff' : ''}>{pendingPriceText(pendingDbPrices.loaded, database)}</td><td>{pendingPriceText(pendingAutoStatus.loaded, grab)}{(dbDiff || promaxDiff) && <span className="pn-difference" aria-label="ราคา GRAB ไม่ตรง">≠</span>}</td><td className={promaxDiff ? 'pn-price-diff' : ''}>{pendingPriceText(pendingAutoStatus.loaded, promax)}</td><td><span className={`pn-reason${automatic ? ' is-automatic' : ''}`}>{reason}</span></td><td><button className="pn-delete" disabled={!pendingCanEdit} aria-label={`นำ ${entry.sku} ออกจาก PENDING เฉพาะ ${pendingTab.toUpperCase()}`} onClick={() => void editPending({ kind: 'resolveBranch', sku: entry.sku, branch: pendingTab, prices: pendingPricePair(check, pendingTab) })}>นำออกจาก PENDING</button></td></tr>
+                  const promaxDiff = comparePendingPrices(grab, promax) === 'diff'
+                  return <tr key={entry.sku} data-pending-sku={entry.sku} className={promaxDiff ? 'pn-row-mismatch' : ''}><td><code>{entry.sku}</code></td><td>{entry.name || check?.name || <span className="pn-no-name">ยังไม่พบชื่อสินค้า</span>}</td><td>{pendingPriceText(pendingDbPrices.loaded, database)}</td><td>{pendingPriceText(pendingAutoStatus.loaded, grab)}{promaxDiff && <span className="pn-difference" aria-label="ราคา GRAB ไม่ตรงกับ PROMAXX">≠</span>}</td><td className={promaxDiff ? 'pn-price-diff' : ''}>{pendingPriceText(pendingAutoStatus.loaded, promax)}</td><td><span className={`pn-reason${automatic ? ' is-automatic' : ''}`}>{reason}</span></td><td><button className="pn-delete" disabled={!pendingCanEdit} aria-label={`นำ ${entry.sku} ออกจาก PENDING เฉพาะ ${pendingTab.toUpperCase()}`} onClick={() => void editPending({ kind: 'resolveBranch', sku: entry.sku, branch: pendingTab, prices: pendingPricePair(check, pendingTab) })}>นำออกจาก PENDING</button></td></tr>
                 })}
                 {!pendingRows.length && <tr><td colSpan={7}>{pendingLoading ? 'กำลังโหลด PENDING...' : pendingError ? 'ยังอ่านรายการไม่ได้ กรุณาโหลดใหม่' : `ไม่มีรายการ PENDING สำหรับ ${pendingTab.toUpperCase()}`}</td></tr>}
               </tbody></table></div>
@@ -2616,11 +2675,11 @@ async function confirmUpdatePrices() {
             {filtersOpen && <div className="pc-filters" id="product-filters"><label>หมวดหมู่<select aria-label="กรองหมวดหมู่" value={selectedSheet} disabled={savingPrice} onChange={event => { setSelectedSheet(event.target.value); setPageNumber(1); resetPriceReview() }}><option value="all">ทุกหมวดหมู่ ({stats.sheets.length})</option>{stats.sheets.map(sheet => <option key={sheet.name} value={sheet.name}>{sheet.name} ({sheet.count})</option>)}</select></label><label>สินค้าที่มีในสาขา<select aria-label="กรองสาขา" value={branchFilter} disabled={savingPrice} onChange={event => { setBranchFilter(event.target.value as 'all' | BranchKey); setPageNumber(1); resetPriceReview() }}><option value="all">ทุกสาขา</option>{branches.map(branch => <option key={branch} value={branch}>{branchNames[branch]}</option>)}</select></label><button className="pc-text-button" onClick={() => { setSelectedSheet('all'); setBranchFilter('all'); setPriceFilter('all'); setSearch(''); setPageNumber(1); resetPriceReview() }}>ล้างตัวกรอง</button></div>}
 
             <div className="pc-table-card">
-              <div className="pc-table-heading"><div><h2>{selectedSheet === 'all' ? 'สินค้าทั้งหมด' : selectedSheet}<span className="pc-count">{filteredProducts.length.toLocaleString('th-TH')}</span></h2><p>เทียบราคา GRAB <b>{branchNames[inspectionBranch]}</b> กับราคา DB · เลือกสินค้าเพื่อดูรายละเอียด</p></div><div className="pc-price-tabs" aria-label="กรองสถานะราคา"><button className={priceFilter === 'all' ? 'is-active' : ''} aria-pressed={priceFilter === 'all'} onClick={() => { setPriceFilter('all'); setPageNumber(1); resetPriceReview() }}>ทั้งหมด</button><button className={priceFilter === 'mismatch' ? 'is-active' : ''} aria-pressed={priceFilter === 'mismatch'} onClick={() => { setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}>ต้องตรวจ <b>{issueCount}</b></button></div></div>
+              <div className="pc-table-heading"><div><h2>{selectedSheet === 'all' ? 'สินค้าทั้งหมด' : selectedSheet}<span className="pc-count">{filteredProducts.length.toLocaleString('th-TH')}</span></h2><p>เทียบราคา GRAB <b>{branchNames[inspectionBranch]}</b> กับ PROMAXX · ราคา DB / Cloud ใช้ประกอบการตรวจสอบ</p></div><div className="pc-price-tabs" aria-label="กรองสถานะราคา"><button className={priceFilter === 'all' ? 'is-active' : ''} aria-pressed={priceFilter === 'all'} onClick={() => { setPriceFilter('all'); setPageNumber(1); resetPriceReview() }}>ทั้งหมด</button><button className={priceFilter === 'mismatch' ? 'is-active' : ''} aria-pressed={priceFilter === 'mismatch'} onClick={() => { setPriceFilter('mismatch'); setPageNumber(1); resetPriceReview() }}>ต้องตรวจ <b>{issueCount}</b></button></div></div>
               <div className="pc-table-options"><div className="pc-branch-switch" aria-label="เลือกสาขาเปรียบเทียบ">{branches.map(branch => <button key={branch} className={inspectionBranch === branch ? 'is-active' : ''} aria-pressed={inspectionBranch === branch} disabled={savingPrice} onClick={() => { setInspectionBranch(branch); setPageNumber(1); resetPriceReview() }}>{branchNames[branch]}</button>)}</div><span className="pc-price-view"><WorkspaceIcon name="grid" />ดูราคาทุกระบบ</span></div>
 
               {loadError && <div className="pc-load-error" role="alert"><WorkspaceIcon name="clock" /><div><strong>โหลดข้อมูลสินค้าไม่สำเร็จ</strong><p>{loadError}</p></div><button className="pc-button" onClick={() => search.trim().length >= 3 ? searchProducts(search.trim()) : loadProducts(selectedSheet)}>ลองอีกครั้ง</button></div>}
-              {loading ? <div className="pc-loading" role="status" aria-label="กำลังโหลดสินค้า"><span className="pc-loading-label"><i />กำลังโหลดข้อมูลสินค้า...</span>{Array.from({ length: 6 }, (_, index) => <div className="pc-skeleton-row" key={index}><i /><span /><span /><b /></div>)}</div> : !loadError && filteredProducts.length === 0 ? <div className="pc-empty"><WorkspaceIcon name="search" /><h3>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ไม่พบสินค้าที่ตรงกับเงื่อนไข' : 'ยังไม่มีรายการสินค้า'}</h3><p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ลองเปลี่ยนคำค้นหา สาขา หรือสถานะราคา' : 'เริ่มต้นด้วยการนำเข้าไฟล์ Excel หรือเพิ่มสินค้าใหม่'}</p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? <button className="pc-button" onClick={() => { setSearch(''); setPriceFilter('all'); setSelectedSheet('all'); setBranchFilter('all'); setPageNumber(1) }}>แสดงสินค้าทั้งหมด</button> : <button className="pc-button pc-button-primary" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" />นำเข้าสินค้า</button>}</div> : !loadError && <div className="pc-table-scroll"><table className="pc-products-table pc-expanded-prices"><thead><tr><th className="pc-checkbox-cell"><input type="checkbox" aria-label="เลือกสินค้าทั้งหมดในหน้านี้" checked={pageProducts.length > 0 && pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)']))} ref={input => { if (input) input.indeterminate = pageProducts.some(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) && !pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) }} onChange={event => setSelectedSkus(previous => { const next = new Set(previous); pageProducts.forEach(product => event.target.checked ? next.add(product['รหัสสินค้า (SKU NUMBER)']) : next.delete(product['รหัสสินค้า (SKU NUMBER)'])); return next })} /></th><th className="pc-product-column">สินค้า / SKU</th><th scope="col" className="pc-pending-cell" title="✓ อยู่ใน PENDING ครบ 3 สาขา · ✕ ยังไม่ครบ · คลิกดูรายละเอียด">Pending</th><th>ราคา DB</th><th>Promaxx</th><th>New Promaxx</th>{branches.map(branch => <th key={branch}>GRAB {branchNames[branch]}</th>)}<th>สถานะ</th><th><span className="pc-sr-only">รายละเอียด</span></th></tr></thead><tbody>{pageProducts.map(product => {
+              {loading ? <div className="pc-loading" role="status" aria-label="กำลังโหลดสินค้า"><span className="pc-loading-label"><i />กำลังโหลดข้อมูลสินค้า...</span>{Array.from({ length: 6 }, (_, index) => <div className="pc-skeleton-row" key={index}><i /><span /><span /><b /></div>)}</div> : !loadError && filteredProducts.length === 0 ? <div className="pc-empty"><WorkspaceIcon name="search" /><h3>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ไม่พบสินค้าที่ตรงกับเงื่อนไข' : 'ยังไม่มีรายการสินค้า'}</h3><p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? 'ลองเปลี่ยนคำค้นหา สาขา หรือสถานะราคา' : 'เริ่มต้นด้วยการนำเข้าไฟล์ Excel หรือเพิ่มสินค้าใหม่'}</p>{search || priceFilter !== 'all' || selectedSheet !== 'all' || branchFilter !== 'all' ? <button className="pc-button" onClick={() => { setSearch(''); setPriceFilter('all'); setSelectedSheet('all'); setBranchFilter('all'); setPageNumber(1) }}>แสดงสินค้าทั้งหมด</button> : <button className="pc-button pc-button-primary" onClick={() => document.getElementById('importInput')?.click()}><WorkspaceIcon name="upload" />นำเข้าสินค้า</button>}</div> : !loadError && <div className="pc-table-scroll"><table className="pc-products-table pc-expanded-prices"><thead><tr><th className="pc-checkbox-cell"><input type="checkbox" aria-label="เลือกสินค้าทั้งหมดในหน้านี้" checked={pageProducts.length > 0 && pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)']))} ref={input => { if (input) input.indeterminate = pageProducts.some(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) && !pageProducts.every(product => selectedSkus.has(product['รหัสสินค้า (SKU NUMBER)'])) }} onChange={event => setSelectedSkus(previous => { const next = new Set(previous); pageProducts.forEach(product => event.target.checked ? next.add(product['รหัสสินค้า (SKU NUMBER)']) : next.delete(product['รหัสสินค้า (SKU NUMBER)'])); return next })} /></th><th className="pc-product-column">สินค้า / SKU</th><th scope="col" className="pc-pending-cell" title="✓ อยู่ใน PENDING ครบ 3 สาขา · ✕ ยังไม่ครบ · คลิกดูรายละเอียด">Pending</th><th>ราคา DB / Cloud</th><th>PROMAXX</th><th>New Promaxx</th>{branches.map(branch => <th key={branch}>GRAB {branchNames[branch]}</th>)}<th>สถานะ</th><th><span className="pc-sr-only">รายละเอียด</span></th></tr></thead><tbody>{pageProducts.map(product => {
                 const sku = String(product['รหัสสินค้า (SKU NUMBER)'])
                 const state = priceState(product)
                 const coverage = productPendingReady && productPendingSets ? pendingBranchCoverage(sku, productPendingSets) : null
@@ -2631,7 +2690,7 @@ async function confirmUpdatePrices() {
                   <td><button className="pc-product-link" aria-label={`ตรวจสินค้า ${product['*ชื่อสินค้า (NAME)'] || sku}`} disabled={savingPrice} onClick={() => selectInspectorProduct(product)}><span className="pc-product-thumb"><WorkspaceIcon name="box" />{image && <NextImage src={image} alt="" fill sizes="33px" unoptimized loading="lazy" onError={event => { event.currentTarget.hidden = true }} />}</span><span><strong>{product['*ชื่อสินค้า (NAME)'] || 'ยังไม่ระบุชื่อสินค้า'}</strong><small>{sku}</small><span className="pc-row-branches">{branches.filter(branch => hasProductBranch(product, branch)).map(branch => <i key={branch}>{branchNames[branch]}</i>)}</span></span></button></td>
                   <td className="pc-pending-cell"><button className={`pc-pending-status ${coverage ? coverage.complete ? 'is-complete' : 'is-incomplete' : 'is-unavailable'}`} aria-label={`ดู Pending ของ SKU ${sku}: ${pendingDescription}`} title={pendingDescription} aria-haspopup="dialog" aria-expanded={pendingProduct?.sku === sku} onClick={() => { setTooltip(null); setPendingProduct({ sku, name: String(product['*ชื่อสินค้า (NAME)'] || '') }) }}><WorkspaceIcon name={coverage ? coverage.complete ? 'check' : 'close' : productPendingError ? 'alert' : 'clock'} /><small>{coverage ? `${coverage.present.length}/3` : '—'}</small></button></td>
                   <td className="pc-table-price">{formatMoney(product['*ราคาสินค้า'])}</td>
-                  <td className={pricesDiffer(product.promaxx_price, product['*ราคาสินค้า']) ? 'pc-price-mismatch' : ''}>{formatMoney(product.promaxx_price)}</td><td>{formatMoney(product.new_promaxx_price)}</td>{branches.map(branch => <td key={branch} className={hasProductBranch(product, branch) && pricesDiffer(product[`${branch}_price`], product['*ราคาสินค้า']) ? 'pc-price-mismatch' : ''}>{hasProductBranch(product, branch) ? formatMoney(product[`${branch}_price`]) : '—'}</td>)}
+                  <td>{formatMoney(product.promaxx_price)}</td><td>{formatMoney(product.new_promaxx_price)}</td>{branches.map(branch => <td key={branch} className={hasProductBranch(product, branch) && pricesDiffer(product[`${branch}_price`], product.promaxx_price) ? 'pc-price-mismatch' : ''}>{hasProductBranch(product, branch) ? formatMoney(product[`${branch}_price`]) : '—'}</td>)}
                   <td><span className={`pc-status pc-status-${state}`}><WorkspaceIcon name={state === 'matched' ? 'check' : state === 'mismatch' ? 'clock' : 'tag'} />{priceLabels[state]}</span></td><td><button className="pc-row-open" aria-label={`ดูรายละเอียด ${product['*ชื่อสินค้า (NAME)'] || sku}`} disabled={savingPrice} onClick={() => selectInspectorProduct(product)}><WorkspaceIcon name="chevron" /></button></td>
                 </tr>
               })}</tbody></table></div>}
@@ -2646,21 +2705,40 @@ async function confirmUpdatePrices() {
             {inspectedProduct && !loadError ? <>
               <div className="pc-product-image"><span className="pc-image-placeholder"><WorkspaceIcon name="box" /><span>รูปภาพสินค้า</span></span>{convertDriveLink(inspectedProduct['*รูปภาพสินค้า'] || '') && <NextImage key={inspectedSku} src={convertDriveLink(inspectedProduct['*รูปภาพสินค้า'])} alt={inspectedProduct['*ชื่อสินค้า (NAME)'] || 'รูปสินค้า'} fill sizes="(max-width: 820px) 80vw, 350px" unoptimized onError={event => { event.currentTarget.hidden = true }} />}</div>
               <div className="pc-inspector-product"><span className="pc-product-category">{inspectedProduct['หมวดหมู่สินค้า (CATEGORIES)'] || 'ยังไม่ระบุหมวดหมู่'}</span><h2>{inspectedProduct['*ชื่อสินค้า (NAME)'] || 'ยังไม่ระบุชื่อสินค้า'}</h2><p className="pc-inspector-sku">{inspectedSku}</p><span className={`pc-status pc-status-${priceState(inspectedProduct)}`}><WorkspaceIcon name={priceState(inspectedProduct) === 'matched' ? 'check' : 'clock'} />{priceLabels[priceState(inspectedProduct)]}</span></div>
-              <div className="pc-comparison-prices"><div><small>ราคาใน DB</small><strong>{formatMoney(inspectedProduct['*ราคาสินค้า'])}</strong></div><div><small>ราคา GRAB {branchNames[inspectionBranch]}</small><strong>{formatMoney(comparisonPrice)}</strong></div></div>
-              <div className={`pc-price-difference ${priceDifference !== null && !pricesDiffer(comparisonPrice, originalPrice) ? 'is-matched' : ''}`}><WorkspaceIcon name="tag" /><span>{priceDifference === null ? 'ยังเปรียบเทียบราคาไม่ได้' : 'ผลต่างจากราคา DB'}</span><strong>{priceDifference === null ? '—' : `${priceDifference > 0 ? '+' : priceDifference < 0 ? '−' : ''} ${formatMoney(Math.abs(priceDifference))}`}</strong></div>
-              <div className="pc-inspector-field"><label htmlFor="proposed-price">ราคาที่เสนอ <span>THB</span></label><input id="proposed-price" type="text" inputMode="decimal" autoComplete="off" aria-describedby="price-help inspector-error" value={draftPrice} disabled={savingPrice || loading} onChange={event => { if (!inspectedSku) return; setPriceDrafts(previous => ({ ...previous, [inspectedSku]: event.target.value })); resetPriceReview() }} /><div id="price-help" className="pc-field-help"><span>{hasPriceChange ? 'มีราคาที่ยังไม่ได้บันทึก' : 'ปรับราคา DB แล้วตรวจทานก่อนบันทึก'}</span>{hasPriceChange && <button disabled={savingPrice} onClick={() => { setPriceDrafts(previous => { const next = { ...previous }; if (inspectedSku) delete next[inspectedSku]; return next }); resetPriceReview() }}>คืนค่าเดิม</button>}</div></div>
+              <div className="pc-comparison-prices"><div><small>PROMAXX · ราคาขายอ้างอิง</small><strong>{formatMoney(referencePrice)}</strong></div><div><small>ราคา GRAB {branchNames[inspectionBranch]}</small><strong>{formatMoney(comparisonPrice)}</strong></div></div>
+              <div className={`pc-price-difference ${priceDifference !== null && !pricesDiffer(comparisonPrice, referencePrice) ? 'is-matched' : ''}`}><WorkspaceIcon name="tag" /><span>{priceDifference === null ? 'ยังเปรียบเทียบราคาไม่ได้' : 'GRAB − PROMAXX'}</span><strong>{priceDifference === null ? '—' : `${priceDifference > 0 ? '+' : priceDifference < 0 ? '−' : ''} ${formatMoney(Math.abs(priceDifference))}`}</strong></div>
+              <div className="pc-inspector-field"><label htmlFor="proposed-price">ราคา DB / Cloud ที่เสนอ <span>THB</span></label><input id="proposed-price" type="text" inputMode="decimal" autoComplete="off" aria-describedby="price-help inspector-error" value={draftPrice} disabled={savingPrice || loading} onChange={event => { if (!inspectedSku) return; setPriceDrafts(previous => ({ ...previous, [inspectedSku]: event.target.value })); resetPriceReview() }} /><div id="price-help" className="pc-field-help"><span>{hasPriceChange ? 'มีราคาที่ยังไม่ได้บันทึก' : 'ปรับราคาบน Cloud แล้วตรวจทานก่อนบันทึก'}</span>{hasPriceChange && <button disabled={savingPrice} onClick={() => { setPriceDrafts(previous => { const next = { ...previous }; if (inspectedSku) delete next[inspectedSku]; return next }); resetPriceReview() }}>คืนค่าเดิม</button>}</div></div>
               <div className="pc-inspector-branches"><span>สาขาที่จำหน่าย</span><div>{branches.map(branch => <span className={hasProductBranch(inspectedProduct, branch) ? 'is-available' : ''} key={branch}><WorkspaceIcon name={hasProductBranch(inspectedProduct, branch) ? 'check' : 'close'} />{branchNames[branch]}</span>)}</div></div>
-              <div className="pc-reference-price"><span>ราคา Promaxx</span><strong>{productPrice(inspectedProduct.promaxx_price) === null ? 'ยังไม่มีราคา' : formatMoney(inspectedProduct.promaxx_price)}</strong></div>
+              <div className="pc-reference-price"><span>ราคา DB / Cloud ปัจจุบัน</span><strong>{formatMoney(originalPrice)}</strong></div>
               <div className="pc-reference-price"><span>เลขที่ใบอนุญาต</span><strong>{inspectedProduct['*เลขที่ใบอนุญาตโฆษณา'] || 'ยังไม่ระบุ'}</strong></div>
               {inspectedProduct.correctPrice !== undefined && <div className="pc-reference-price"><span>ราคาอ้างอิง</span><strong>{formatMoney(inspectedProduct.correctPrice)}</strong></div>}
               {inspectorError && <p id="inspector-error" className="pc-inspector-error" role="alert">{inspectorError}</p>}
-              {activeReview ? <section className="pc-review" aria-label="ตรวจทานราคาก่อนบันทึก"><h3><WorkspaceIcon name="check" />ตรวจทานก่อนบันทึก</h3><p>ปรับราคา DB ของสินค้านี้</p><div><span>{formatMoney(activeReview.previous)}</span><WorkspaceIcon name="arrow" /><strong>{formatMoney(activeReview.price)}</strong></div><button className="pc-button pc-button-primary" disabled={savingPrice} onClick={saveInspectorPrice}>{savingPrice ? 'กำลังบันทึก...' : 'ยืนยันบันทึกราคา'}<WorkspaceIcon name="check" /></button><button className="pc-text-button" disabled={savingPrice} onClick={resetPriceReview}>กลับไปแก้ไข</button></section> : <button className="pc-button pc-button-primary pc-review-button" disabled={!hasPriceChange || savingPrice || loading} onClick={reviewInspectorPrice}>ตรวจทานการปรับราคา<WorkspaceIcon name="arrow" /></button>}
+              {activeReview ? <section className="pc-review" aria-label="ตรวจทานราคาก่อนบันทึก"><h3><WorkspaceIcon name="check" />ตรวจทานก่อนบันทึก</h3><p>ปรับราคา DB / Cloud ของสินค้านี้</p><div><span>{formatMoney(activeReview.previous)}</span><WorkspaceIcon name="arrow" /><strong>{formatMoney(activeReview.price)}</strong></div><button className="pc-button pc-button-primary" disabled={savingPrice} onClick={saveInspectorPrice}>{savingPrice ? 'กำลังบันทึก...' : 'ยืนยันบันทึกราคา DB / Cloud'}<WorkspaceIcon name="check" /></button><button className="pc-text-button" disabled={savingPrice} onClick={resetPriceReview}>กลับไปแก้ไข</button></section> : <button className="pc-button pc-button-primary pc-review-button" disabled={!hasPriceChange || savingPrice || loading} onClick={reviewInspectorPrice}>ตรวจทานราคา DB / Cloud<WorkspaceIcon name="arrow" /></button>}
               <button className="pc-edit-details" disabled={savingPrice} onClick={() => { setIsAdding(false); setEditProduct({ ...inspectedProduct, _originalSku: inspectedSku }) }}>แก้ไขรายละเอียดและรูปสินค้า<WorkspaceIcon name="chevron" /></button>
             </> : <div className="pc-inspector-empty"><WorkspaceIcon name="box" /><h2>เลือกสินค้าที่ต้องการตรวจ</h2><p>เลือกสินค้าจากตารางเพื่อดูราคา สาขา และปรับข้อมูลในพื้นที่นี้</p><div className="pc-empty-guide"><span><b>01</b>เลือกสินค้าจากรายการ</span><span><b>02</b>ตรวจราคาและผลต่าง</span><span><b>03</b>ตรวจทานก่อนบันทึก</span></div></div>}
           </aside>
         </div>}
         <footer className="pc-statusbar"><span role="status" aria-live="polite"><i className={loadError || inspectorError ? 'has-error' : ''} />{status}</span><span>PRICE CHECKER <b>/</b> {engineOpen ? 'PROCESS ENGINE' : toolsOpen ? 'TOOLS' : catalogOpen ? 'IMAGE CATALOGUE' : 'SPLIT INSPECTOR'}</span></footer>
       </main>
+
+      {pendingPromaxxReview && <StudioModal label="ตรวจทานราคา GRAB ตาม PROMAXX" width={1000} onClose={closePendingPromaxxReview}>
+        <div className="pc-modal-panel" aria-busy={pendingPromaxxReview.loading}>
+          <header className="pc-modal-header"><div><h2><WorkspaceIcon name="tag" />ตรวจทานราคา GRAB ตาม PROMAXX</h2><span>GM MME · สาขา {pendingPromaxxReview.branch.toUpperCase()} · ราคาเดิม → ราคา PROMAXX</span></div><button className="pc-modal-close" aria-label="ปิด" onClick={closePendingPromaxxReview}>×</button></header>
+          <div className="pc-modal-body pn-export-body">
+            <p>ไฟล์นี้ใช้ราคา PROMAXX เพื่อปรับราคาขายบน Grab หลังได้รับอนุมัติ ให้นำเข้าไฟล์ราคา GRAB ล่าสุดอีกครั้งเพื่อยืนยันผล</p>
+            {pendingPromaxxReview.error && <p className="pe-error" role="alert">{pendingPromaxxReview.error}</p>}
+            {pendingPromaxxReview.loading ? <p className="pn-export-loading" role="status">กำลังตรวจ PENDING และราคาล่าสุด...</p> : <>
+              <div className="pn-export-summary" role="status"><strong>พร้อมปรับราคา {pendingPromaxxReview.rows.filter(row => row.ready).length} รายการ</strong><span>ไม่ส่งออก {pendingPromaxxReview.rows.filter(row => !row.ready).length} รายการ · ดูเหตุผลในตาราง</span></div>
+              <p className="pn-export-scroll-hint">เลื่อนตารางด้านข้างเพื่อดูราคาและผลตรวจสอบ</p>
+              <div className="pn-table-scroll"><table className="pn-table" aria-label="ตรวจทานราคาเดิมและราคาใหม่"><thead><tr><th>SKU</th><th>ชื่อสินค้า</th><th>GRAB เดิม</th><th>PROMAXX ใหม่</th><th>ผลตรวจสอบ</th></tr></thead><tbody>
+                {pendingPromaxxReview.rows.map(row => <tr key={row.sku} className={row.ready ? '' : 'pn-export-skipped'}><td><code>{row.sku}</code></td><td>{row.product?.['*ชื่อสินค้า (NAME)'] || '—'}</td><td>{formatMoney(row.grab)}</td><td>{formatMoney(row.promaxx)}</td><td>{row.ready ? 'พร้อมปรับราคา' : row.reason}</td></tr>)}
+                {!pendingPromaxxReview.rows.length && <tr><td colSpan={5}>{pendingPromaxxReview.error ? 'ตรวจสอบข้อความด้านบน แล้วกดโหลดข้อมูลใหม่' : 'ไม่มี PENDING ที่บันทึกไว้สำหรับสาขานี้'}</td></tr>}
+              </tbody></table></div>
+            </>}
+          </div>
+          <footer className="pc-modal-footer pn-export-footer"><button className="pc-button" onClick={closePendingPromaxxReview}>ยกเลิก</button><button className="pc-button" disabled={Boolean(engineBusy)} onClick={() => void reviewPendingPromaxxExport(pendingPromaxxReview.branch)}><WorkspaceIcon name="refresh" />โหลดข้อมูลใหม่</button><button className="pc-button pc-button-primary" disabled={Boolean(engineBusy) || pendingPromaxxReview.loading || !pendingPromaxxReview.rows.some(row => row.ready)} onClick={() => void exportPendingGmMmeXlsx(pendingPromaxxReview.branch, pendingPromaxxReview)}><WorkspaceIcon name="download" />{pendingPromaxxReview.loading ? 'กำลังตรวจข้อมูล...' : `Export PROMAXX (${pendingPromaxxReview.rows.filter(row => row.ready).length} รายการ)`}</button></footer>
+        </div>
+      </StudioModal>}
 
       {pendingProduct && <StudioModal label="สถานะ Pending แยกสาขา" width={440} onClose={() => setPendingProduct(null)}>
         <div className="pc-modal-panel">
@@ -2850,7 +2928,7 @@ async function confirmUpdatePrices() {
             disabled={grabMismatchProducts.length === 0}
             style={{ ...btnStyle, background: 'var(--pc-soft)', borderColor: 'var(--pc-line)', color: 'var(--pc-accent-dark)', opacity: grabMismatchProducts.length === 0 ? 0.5 : 1 }}
            className="pc-popup-action"><WorkspaceIcon name="download" />
-            Export ราคาไม่ตรง ({grabMismatchProducts.length})
+            Export ราคา DB / Cloud ({grabMismatchProducts.length})
           </button>
           <button
             onClick={exportNotFoundXlsx}
